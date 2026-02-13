@@ -5,10 +5,8 @@ class UnknownCommand extends BaseCalypsoCommand {
     super("unknown");
   }
 
-  parse({ commandText }) {
-    return this.buildRespondParsedCommand(
-      [`Unknown subcommand: \`${commandText}\``, "Run `/calypso help` for usage."].join("\n"),
-    );
+  parse() {
+    return this.buildRespondParsedCommand("Unknown subcommand. Run `/calypso help` for usage.");
   }
 }
 

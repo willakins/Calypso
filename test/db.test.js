@@ -4,9 +4,11 @@ const test = require("node:test");
 const {
   addUserToDeployWhitelist,
   createPool,
+  getConfiguredTimeFormat,
   isUserWhitelistedForDeploy,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
+  setConfiguredTimeFormat,
 } = require("../src/db");
 
 test("createPool requires DATABASE_URL", () => {
@@ -136,4 +138,61 @@ test("addUserToDeployWhitelist inserts when user is not present", async () => {
   assert.deepEqual(result, { added: true });
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1].params, ["U123", "UADMIN"]);
+});
+
+test("getConfiguredTimeFormat returns configured value", async () => {
+  const pool = {
+    async query() {
+      return {
+        rows: [{ time_format: "long" }],
+      };
+    },
+  };
+
+  const result = await getConfiguredTimeFormat(pool);
+  assert.equal(result, "long");
+});
+
+test("getConfiguredTimeFormat falls back to human when unset", async () => {
+  const pool = {
+    async query() {
+      return {
+        rows: [],
+      };
+    },
+  };
+
+  const result = await getConfiguredTimeFormat(pool);
+  assert.equal(result, "human");
+});
+
+test("setConfiguredTimeFormat upserts selected format", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ time_format: "long", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setConfiguredTimeFormat(pool, "long", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO runtime_config/);
+  assert.deepEqual(captured.params, ["long", "UADMIN"]);
+  assert.deepEqual(result, { time_format: "long", updated_by: "UADMIN" });
+});
+
+test("setConfiguredTimeFormat rejects unsupported values", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setConfiguredTimeFormat(pool, "invalid", "UADMIN");
+  }, /Unsupported time format/);
 });

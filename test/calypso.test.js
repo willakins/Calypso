@@ -78,11 +78,42 @@ test("handleCalypsoCommand routes whitelist command with mention", () => {
   assert.equal(result.targetUserId, "U123ABC");
 });
 
+test("handleCalypsoCommand routes config time-format input", () => {
+  const result = handleCalypsoCommand({ text: "config time-format:long", user_id: "UADMIN" });
+
+  assert.equal(result.action, "config_time_format");
+  assert.equal(result.timeFormat, "long");
+});
+
+test("handleCalypsoCommand rejects invalid config input", () => {
+  const result = handleCalypsoCommand({ text: "config time-format:weird", user_id: "UADMIN" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /Usage: `\/calypso config time-format:human`/);
+});
+
 test("handleCalypsoCommand returns unknown message for unsupported input", () => {
   const result = handleCalypsoCommand({ text: "foobar", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /Unknown subcommand: `foobar`/);
+  assert.match(result.responseText, /Unknown subcommand\./);
+  assert.doesNotMatch(result.responseText, /foobar/);
+});
+
+test("handleCalypsoCommand sanitizes control characters before parsing", () => {
+  const result = handleCalypsoCommand({ text: "\u0000\nstatus\t", user_id: "U123" });
+
+  assert.equal(result.action, "status");
+});
+
+test("handleCalypsoCommand rejects tested command with injection-like payload", () => {
+  const result = handleCalypsoCommand({
+    text: "tested \"/'DATABASE DROP\"",
+    user_id: "U123",
+  });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /Usage:/);
 });
 
 test("registerCalypsoCommand registers /calypso and responds ephemerally", async () => {
@@ -130,8 +161,9 @@ test("registerCalypsoCommand handles status with injected db functions", async (
 
   registerCalypsoCommand(app, {
     pool: {},
-    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    getLastProdDeployAtFn: async () => "2026-02-13T22:00:17.000Z",
     listBlockingPullRequestsFn: async () => [],
+    readTimeFormatPreferenceFn: async () => "long",
   });
 
   let payload;
@@ -146,6 +178,7 @@ test("registerCalypsoCommand handles status with injected db functions", async (
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /No blockers since last prod deploy/);
+  assert.match(payload.text, /2026-02-13 22:00:17 UTC/);
 });
 
 test("registerCalypsoCommand reports not found for tested command", async () => {
@@ -314,6 +347,17 @@ test("registerCalypsoCommand shows recently tested PRs for tested recent", async
   let payload;
   await commandHandler({
     command: { text: "tested recent day", user_id: "U123" },
+    client: {
+      users: {
+        info: async () => ({
+          user: {
+            profile: {
+              display_name: "Willa",
+            },
+          },
+        }),
+      },
+    },
     ack: async () => {},
     respond: async (message) => {
       payload = message;
@@ -323,7 +367,7 @@ test("registerCalypsoCommand shows recently tested PRs for tested recent", async
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /PRs tested in the last day/);
   assert.match(payload.text, /#123/);
-  assert.match(payload.text, /tested by U123/);
+  assert.match(payload.text, /tested by Willa on February 13th, 2026 at 3:00 PM EST/);
 });
 
 test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
@@ -759,4 +803,68 @@ test("registerCalypsoCommand whitelist command adds user for whitelisted caller"
   assert.equal(captured.addedBy, "UWHITELISTED");
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Added <@U777> to deploy whitelist/);
+});
+
+test("registerCalypsoCommand config command updates time format", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredTimeFormatFn: async (pool, timeFormat, updatedBy) => {
+      capturedCalls.push({ pool, timeFormat, updatedBy });
+      return { time_format: timeFormat, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config time-format:long", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Updated time format to `long`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].timeFormat, "long");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command denies non-admin, non-whitelisted user", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: false }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config time-format:human", user_id: "U123" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Config update denied/);
 });

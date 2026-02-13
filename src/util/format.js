@@ -1,5 +1,5 @@
-function formatStatusResponse({ lastDeployAt, blockers }) {
-  const lastDeploymentTimestamp = formatAsIsoTimestamp(lastDeployAt);
+function formatStatusResponse({ lastDeployAt, blockers, timeFormat }) {
+  const lastDeploymentTimestamp = formatTimestampByTimeFormat(lastDeployAt, { timeFormat });
   const hasBlockingPullRequests = Array.isArray(blockers) && blockers.length > 0;
 
   if (!hasBlockingPullRequests) {
@@ -25,14 +25,160 @@ function formatBlockingPullRequestLine(pullRequest) {
   return `• ${pullRequest.repo}#${pullRequest.pr_number} (${pullRequest.status})${pullRequestTitleSuffix}`;
 }
 
-function formatAsIsoTimestamp(value) {
+const TIMESTAMP_STYLES = {
+  human: "human",
+  legacyUtc: "legacy_utc",
+};
+
+function formatTimestampWithTimezone(value, options = {}) {
   const parsedDate = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsedDate.getTime())) {
     return String(value);
   }
-  return parsedDate.toISOString();
+
+  const style = options.style || TIMESTAMP_STYLES.human;
+  if (style === TIMESTAMP_STYLES.legacyUtc) {
+    return formatTimestampAsUtcLegacyFromParsedDate(parsedDate);
+  }
+
+  const timeZone = options.timeZone || "America/New_York";
+  return formatTimestampAsHumanFromParsedDate(parsedDate, timeZone);
 }
 
+function formatTimestampByTimeFormat(value, options = {}) {
+  const normalizedTimeFormat = String(options.timeFormat || "").toLowerCase().trim();
+  if (normalizedTimeFormat === "long") {
+    return formatTimestampWithTimezone(value, {
+      style: TIMESTAMP_STYLES.legacyUtc,
+    });
+  }
+
+  return formatTimestampWithTimezone(value, {
+    style: TIMESTAMP_STYLES.human,
+    timeZone: options.timeZone || "America/New_York",
+  });
+}
+
+function formatTimestampAsUtcLegacy(value) {
+  const parsedDate = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return String(value);
+  }
+
+  return formatTimestampAsUtcLegacyFromParsedDate(parsedDate);
+}
+
+function formatTimestampAsHumanFromParsedDate(parsedDate, timeZone) {
+  const timestampParts = readDateTimeParts(parsedDate, timeZone);
+  const dayOfMonth = Number(timestampParts.day);
+  const ordinalDay = `${dayOfMonth}${readOrdinalSuffix(dayOfMonth)}`;
+  const meridiem = (timestampParts.dayPeriod || "").toUpperCase();
+
+  return [
+    "on",
+    `${timestampParts.month} ${ordinalDay},`,
+    `${timestampParts.year}`,
+    "at",
+    `${timestampParts.hour}:${timestampParts.minute}`,
+    meridiem,
+    timestampParts.timeZoneName,
+  ].join(" ");
+}
+
+function formatTimestampAsUtcLegacyFromParsedDate(parsedDate) {
+  const year = parsedDate.getUTCFullYear();
+  const month = String(parsedDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(parsedDate.getUTCDate()).padStart(2, "0");
+  const hour = String(parsedDate.getUTCHours()).padStart(2, "0");
+  const minute = String(parsedDate.getUTCMinutes()).padStart(2, "0");
+  const second = String(parsedDate.getUTCSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}:${second} UTC`;
+}
+
+function readDateTimeParts(parsedDate, timeZone) {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    });
+
+    const parts = formatter.formatToParts(parsedDate);
+    const partsByType = {};
+    for (const part of parts) {
+      if (part.type !== "literal") {
+        partsByType[part.type] = part.value;
+      }
+    }
+
+    return {
+      month: partsByType.month,
+      day: partsByType.day,
+      year: partsByType.year,
+      hour: partsByType.hour,
+      minute: partsByType.minute,
+      dayPeriod: partsByType.dayPeriod,
+      timeZoneName: partsByType.timeZoneName || "UTC",
+    };
+  } catch (_error) {
+    if (timeZone !== "UTC") {
+      return readDateTimeParts(parsedDate, "UTC");
+    }
+
+    const hour24 = parsedDate.getUTCHours();
+    return {
+      month: UTC_MONTH_NAMES[parsedDate.getUTCMonth()],
+      day: String(parsedDate.getUTCDate()),
+      year: String(parsedDate.getUTCFullYear()),
+      hour: String(hour24 % 12 || 12),
+      minute: String(parsedDate.getUTCMinutes()).padStart(2, "0"),
+      dayPeriod: hour24 >= 12 ? "PM" : "AM",
+      timeZoneName: "UTC",
+    };
+  }
+}
+
+function readOrdinalSuffix(dayOfMonth) {
+  if (dayOfMonth % 100 >= 11 && dayOfMonth % 100 <= 13) {
+    return "th";
+  }
+
+  switch (dayOfMonth % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
+const UTC_MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 module.exports = {
+  TIMESTAMP_STYLES,
+  formatTimestampAsUtcLegacy,
+  formatTimestampByTimeFormat,
+  formatTimestampWithTimezone,
   formatStatusResponse,
 };

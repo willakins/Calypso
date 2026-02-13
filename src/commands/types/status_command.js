@@ -16,6 +16,7 @@ class StatusCommand extends BaseCalypsoCommand {
       return this.buildExecutionResult("Status unavailable: database pool is not configured.");
     }
 
+    const timeFormat = await runtime.readTimeFormatPreferenceFn(runtime);
     const lastProductionDeploymentAt = await runtime.getLastProdDeployAtFn(runtime.pool);
     const blockingPullRequests = await runtime.listBlockingPullRequestsFn(
       runtime.pool,
@@ -25,6 +26,7 @@ class StatusCommand extends BaseCalypsoCommand {
     const responseText = runtime.formatStatusResponseFn({
       lastDeployAt: lastProductionDeploymentAt,
       blockers: blockingPullRequests,
+      timeFormat,
     });
 
     return this.buildExecutionResult(responseText);

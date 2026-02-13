@@ -1,3 +1,4 @@
+const { ConfigCommand } = require("../types/config_command");
 const { DeployCommand } = require("../types/deploy_command");
 const { HelpCommand } = require("../types/help_command");
 const { StatusCommand } = require("../types/status_command");
@@ -9,6 +10,7 @@ function createCalypsoCommandRegistry() {
   return new CalypsoCommandRegistry({
     commandDefinitions: [
       new HelpCommand(),
+      new ConfigCommand(),
       new StatusCommand(),
       new TestedCommand(),
       new DeployCommand(),
@@ -30,7 +32,7 @@ class CalypsoCommandRegistry {
   }
 
   parse({ text }) {
-    const normalizedText = (text || "").trim();
+    const normalizedText = sanitizeCommandText(text);
     const commandWords = splitIntoWords(normalizedText);
     const commandName = resolveCommandName(commandWords);
     const commandDefinition =
@@ -65,6 +67,12 @@ class CalypsoCommandRegistry {
 
 function splitIntoWords(text) {
   return text.split(/\s+/).filter(Boolean);
+}
+
+function sanitizeCommandText(text) {
+  const rawText = typeof text === "string" ? text : "";
+  const withoutControlChars = rawText.replace(/[\u0000-\u001F\u007F]/g, " ");
+  return withoutControlChars.replace(/\s+/g, " ").trim();
 }
 
 function resolveCommandName(commandWords) {

@@ -1,5 +1,7 @@
 const {
   addUserToDeployWhitelist,
+  DEFAULT_TIME_FORMAT,
+  getConfiguredTimeFormat,
   getLastProdDeployAt,
   isUserWhitelistedForDeploy,
   insertDeployment,
@@ -8,6 +10,7 @@ const {
   markAllUntestedPullRequestsTested,
   markPullRequestTested,
   markPullRequestsDeployedSince,
+  setConfiguredTimeFormat,
 } = require("../../db");
 const { createDigitalOceanClient } = require("../../integrations/digitalocean/client");
 const { formatStatusResponse } = require("../../util/format");
@@ -58,6 +61,7 @@ function createDefaultDependencies() {
     formatStatusResponseFn: formatStatusResponse,
     addUserToDeployWhitelistFn: addUserToDeployWhitelist,
     getLastProdDeployAtFn: getLastProdDeployAt,
+    getConfiguredTimeFormatFn: getConfiguredTimeFormat,
     isUserWhitelistedForDeployFn: isUserWhitelistedForDeploy,
     isWorkspaceAdminFn: isWorkspaceAdmin,
     insertDeploymentFn: insertDeployment,
@@ -66,7 +70,9 @@ function createDefaultDependencies() {
     markAllUntestedPullRequestsTestedFn: markAllUntestedPullRequestsTested,
     markPullRequestTestedFn: markPullRequestTested,
     markPullRequestsDeployedSinceFn: markPullRequestsDeployedSince,
+    readTimeFormatPreferenceFn: readTimeFormatPreference,
     resolveDeployAccessFn: resolveDeployAccess,
+    setConfiguredTimeFormatFn: setConfiguredTimeFormat,
     triggerProdDeployFn: triggerProductionDeployment,
     waitForProdDeployCompletionFn: waitForProductionDeploymentCompletion,
   };
@@ -83,6 +89,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.formatStatusResponseFn || defaultDependencies.formatStatusResponseFn,
     getLastProdDeployAtFn:
       mergedOptions.getLastProdDeployAtFn || defaultDependencies.getLastProdDeployAtFn,
+    getConfiguredTimeFormatFn:
+      mergedOptions.getConfiguredTimeFormatFn || defaultDependencies.getConfiguredTimeFormatFn,
     isUserWhitelistedForDeployFn:
       mergedOptions.isUserWhitelistedForDeployFn || defaultDependencies.isUserWhitelistedForDeployFn,
     isWorkspaceAdminFn: mergedOptions.isWorkspaceAdminFn || defaultDependencies.isWorkspaceAdminFn,
@@ -101,8 +109,12 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.markPullRequestsDeployedSinceFn ||
       defaultDependencies.markPullRequestsDeployedSinceFn,
     pool: mergedOptions.pool,
+    readTimeFormatPreferenceFn:
+      mergedOptions.readTimeFormatPreferenceFn || defaultDependencies.readTimeFormatPreferenceFn,
     resolveDeployAccessFn:
       mergedOptions.resolveDeployAccessFn || defaultDependencies.resolveDeployAccessFn,
+    setConfiguredTimeFormatFn:
+      mergedOptions.setConfiguredTimeFormatFn || defaultDependencies.setConfiguredTimeFormatFn,
     slackClient: mergedOptions.slackClient || null,
     slackUserId: mergedOptions.slackUserId,
     enableDeploymentCompletionNotifications: Boolean(
@@ -173,6 +185,18 @@ async function resolveDeployAccess(runtimeContext) {
     canDeploy: false,
     reason: "not authorized",
   };
+}
+
+async function readTimeFormatPreference(runtimeContext) {
+  if (!runtimeContext.pool || typeof runtimeContext.pool.query !== "function") {
+    return DEFAULT_TIME_FORMAT;
+  }
+
+  try {
+    return await runtimeContext.getConfiguredTimeFormatFn(runtimeContext.pool);
+  } catch (_error) {
+    return DEFAULT_TIME_FORMAT;
+  }
 }
 
 async function isWorkspaceAdmin(slackClient, slackUserId) {

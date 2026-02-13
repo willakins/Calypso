@@ -10,6 +10,7 @@ and blocks production deploys when untested changes exist.
 - Exposes a Slack slash command: `/calypso`.
 - Supports status and release workflow commands:
   - `/calypso help`
+  - `/calypso config time-format:human|long`
   - `/calypso status`
   - `/calypso tested <PR_NUMBER>`
   - `/calypso deploy prod`
@@ -33,7 +34,7 @@ Commands are structured for extensibility:
 - `registry`:
   - Command lookup and dispatch by command name.
 - `types`:
-  - One file per command type (`help`, `status`, `tested`, `deploy`, `unknown`).
+  - One file per command type (`help`, `config`, `status`, `tested`, `deploy`, `unknown`).
   - Each command encapsulates its own parse + execute behavior.
 - `base class`:
   - Shared command contract and helpers.
@@ -60,6 +61,7 @@ src/
     types/
       base_calypso_command.js
       help_command.js
+      config_command.js
       status_command.js
       tested_command.js
       deploy_command.js
@@ -67,6 +69,8 @@ src/
   db/
     index.js
     migrations/001_init.sql
+    migrations/002_deployment_whitelist.sql
+    migrations/003_runtime_config.sql
   integrations/
     github/
       webhook.js
@@ -213,7 +217,7 @@ npm run dev
 On app startup Calypso will:
 
 - Verify DB connectivity (`SELECT 1`).
-- Run migrations (`001_init.sql`) idempotently.
+- Run migrations (`src/db/migrations/*.sql`) idempotently.
 - Start webhook server on `PORT`.
 - Start Slack Socket Mode.
 

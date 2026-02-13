@@ -5,6 +5,11 @@ const { Pool } = require("pg");
 const MIGRATIONS_DIRECTORY_PATH = path.join(__dirname, "migrations");
 const EPOCH_UTC_TIMESTAMP_SQL = "TIMESTAMPTZ '1970-01-01 00:00:00+00'";
 const TLS_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
+const TIME_FORMATS = Object.freeze({
+  human: "human",
+  long: "long",
+});
+const DEFAULT_TIME_FORMAT = TIME_FORMATS.human;
 
 function createPool(databaseConnectionString) {
   if (!databaseConnectionString || databaseConnectionString.trim() === "") {
@@ -256,10 +261,54 @@ async function addUserToDeployWhitelist(pool, slackUserId, addedBy) {
   return { added: true };
 }
 
+async function getConfiguredTimeFormat(pool) {
+  const result = await pool.query(
+    `
+      SELECT time_format
+      FROM runtime_config
+      WHERE id = 1
+      LIMIT 1
+    `,
+  );
+
+  const configuredValue = result.rows[0]?.time_format || DEFAULT_TIME_FORMAT;
+  return normalizeTimeFormat(configuredValue) || DEFAULT_TIME_FORMAT;
+}
+
+async function setConfiguredTimeFormat(pool, timeFormat, updatedBy) {
+  const normalizedTimeFormat = normalizeTimeFormat(timeFormat);
+  if (!normalizedTimeFormat) {
+    throw new Error(`Unsupported time format: ${timeFormat}`);
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO runtime_config (id, time_format, updated_by, updated_at)
+      VALUES (1, $1, $2, NOW())
+      ON CONFLICT (id)
+      DO UPDATE SET
+        time_format = EXCLUDED.time_format,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = NOW()
+      RETURNING time_format, updated_by, updated_at
+    `,
+    [normalizedTimeFormat, updatedBy || null],
+  );
+
+  return result.rows[0];
+}
+
+function normalizeTimeFormat(timeFormat) {
+  const normalizedTimeFormat = String(timeFormat || "").toLowerCase().trim();
+  return TIME_FORMATS[normalizedTimeFormat] || null;
+}
+
 module.exports = {
   addUserToDeployWhitelist,
   createPool,
+  DEFAULT_TIME_FORMAT,
   getLastProdDeployAt,
+  getConfiguredTimeFormat,
   isUserWhitelistedForDeploy,
   insertDeployment,
   listRecentlyTestedPullRequests,
@@ -268,6 +317,8 @@ module.exports = {
   markPullRequestsDeployedSince,
   markPullRequestTested,
   runMigrations,
+  setConfiguredTimeFormat,
+  TIME_FORMATS,
   upsertPullRequestAsUntested,
   verifyConnection,
 };
