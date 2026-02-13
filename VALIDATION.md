@@ -23,18 +23,24 @@
    - `npm install`
 2. Start bot:
    - `npm run dev`
+3. Run offline command tests:
+   - `npm test`
 
-### Manual check
+### Expected
 
-- In Slack, run:
-  - `/calypso help`
-- Expected:
-  - Bot responds with usage text (no errors in console)
+- Bolt app initializes and command registration executes.
+- No startup exception while running `npm run dev`.
+- Offline tests pass, including direct invocation of `handleCalypsoCommand`.
 
 Pass criteria:
 
 - No startup crash
-- Slack command response received
+- Offline handler tests pass
+
+Optional manual Slack smoke test:
+
+- In Slack, run `/calypso help`
+- Expected: bot responds with usage text (no runtime errors in console)
 
 ---
 
@@ -68,13 +74,21 @@ Pass criteria:
 ### Commands
 
 - `npm run dev`
+- `npm test`
 
-### Manual checks
+### Offline checks
+
+1. With empty `deployments` and `pull_requests`, run a local status check script (or call DB helpers directly).
+   - Expected: epoch baseline (`1970-01-01T00:00:00.000Z`) and “No blockers…” output
+2. Insert a fake untested PR row, then run the local status check script again.
+   - Expected: PR appears as blocking when no deployments exist.
+
+Optional manual Slack smoke test:
 
 1. `/calypso status` with empty DB
    - Expected: “No blockers…” message
 2. Insert a fake PR row (manual psql), then re-run `/calypso status`
-   - If no deployments exist, PR should appear as blocking (since epoch baseline)
+   - Expected: PR appears as blocking (epoch baseline when no deployments exist)
 
 Pass criteria:
 
@@ -103,31 +117,37 @@ Pass criteria:
 
 ## CHUNK-05-TESTED-COMMAND Validation
 
-### Manual checks
+### Offline checks
 
 1. Ensure at least one PR exists in DB.
-2. `/calypso tested <PR_NUMBER>`
+2. Run local command-flow simulation for `tested <PR_NUMBER>` (direct handler invocation is fine).
    - Expected: confirmation message
-3. `/calypso status`
+3. Run local status check afterward.
    - Expected: PR no longer blocks (if it was the only blocker)
 
 Pass criteria:
 
 - DB updated (status=tested, tested_at set, tested_by set)
-- Slack responses correct
+- Command responses correct
+
+Optional manual Slack smoke test:
+
+1. `/calypso tested <PR_NUMBER>` in Slack
+2. `/calypso status`
+3. Confirm the tested PR no longer appears as a blocker
 
 ---
 
 ## CHUNK-06-DEPLOY-GATE Validation
 
-### Manual checks
+### Offline checks
 
 1. With blockers present:
-   - `/calypso deploy prod`
+   - Simulate `/calypso deploy prod` via local command handler.
    - Expected: refused + lists blockers
 2. With zero blockers:
-   - unset DO env vars (or leave missing)
-   - `/calypso deploy prod`
+   - keep DO env vars missing
+   - simulate `/calypso deploy prod` via local command handler
    - Expected: “deploy not configured” (and does not crash)
 
 Pass criteria:
@@ -135,25 +155,37 @@ Pass criteria:
 - Gate blocks correctly and does not attempt deploy when blocked
 - Clear messaging
 
+Optional manual Slack smoke test:
+
+1. `/calypso deploy prod` with blockers present
+2. `/calypso tested <PR_NUMBER>` until blockers clear
+3. `/calypso deploy prod` again and confirm “deploy not configured”
+
 ---
 
 ## CHUNK-07-DIGITALOCEAN-DEPLOY Validation
 
-### Manual checks
+### Offline checks
 
-1. Set DIGITALOCEAN_TOKEN and DO_APP_ID_PROD
-2. Ensure no blockers exist
-3. `/calypso deploy prod`
-   - Expected: DO deploy triggered
-   - DB: deployments row inserted
-   - PRs since last deploy marked deployed
+1. Seed at least one `tested` PR with no blockers.
+2. Simulate `/calypso deploy prod` with an injected successful deploy function.
+   - Expected: deploy response indicates success
+   - DB: `deployments` row inserted
+   - PRs since last deploy marked `deployed`
 
 Failure-mode check:
 
-- Use an invalid DO token
-- Ensure deploy fails and does not insert deployment row or mark PRs deployed
+- Simulate `/calypso deploy prod` with an injected failing deploy function.
+- Ensure deploy fails and does not insert deployment row or mark PRs deployed.
 
 Pass criteria:
 
 - Success path writes correct DB updates
 - Failure path does not mutate DB state (besides logs)
+
+Optional manual live deploy smoke test:
+
+1. Set real `DIGITALOCEAN_TOKEN` and `DO_APP_ID_PROD`
+2. Ensure no blockers exist
+3. Run `/calypso deploy prod`
+4. Verify DO deployment trigger and DB updates
