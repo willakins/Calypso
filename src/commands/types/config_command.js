@@ -1,6 +1,7 @@
 const { BaseCalypsoCommand } = require("./base_calypso_command");
 
 const TIME_FORMAT_ARGUMENT_PATTERN = /^time-format:(human|long)$/i;
+const TIME_ZONE_ARGUMENT_PATTERN = /^timezone:(.+)$/i;
 
 class ConfigCommand extends BaseCalypsoCommand {
   constructor() {
@@ -10,22 +11,28 @@ class ConfigCommand extends BaseCalypsoCommand {
   parse({ commandWords }) {
     if (commandWords.length !== 2) {
       return this.buildRespondParsedCommand(
-        "Usage: `/calypso config time-format:human` or `/calypso config time-format:long`",
+        buildConfigUsageMessage(),
       );
     }
 
     const argument = commandWords[1];
     const match = argument.match(TIME_FORMAT_ARGUMENT_PATTERN);
-    if (!match) {
-      return this.buildRespondParsedCommand(
-        "Usage: `/calypso config time-format:human` or `/calypso config time-format:long`",
-      );
+    if (match) {
+      return this.buildParsedCommand({
+        action: "config_time_format",
+        timeFormat: match[1].toLowerCase(),
+      });
     }
 
-    return this.buildParsedCommand({
-      action: "config_time_format",
-      timeFormat: match[1].toLowerCase(),
-    });
+    const timezoneMatch = argument.match(TIME_ZONE_ARGUMENT_PATTERN);
+    if (timezoneMatch) {
+      return this.buildParsedCommand({
+        action: "config_timezone",
+        timeZone: timezoneMatch[1].trim(),
+      });
+    }
+
+    return this.buildRespondParsedCommand(buildConfigUsageMessage());
   }
 
   async checkCallerAccess({ runtime }) {
@@ -48,16 +55,46 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildExecutionResult("Config command unavailable: database pool is not configured.");
     }
 
-    await runtime.setConfiguredTimeFormatFn(
+    if (parsedCommand.action === "config_time_format") {
+      await runtime.setConfiguredTimeFormatFn(
+        runtime.pool,
+        parsedCommand.timeFormat,
+        runtime.slackUserId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated your time format to \`${parsedCommand.timeFormat}\`.`,
+      );
+    }
+
+    if (!runtime.isValidTimeZoneFn(parsedCommand.timeZone)) {
+      return this.buildExecutionResult(
+        [
+          `Timezone \`${parsedCommand.timeZone}\` is invalid.`,
+          "Use an IANA timezone such as `America/New_York`.",
+        ].join("\n"),
+      );
+    }
+
+    await runtime.setConfiguredTimeZoneFn(
       runtime.pool,
-      parsedCommand.timeFormat,
+      parsedCommand.timeZone,
       runtime.slackUserId,
     );
 
     return this.buildExecutionResult(
-      `Updated time format to \`${parsedCommand.timeFormat}\`.`,
+      `Timezone \`${parsedCommand.timeZone}\` is valid. Updated your timezone setting.`,
     );
   }
+}
+
+function buildConfigUsageMessage() {
+  return [
+    "Usage:",
+    "`/calypso config time-format:human`",
+    "`/calypso config time-format:long`",
+    "`/calypso config timezone:America/New_York`",
+  ].join("\n");
 }
 
 module.exports = {

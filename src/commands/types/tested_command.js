@@ -111,6 +111,7 @@ class TestedCommand extends BaseCalypsoCommand {
         sinceTimestamp,
       );
       const timeFormat = await runtime.readTimeFormatPreferenceFn(runtime);
+      const timeZone = await runtime.readTimeZonePreferenceFn(runtime);
       const testedByNameById = await resolveTestedByNames(
         recentlyTestedPullRequests,
         runtime.slackClient,
@@ -126,7 +127,7 @@ class TestedCommand extends BaseCalypsoCommand {
         [
           `PRs tested in the last ${timeframeDefinition.displayName}:`,
           ...recentlyTestedPullRequests.map((pullRequest) =>
-            formatRecentlyTestedPullRequestLine(pullRequest, testedByNameById, timeFormat),
+            formatRecentlyTestedPullRequestLine(pullRequest, testedByNameById, timeFormat, timeZone),
           ),
         ].join("\n"),
       );
@@ -183,12 +184,17 @@ async function readSlackDisplayName(slackClient, slackUserId) {
   }
 }
 
-function formatRecentlyTestedPullRequestLine(pullRequest, testedByNameById, timeFormat) {
+function formatRecentlyTestedPullRequestLine(
+  pullRequest,
+  testedByNameById,
+  timeFormat,
+  timeZone,
+) {
   const testedByUserId = pullRequest.tested_by || null;
   const testedBy =
     (testedByUserId && testedByNameById.get(testedByUserId)) || testedByUserId || "unknown user";
   const testedAt = pullRequest.tested_at
-    ? formatTimestampByTimeFormat(pullRequest.tested_at, { timeFormat })
+    ? formatTimestampByTimeFormat(pullRequest.tested_at, { timeFormat, timeZone })
     : "at an unknown time";
   const titleSuffix = pullRequest.title ? ` - ${pullRequest.title}` : "";
   return `• ${pullRequest.repo}#${pullRequest.pr_number}${titleSuffix} (${pullRequest.status}) tested by ${testedBy} ${testedAt}`;

@@ -5,10 +5,12 @@ const {
   addUserToDeployWhitelist,
   createPool,
   getConfiguredTimeFormat,
+  getConfiguredTimeZone,
   isUserWhitelistedForDeploy,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
   setConfiguredTimeFormat,
+  setConfiguredTimeZone,
 } = require("../src/db");
 
 test("createPool requires DATABASE_URL", () => {
@@ -141,29 +143,53 @@ test("addUserToDeployWhitelist inserts when user is not present", async () => {
 });
 
 test("getConfiguredTimeFormat returns configured value", async () => {
+  const captured = {};
   const pool = {
-    async query() {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
       return {
         rows: [{ time_format: "long" }],
       };
     },
   };
 
-  const result = await getConfiguredTimeFormat(pool);
+  const result = await getConfiguredTimeFormat(pool, "U123");
   assert.equal(result, "long");
+  assert.match(captured.sql, /FROM runtime_user_config/);
+  assert.deepEqual(captured.params, ["U123"]);
 });
 
 test("getConfiguredTimeFormat falls back to human when unset", async () => {
+  const captured = {};
   const pool = {
-    async query() {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
       return {
         rows: [],
       };
     },
   };
 
+  const result = await getConfiguredTimeFormat(pool, "U123");
+  assert.equal(result, "human");
+  assert.match(captured.sql, /FROM runtime_user_config/);
+  assert.deepEqual(captured.params, ["U123"]);
+});
+
+test("getConfiguredTimeFormat falls back to human when user id missing", async () => {
+  let queryCalled = false;
+  const pool = {
+    async query() {
+      queryCalled = true;
+      return { rows: [] };
+    },
+  };
+
   const result = await getConfiguredTimeFormat(pool);
   assert.equal(result, "human");
+  assert.equal(queryCalled, false);
 });
 
 test("setConfiguredTimeFormat upserts selected format", async () => {
@@ -180,7 +206,7 @@ test("setConfiguredTimeFormat upserts selected format", async () => {
 
   const result = await setConfiguredTimeFormat(pool, "long", "UADMIN");
 
-  assert.match(captured.sql, /INSERT INTO runtime_config/);
+  assert.match(captured.sql, /INSERT INTO runtime_user_config/);
   assert.deepEqual(captured.params, ["long", "UADMIN"]);
   assert.deepEqual(result, { time_format: "long", updated_by: "UADMIN" });
 });
@@ -195,4 +221,109 @@ test("setConfiguredTimeFormat rejects unsupported values", async () => {
   await assert.rejects(async () => {
     await setConfiguredTimeFormat(pool, "invalid", "UADMIN");
   }, /Unsupported time format/);
+});
+
+test("setConfiguredTimeFormat requires slack user id", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setConfiguredTimeFormat(pool, "human", "");
+  }, /slack user id is required/);
+});
+
+test("getConfiguredTimeZone returns configured value", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ timezone: "America/Los_Angeles" }],
+      };
+    },
+  };
+
+  const result = await getConfiguredTimeZone(pool, "U123");
+  assert.equal(result, "America/Los_Angeles");
+  assert.match(captured.sql, /FROM runtime_user_config/);
+  assert.deepEqual(captured.params, ["U123"]);
+});
+
+test("getConfiguredTimeZone falls back to default when unset", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [],
+      };
+    },
+  };
+
+  const result = await getConfiguredTimeZone(pool, "U123");
+  assert.equal(result, "America/New_York");
+  assert.match(captured.sql, /FROM runtime_user_config/);
+  assert.deepEqual(captured.params, ["U123"]);
+});
+
+test("getConfiguredTimeZone falls back to default when user id missing", async () => {
+  let queryCalled = false;
+  const pool = {
+    async query() {
+      queryCalled = true;
+      return { rows: [] };
+    },
+  };
+
+  const result = await getConfiguredTimeZone(pool);
+  assert.equal(result, "America/New_York");
+  assert.equal(queryCalled, false);
+});
+
+test("setConfiguredTimeZone upserts selected timezone", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ timezone: "America/Los_Angeles", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setConfiguredTimeZone(pool, "America/Los_Angeles", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO runtime_user_config/);
+  assert.deepEqual(captured.params, ["America/Los_Angeles", "UADMIN"]);
+  assert.deepEqual(result, { timezone: "America/Los_Angeles", updated_by: "UADMIN" });
+});
+
+test("setConfiguredTimeZone rejects unsupported values", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setConfiguredTimeZone(pool, "", "UADMIN");
+  }, /Unsupported timezone/);
+});
+
+test("setConfiguredTimeZone requires slack user id", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setConfiguredTimeZone(pool, "America/New_York", "");
+  }, /slack user id is required/);
 });

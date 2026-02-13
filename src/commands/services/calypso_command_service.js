@@ -1,7 +1,9 @@
 const {
   addUserToDeployWhitelist,
   DEFAULT_TIME_FORMAT,
+  DEFAULT_TIME_ZONE,
   getConfiguredTimeFormat,
+  getConfiguredTimeZone,
   getLastProdDeployAt,
   isUserWhitelistedForDeploy,
   insertDeployment,
@@ -11,9 +13,10 @@ const {
   markPullRequestTested,
   markPullRequestsDeployedSince,
   setConfiguredTimeFormat,
+  setConfiguredTimeZone,
 } = require("../../db");
 const { createDigitalOceanClient } = require("../../integrations/digitalocean/client");
-const { formatStatusResponse } = require("../../util/format");
+const { formatStatusResponse, isValidTimeZone } = require("../../util/format");
 const { createCalypsoCommandRegistry } = require("../registry/calypso_command_registry");
 
 function createCalypsoCommandService(serviceOptions = {}) {
@@ -62,7 +65,9 @@ function createDefaultDependencies() {
     addUserToDeployWhitelistFn: addUserToDeployWhitelist,
     getLastProdDeployAtFn: getLastProdDeployAt,
     getConfiguredTimeFormatFn: getConfiguredTimeFormat,
+    getConfiguredTimeZoneFn: getConfiguredTimeZone,
     isUserWhitelistedForDeployFn: isUserWhitelistedForDeploy,
+    isValidTimeZoneFn: isValidTimeZone,
     isWorkspaceAdminFn: isWorkspaceAdmin,
     insertDeploymentFn: insertDeployment,
     listRecentlyTestedPullRequestsFn: listRecentlyTestedPullRequests,
@@ -71,8 +76,10 @@ function createDefaultDependencies() {
     markPullRequestTestedFn: markPullRequestTested,
     markPullRequestsDeployedSinceFn: markPullRequestsDeployedSince,
     readTimeFormatPreferenceFn: readTimeFormatPreference,
+    readTimeZonePreferenceFn: readTimeZonePreference,
     resolveDeployAccessFn: resolveDeployAccess,
     setConfiguredTimeFormatFn: setConfiguredTimeFormat,
+    setConfiguredTimeZoneFn: setConfiguredTimeZone,
     triggerProdDeployFn: triggerProductionDeployment,
     waitForProdDeployCompletionFn: waitForProductionDeploymentCompletion,
   };
@@ -91,8 +98,11 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.getLastProdDeployAtFn || defaultDependencies.getLastProdDeployAtFn,
     getConfiguredTimeFormatFn:
       mergedOptions.getConfiguredTimeFormatFn || defaultDependencies.getConfiguredTimeFormatFn,
+    getConfiguredTimeZoneFn:
+      mergedOptions.getConfiguredTimeZoneFn || defaultDependencies.getConfiguredTimeZoneFn,
     isUserWhitelistedForDeployFn:
       mergedOptions.isUserWhitelistedForDeployFn || defaultDependencies.isUserWhitelistedForDeployFn,
+    isValidTimeZoneFn: mergedOptions.isValidTimeZoneFn || defaultDependencies.isValidTimeZoneFn,
     isWorkspaceAdminFn: mergedOptions.isWorkspaceAdminFn || defaultDependencies.isWorkspaceAdminFn,
     insertDeploymentFn: mergedOptions.insertDeploymentFn || defaultDependencies.insertDeploymentFn,
     listRecentlyTestedPullRequestsFn:
@@ -111,10 +121,14 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     pool: mergedOptions.pool,
     readTimeFormatPreferenceFn:
       mergedOptions.readTimeFormatPreferenceFn || defaultDependencies.readTimeFormatPreferenceFn,
+    readTimeZonePreferenceFn:
+      mergedOptions.readTimeZonePreferenceFn || defaultDependencies.readTimeZonePreferenceFn,
     resolveDeployAccessFn:
       mergedOptions.resolveDeployAccessFn || defaultDependencies.resolveDeployAccessFn,
     setConfiguredTimeFormatFn:
       mergedOptions.setConfiguredTimeFormatFn || defaultDependencies.setConfiguredTimeFormatFn,
+    setConfiguredTimeZoneFn:
+      mergedOptions.setConfiguredTimeZoneFn || defaultDependencies.setConfiguredTimeZoneFn,
     slackClient: mergedOptions.slackClient || null,
     slackUserId: mergedOptions.slackUserId,
     enableDeploymentCompletionNotifications: Boolean(
@@ -193,9 +207,27 @@ async function readTimeFormatPreference(runtimeContext) {
   }
 
   try {
-    return await runtimeContext.getConfiguredTimeFormatFn(runtimeContext.pool);
+    return await runtimeContext.getConfiguredTimeFormatFn(
+      runtimeContext.pool,
+      runtimeContext.slackUserId,
+    );
   } catch (_error) {
     return DEFAULT_TIME_FORMAT;
+  }
+}
+
+async function readTimeZonePreference(runtimeContext) {
+  if (!runtimeContext.pool || typeof runtimeContext.pool.query !== "function") {
+    return DEFAULT_TIME_ZONE;
+  }
+
+  try {
+    return await runtimeContext.getConfiguredTimeZoneFn(
+      runtimeContext.pool,
+      runtimeContext.slackUserId,
+    );
+  } catch (_error) {
+    return DEFAULT_TIME_ZONE;
   }
 }
 

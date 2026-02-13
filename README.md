@@ -11,12 +11,14 @@ and blocks production deploys when untested changes exist.
 - Supports status and release workflow commands:
   - `/calypso help`
   - `/calypso config time-format:human|long`
+  - `/calypso config timezone:America/New_York`
   - `/calypso status`
   - `/calypso tested <PR_NUMBER>`
   - `/calypso deploy prod`
 - Enforces deploy blocking rules:
   - A blocker is any PR with `merged_at > last_prod_deploy_at` and `status` not in `tested`, `deployed`.
 - Optionally triggers DigitalOcean App Platform deploy when gate is clear.
+- Runtime display config is per Slack user (defaults: time format `human`, timezone `America/New_York`).
 
 ## Architecture
 
@@ -71,6 +73,8 @@ src/
     migrations/001_init.sql
     migrations/002_deployment_whitelist.sql
     migrations/003_runtime_config.sql
+    migrations/004_runtime_config_timezone.sql
+    migrations/005_runtime_user_config.sql
   integrations/
     github/
       webhook.js

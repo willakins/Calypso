@@ -10,6 +10,7 @@ const TIME_FORMATS = Object.freeze({
   long: "long",
 });
 const DEFAULT_TIME_FORMAT = TIME_FORMATS.human;
+const DEFAULT_TIME_ZONE = "America/New_York";
 
 function createPool(databaseConnectionString) {
   if (!databaseConnectionString || databaseConnectionString.trim() === "") {
@@ -261,38 +262,94 @@ async function addUserToDeployWhitelist(pool, slackUserId, addedBy) {
   return { added: true };
 }
 
-async function getConfiguredTimeFormat(pool) {
+async function getConfiguredTimeFormat(pool, slackUserId) {
+  const normalizedSlackUserId = normalizeSlackUserId(slackUserId);
+  if (!normalizedSlackUserId) {
+    return DEFAULT_TIME_FORMAT;
+  }
+
   const result = await pool.query(
     `
       SELECT time_format
-      FROM runtime_config
-      WHERE id = 1
+      FROM runtime_user_config
+      WHERE slack_user_id = $1
       LIMIT 1
     `,
+    [normalizedSlackUserId],
   );
 
   const configuredValue = result.rows[0]?.time_format || DEFAULT_TIME_FORMAT;
   return normalizeTimeFormat(configuredValue) || DEFAULT_TIME_FORMAT;
 }
 
-async function setConfiguredTimeFormat(pool, timeFormat, updatedBy) {
-  const normalizedTimeFormat = normalizeTimeFormat(timeFormat);
-  if (!normalizedTimeFormat) {
-    throw new Error(`Unsupported time format: ${timeFormat}`);
+async function getConfiguredTimeZone(pool, slackUserId) {
+  const normalizedSlackUserId = normalizeSlackUserId(slackUserId);
+  if (!normalizedSlackUserId) {
+    return DEFAULT_TIME_ZONE;
   }
 
   const result = await pool.query(
     `
-      INSERT INTO runtime_config (id, time_format, updated_by, updated_at)
-      VALUES (1, $1, $2, NOW())
-      ON CONFLICT (id)
+      SELECT timezone
+      FROM runtime_user_config
+      WHERE slack_user_id = $1
+      LIMIT 1
+    `,
+    [normalizedSlackUserId],
+  );
+
+  return normalizeTimeZone(result.rows[0]?.timezone) || DEFAULT_TIME_ZONE;
+}
+
+async function setConfiguredTimeFormat(pool, timeFormat, updatedBy) {
+  const normalizedTimeFormat = normalizeTimeFormat(timeFormat);
+  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  if (!normalizedTimeFormat) {
+    throw new Error(`Unsupported time format: ${timeFormat}`);
+  }
+  if (!normalizedSlackUserId) {
+    throw new Error("slack user id is required");
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO runtime_user_config (slack_user_id, time_format, updated_by, updated_at)
+      VALUES ($2, $1, $2, NOW())
+      ON CONFLICT (slack_user_id)
       DO UPDATE SET
         time_format = EXCLUDED.time_format,
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
       RETURNING time_format, updated_by, updated_at
     `,
-    [normalizedTimeFormat, updatedBy || null],
+    [normalizedTimeFormat, normalizedSlackUserId],
+  );
+
+  return result.rows[0];
+}
+
+async function setConfiguredTimeZone(pool, timeZone, updatedBy) {
+  const normalizedTimeZone = normalizeTimeZone(timeZone);
+  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  if (!normalizedTimeZone) {
+    throw new Error(`Unsupported timezone: ${timeZone}`);
+  }
+  if (!normalizedSlackUserId) {
+    throw new Error("slack user id is required");
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO runtime_user_config (slack_user_id, timezone, updated_by, updated_at)
+      VALUES ($2, $1, $2, NOW())
+      ON CONFLICT (slack_user_id)
+      DO UPDATE SET
+        timezone = EXCLUDED.timezone,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = NOW()
+      RETURNING timezone, updated_by, updated_at
+    `,
+    [normalizedTimeZone, normalizedSlackUserId],
   );
 
   return result.rows[0];
@@ -303,10 +360,22 @@ function normalizeTimeFormat(timeFormat) {
   return TIME_FORMATS[normalizedTimeFormat] || null;
 }
 
+function normalizeTimeZone(timeZone) {
+  const normalizedTimeZone = String(timeZone || "").trim();
+  return normalizedTimeZone === "" ? null : normalizedTimeZone;
+}
+
+function normalizeSlackUserId(slackUserId) {
+  const normalizedSlackUserId = String(slackUserId || "").trim();
+  return normalizedSlackUserId === "" ? null : normalizedSlackUserId;
+}
+
 module.exports = {
   addUserToDeployWhitelist,
   createPool,
   DEFAULT_TIME_FORMAT,
+  DEFAULT_TIME_ZONE,
+  getConfiguredTimeZone,
   getLastProdDeployAt,
   getConfiguredTimeFormat,
   isUserWhitelistedForDeploy,
@@ -318,6 +387,7 @@ module.exports = {
   markPullRequestTested,
   runMigrations,
   setConfiguredTimeFormat,
+  setConfiguredTimeZone,
   TIME_FORMATS,
   upsertPullRequestAsUntested,
   verifyConnection,

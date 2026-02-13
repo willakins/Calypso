@@ -7,6 +7,7 @@ const HELP_TEXT = [
   "*Usage*",
   "`/calypso help` Show this message.",
   "`/calypso config time-format:human|long` Configure timestamp display format.",
+  "`/calypso config timezone:America/New_York` Configure timezone for human timestamps.",
   "`/calypso status` Show deploy blockers since last prod deploy.",
   "`/calypso tested <PR_NUMBER>` Mark a PR as tested.",
   "`/calypso tested all` Mark all untested PRs as tested.",

@@ -17,6 +17,7 @@ class StatusCommand extends BaseCalypsoCommand {
     }
 
     const timeFormat = await runtime.readTimeFormatPreferenceFn(runtime);
+    const timeZone = await runtime.readTimeZonePreferenceFn(runtime);
     const lastProductionDeploymentAt = await runtime.getLastProdDeployAtFn(runtime.pool);
     const blockingPullRequests = await runtime.listBlockingPullRequestsFn(
       runtime.pool,
@@ -27,6 +28,7 @@ class StatusCommand extends BaseCalypsoCommand {
       lastDeployAt: lastProductionDeploymentAt,
       blockers: blockingPullRequests,
       timeFormat,
+      timeZone,
     });
 
     return this.buildExecutionResult(responseText);

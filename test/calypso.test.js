@@ -89,7 +89,19 @@ test("handleCalypsoCommand rejects invalid config input", () => {
   const result = handleCalypsoCommand({ text: "config time-format:weird", user_id: "UADMIN" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /Usage: `\/calypso config time-format:human`/);
+  assert.match(result.responseText, /Usage:/);
+  assert.match(result.responseText, /`\/calypso config time-format:human`/);
+  assert.match(result.responseText, /`\/calypso config timezone:America\/New_York`/);
+});
+
+test("handleCalypsoCommand routes config timezone input", () => {
+  const result = handleCalypsoCommand({
+    text: "config timezone:America/Los_Angeles",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_timezone");
+  assert.equal(result.timeZone, "America/Los_Angeles");
 });
 
 test("handleCalypsoCommand returns unknown message for unsupported input", () => {
@@ -835,7 +847,7 @@ test("registerCalypsoCommand config command updates time format", async () => {
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Updated time format to `long`/);
+  assert.match(payload.text, /Updated your time format to `long`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].timeFormat, "long");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
@@ -867,4 +879,77 @@ test("registerCalypsoCommand config command denies non-admin, non-whitelisted us
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Config update denied/);
+});
+
+test("registerCalypsoCommand config command updates timezone when valid", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    isValidTimeZoneFn: () => true,
+    setConfiguredTimeZoneFn: async (pool, timeZone, updatedBy) => {
+      capturedCalls.push({ pool, timeZone, updatedBy });
+      return { timezone: timeZone, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config timezone:America/Los_Angeles", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Timezone `America\/Los_Angeles` is valid/);
+  assert.match(payload.text, /Updated your timezone setting/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].timeZone, "America/Los_Angeles");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command reports invalid timezone", async () => {
+  let commandHandler;
+  let setTimezoneCalled = false;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    isValidTimeZoneFn: () => false,
+    setConfiguredTimeZoneFn: async () => {
+      setTimezoneCalled = true;
+      return {};
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config timezone:Mars/Olympus", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Timezone `Mars\/Olympus` is invalid/);
+  assert.equal(setTimezoneCalled, false);
 });

@@ -5,6 +5,7 @@ const {
   formatStatusResponse,
   formatTimestampAsUtcLegacy,
   formatTimestampWithTimezone,
+  isValidTimeZone,
 } = require("../src/util/format");
 
 test("formatStatusResponse returns no-blockers message", () => {
@@ -59,6 +60,17 @@ test("formatStatusResponse supports long time format", () => {
   assert.equal(message, "No blockers since last prod deploy (2026-02-13 22:00:17 UTC).");
 });
 
+test("formatStatusResponse supports custom timezone for human format", () => {
+  const message = formatStatusResponse({
+    lastDeployAt: "2026-02-13T22:00:17.000Z",
+    blockers: [],
+    timeFormat: "human",
+    timeZone: "America/Los_Angeles",
+  });
+
+  assert.equal(message, "No blockers since last prod deploy (on February 13th, 2026 at 2:00 PM PST).");
+});
+
 test("formatTimestampWithTimezone supports human style with on/at phrasing", () => {
   const message = formatTimestampWithTimezone("2026-02-13T22:00:17.000Z");
 
@@ -69,4 +81,12 @@ test("formatTimestampAsUtcLegacy keeps prior UTC timestamp style", () => {
   const message = formatTimestampAsUtcLegacy("2026-02-13T22:00:17.000Z");
 
   assert.equal(message, "2026-02-13 22:00:17 UTC");
+});
+
+test("isValidTimeZone returns true for valid IANA timezone", () => {
+  assert.equal(isValidTimeZone("America/New_York"), true);
+});
+
+test("isValidTimeZone returns false for invalid timezone", () => {
+  assert.equal(isValidTimeZone("Mars/Olympus"), false);
 });

@@ -1,5 +1,5 @@
-function formatStatusResponse({ lastDeployAt, blockers, timeFormat }) {
-  const lastDeploymentTimestamp = formatTimestampByTimeFormat(lastDeployAt, { timeFormat });
+function formatStatusResponse({ lastDeployAt, blockers, timeFormat, timeZone }) {
+  const lastDeploymentTimestamp = formatTimestampByTimeFormat(lastDeployAt, { timeFormat, timeZone });
   const hasBlockingPullRequests = Array.isArray(blockers) && blockers.length > 0;
 
   if (!hasBlockingPullRequests) {
@@ -57,6 +57,20 @@ function formatTimestampByTimeFormat(value, options = {}) {
     style: TIMESTAMP_STYLES.human,
     timeZone: options.timeZone || "America/New_York",
   });
+}
+
+function isValidTimeZone(timeZone) {
+  const candidateTimeZone = String(timeZone || "").trim();
+  if (candidateTimeZone === "") {
+    return false;
+  }
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: candidateTimeZone });
+    return true;
+  } catch (_error) {
+    return false;
+  }
 }
 
 function formatTimestampAsUtcLegacy(value) {
@@ -181,4 +195,5 @@ module.exports = {
   formatTimestampByTimeFormat,
   formatTimestampWithTimezone,
   formatStatusResponse,
+  isValidTimeZone,
 };
