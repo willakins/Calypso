@@ -29,8 +29,11 @@ class BaseCalypsoCommand {
     });
   }
 
-  buildExecutionResult(responseText) {
-    return { responseText };
+  buildExecutionResult(responseText, additionalFields = {}) {
+    return {
+      responseText,
+      ...additionalFields,
+    };
   }
 }
 

@@ -49,6 +49,7 @@ async function initializeDatabase(pool) {
 
 function wireSlackCommands(runtime) {
   registerCalypsoCommand(runtime.slackApp, {
+    enableDeploymentCompletionNotifications: true,
     pool: runtime.pool,
     deployConfig: buildDeployConfig(runtime.config),
   });
@@ -62,6 +63,8 @@ function wireHealthcheckRoute(runtime) {
 
 function buildDeployConfig(config) {
   return {
+    doDeploymentPollIntervalMs: config.doDeployPollIntervalSeconds * 1000,
+    doDeploymentTimeoutMs: config.doDeployTimeoutSeconds * 1000,
     digitaloceanToken: config.digitaloceanToken,
     doAppIdProd: config.doAppIdProd,
   };

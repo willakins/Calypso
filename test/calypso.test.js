@@ -334,6 +334,56 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
 });
 
+test("registerCalypsoCommand sends deployment completion follow-up when enabled", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+  const pool = {
+    async query(sql) {
+      if (sql === "BEGIN" || sql === "COMMIT") {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    enableDeploymentCompletionNotifications: true,
+    pool,
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    listBlockingPullRequestsFn: async () => [],
+    triggerProdDeployFn: async () => ({ externalDeployId: "dep-abc" }),
+    insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
+    markPullRequestsDeployedSinceFn: async () => 2,
+    waitForProdDeployCompletionFn: async () => ({ id: "dep-abc", phase: "ACTIVE" }),
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id",
+      doDeploymentPollIntervalMs: 1,
+      doDeploymentTimeoutMs: 1000,
+    },
+  });
+
+  const responses = [];
+  await commandHandler({
+    command: { text: "deploy prod", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      responses.push(message);
+    },
+  });
+
+  assert.equal(responses.length, 2);
+  assert.match(responses[0].text, /Deploy triggered \(id: dep-abc\)/);
+  assert.match(
+    responses[1].text,
+    /DigitalOcean deployment dep-abc finished successfully with phase ACTIVE/,
+  );
+});
+
 test("registerCalypsoCommand returns deploy not configured when clear", async () => {
   let commandHandler;
 
@@ -454,5 +504,52 @@ test("registerCalypsoCommand does not mutate DB when deploy call fails", async (
   assert.equal(inserted, false);
   assert.equal(marked, false);
   assert.deepEqual(queryCalls, []);
-  assert.match(payload.text, /Calypso hit an error/);
+  assert.match(payload.text, /Deploy failed before deployment state was committed/);
+});
+
+test("registerCalypsoCommand reports rollback when deployment state transaction fails", async () => {
+  let commandHandler;
+  let marked = false;
+  const queryCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+  const pool = {
+    async query(sql) {
+      queryCalls.push(sql);
+      return { rows: [] };
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool,
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    listBlockingPullRequestsFn: async () => [],
+    triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
+    insertDeploymentFn: async () => {
+      throw new Error("insert failed");
+    },
+    markPullRequestsDeployedSinceFn: async () => {
+      marked = true;
+    },
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy prod", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(marked, false);
+  assert.deepEqual(queryCalls, ["BEGIN", "ROLLBACK"]);
+  assert.match(payload.text, /Transaction was rolled back/);
 });

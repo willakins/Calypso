@@ -25,6 +25,13 @@ function registerCalypsoCommand(app, options = {}) {
         response_type: "ephemeral",
         text: executionResult.responseText,
       });
+
+      await sendDeploymentCompletionFollowUpIfNeeded({
+        calypsoCommandService,
+        command,
+        executionResult,
+        respond,
+      });
     } catch (error) {
       console.error("Failed to process /calypso command.");
       console.error(error.message);
@@ -34,6 +41,38 @@ function registerCalypsoCommand(app, options = {}) {
       });
     }
   });
+}
+
+async function sendDeploymentCompletionFollowUpIfNeeded({
+  calypsoCommandService,
+  command,
+  executionResult,
+  respond,
+}) {
+  const shouldNotifyCompletion = Boolean(executionResult.shouldNotifyDeploymentCompletion);
+  const externalDeploymentId = executionResult.externalDeploymentId || null;
+  if (!shouldNotifyCompletion || !externalDeploymentId) {
+    return;
+  }
+
+  try {
+    const completionState = await calypsoCommandService.waitForProdDeploymentCompletion(
+      externalDeploymentId,
+      {
+        slackUserId: command.user_id,
+      },
+    );
+
+    await respond({
+      response_type: "ephemeral",
+      text: `DigitalOcean deployment ${externalDeploymentId} finished successfully with phase ${completionState.phase}.`,
+    });
+  } catch (error) {
+    await respond({
+      response_type: "ephemeral",
+      text: `DigitalOcean deployment ${externalDeploymentId} failed after trigger: ${error.message}`,
+    });
+  }
 }
 
 module.exports = {

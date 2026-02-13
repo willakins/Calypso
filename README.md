@@ -106,6 +106,8 @@ Optional:
 - `PORT` (default `3000`)
 - `DIGITALOCEAN_TOKEN`
 - `DO_APP_ID_PROD`
+- `DO_DEPLOY_POLL_INTERVAL_SECONDS` (default `10`)
+- `DO_DEPLOY_TIMEOUT_SECONDS` (default `1200`)
 - `DEPLOY_CHANNEL_ID` (reserved for future use)
 
 ### How To Get Each Value
@@ -161,6 +163,16 @@ Optional:
 - Find it with:
   - `doctl apps list --format ID,Spec.Name`
 - Safe rollout: set this to a staging app first.
+
+`DO_DEPLOY_POLL_INTERVAL_SECONDS` (optional)
+
+- Poll interval for checking deployment completion status after deploy trigger.
+- Default: `10` seconds.
+
+`DO_DEPLOY_TIMEOUT_SECONDS` (optional)
+
+- Max time Calypso waits for deployment completion follow-up message.
+- Default: `1200` seconds (20 minutes).
 
 ## Setup
 
@@ -372,6 +384,7 @@ Rules:
 - If deploy fails:
   - does not write deployment row
   - does not mark PRs deployed
+- After trigger, Calypso sends a follow-up message when DigitalOcean finishes the deployment.
 
 `/calypso deploy prod force` (or `/calypso deploy prod forced`)
 

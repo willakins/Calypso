@@ -74,6 +74,54 @@ test("triggerAppDeployment throws with status and response body when request fai
   );
 });
 
+test("waitForAppDeploymentCompletion resolves when deployment reaches ACTIVE", async () => {
+  await withMockedFetch(
+    async (url, requestInit) => {
+      assert.equal(url, "https://api.digitalocean.com/v2/apps/app-123/deployments/dep-123");
+      assert.equal(requestInit.method, "GET");
+      assert.equal(requestInit.headers.Authorization, "Bearer token-123");
+
+      return {
+        ok: true,
+        async json() {
+          return { deployment: { id: "dep-123", phase: "ACTIVE" } };
+        },
+      };
+    },
+    async () => {
+      const client = createDigitalOceanClient({ token: "token-123" });
+      const result = await client.waitForAppDeploymentCompletion("app-123", "dep-123", {
+        pollIntervalMs: 1,
+        timeoutMs: 20,
+      });
+
+      assert.deepEqual(result, { id: "dep-123", phase: "ACTIVE" });
+    },
+  );
+});
+
+test("waitForAppDeploymentCompletion throws on terminal failure phase", async () => {
+  await withMockedFetch(
+    async () => ({
+      ok: true,
+      async json() {
+        return { deployment: { id: "dep-123", phase: "ERROR" } };
+      },
+    }),
+    async () => {
+      const client = createDigitalOceanClient({ token: "token-123" });
+      await assert.rejects(
+        () =>
+          client.waitForAppDeploymentCompletion("app-123", "dep-123", {
+            pollIntervalMs: 1,
+            timeoutMs: 20,
+          }),
+        /finished with phase ERROR/,
+      );
+    },
+  );
+});
+
 async function withMockedFetch(mockImplementation, fn) {
   const originalFetch = global.fetch;
   global.fetch = mockImplementation;

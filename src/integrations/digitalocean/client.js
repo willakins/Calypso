@@ -18,6 +18,37 @@ function createDigitalOceanClient({ token }) {
         externalDeployId: readExternalDeploymentId(payload),
       };
     },
+
+    async waitForAppDeploymentCompletion(appId, deploymentId, options = {}) {
+      ensureRequiredValueExists(appId, "DO_APP_ID_PROD");
+      ensureRequiredValueExists(deploymentId, "external deployment id");
+
+      const pollIntervalMs = readPositiveInteger(options.pollIntervalMs, 10000);
+      const timeoutMs = readPositiveInteger(options.timeoutMs, 20 * 60 * 1000);
+      const deadlineTimestamp = Date.now() + timeoutMs;
+      let lastKnownPhase = "unknown";
+
+      while (Date.now() <= deadlineTimestamp) {
+        const deploymentState = await fetchDeploymentState({ token, appId, deploymentId });
+        lastKnownPhase = deploymentState.phase;
+
+        if (deploymentState.phase === "ACTIVE") {
+          return deploymentState;
+        }
+
+        if (isFailedDeploymentPhase(deploymentState.phase)) {
+          throw new Error(
+            `DigitalOcean deployment ${deploymentId} finished with phase ${deploymentState.phase}.`,
+          );
+        }
+
+        await sleep(pollIntervalMs);
+      }
+
+      throw new Error(
+        `DigitalOcean deployment ${deploymentId} did not finish before timeout. Last known phase: ${lastKnownPhase}.`,
+      );
+    },
   };
 }
 
@@ -64,6 +95,59 @@ async function throwIfDeploymentRequestFailed(response) {
 function readExternalDeploymentId(payload) {
   const deployment = payload.deployment || {};
   return deployment.id ? String(deployment.id) : null;
+}
+
+async function fetchDeploymentState({ token, appId, deploymentId }) {
+  const response = await fetch(
+    `https://api.digitalocean.com/v2/apps/${appId}/deployments/${deploymentId}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+  await throwIfDeploymentRequestFailed(response);
+
+  const payload = await response.json();
+  return mapDeploymentPayloadToState(payload);
+}
+
+function mapDeploymentPayloadToState(payload) {
+  const deployment = payload.deployment || {};
+  return {
+    id: deployment.id ? String(deployment.id) : null,
+    phase: readDeploymentPhase(deployment),
+  };
+}
+
+function readDeploymentPhase(deployment) {
+  const phaseValue = deployment.phase || deployment.status || deployment.progress?.phase || "unknown";
+  return String(phaseValue).toUpperCase();
+}
+
+function isFailedDeploymentPhase(phase) {
+  return ["ERROR", "FAILED", "CANCELED", "CANCELLED", "SUPERSEDED"].includes(phase);
+}
+
+function readPositiveInteger(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function sleep(durationMs) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, durationMs);
+  });
 }
 
 module.exports = {

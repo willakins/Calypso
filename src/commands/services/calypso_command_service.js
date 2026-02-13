@@ -25,6 +25,19 @@ function createCalypsoCommandService(serviceOptions = {}) {
 
       return commandRegistry.execute(parsedCommand, runtimeContext);
     },
+
+    async waitForProdDeploymentCompletion(externalDeployId, commandContext = {}) {
+      const runtimeContext = buildRuntimeContext({
+        serviceOptions,
+        commandContext,
+        defaultDependencies,
+      });
+
+      return runtimeContext.waitForProdDeployCompletionFn(
+        runtimeContext.deployConfig,
+        externalDeployId,
+      );
+    },
   };
 }
 
@@ -39,6 +52,7 @@ function createDefaultDependencies() {
     markPullRequestTestedFn: markPullRequestTested,
     markPullRequestsDeployedSinceFn: markPullRequestsDeployedSince,
     triggerProdDeployFn: triggerProductionDeployment,
+    waitForProdDeployCompletionFn: waitForProductionDeploymentCompletion,
   };
 }
 
@@ -67,13 +81,30 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.markPullRequestsDeployedSinceFn,
     pool: mergedOptions.pool,
     slackUserId: mergedOptions.slackUserId,
+    enableDeploymentCompletionNotifications: Boolean(
+      mergedOptions.enableDeploymentCompletionNotifications,
+    ),
     triggerProdDeployFn: mergedOptions.triggerProdDeployFn || defaultDependencies.triggerProdDeployFn,
+    waitForProdDeployCompletionFn:
+      mergedOptions.waitForProdDeployCompletionFn || defaultDependencies.waitForProdDeployCompletionFn,
   };
 }
 
 async function triggerProductionDeployment(deployConfig) {
   const digitalOceanClient = createDigitalOceanClient({ token: deployConfig.digitaloceanToken });
   return digitalOceanClient.triggerAppDeployment(deployConfig.doAppIdProd);
+}
+
+async function waitForProductionDeploymentCompletion(deployConfig, externalDeployId) {
+  const digitalOceanClient = createDigitalOceanClient({ token: deployConfig.digitaloceanToken });
+  return digitalOceanClient.waitForAppDeploymentCompletion(
+    deployConfig.doAppIdProd,
+    externalDeployId,
+    {
+      pollIntervalMs: deployConfig.doDeploymentPollIntervalMs,
+      timeoutMs: deployConfig.doDeploymentTimeoutMs,
+    },
+  );
 }
 
 module.exports = {

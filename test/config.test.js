@@ -35,6 +35,8 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
   withEnvironment(
     {
       ...REQUIRED_ENV,
+      DO_DEPLOY_POLL_INTERVAL_SECONDS: "15",
+      DO_DEPLOY_TIMEOUT_SECONDS: "900",
       DIGITALOCEAN_TOKEN: "  do-token  ",
       DO_APP_ID_PROD: "  app-id  ",
       PORT: "4100",
@@ -48,6 +50,8 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.githubWebhookSecret, "secret");
       assert.equal(config.githubRepo, "croft-eng/croft");
       assert.equal(config.githubMainBranch, "main");
+      assert.equal(config.doDeployPollIntervalSeconds, 15);
+      assert.equal(config.doDeployTimeoutSeconds, 900);
       assert.equal(config.digitaloceanToken, "do-token");
       assert.equal(config.doAppIdProd, "app-id");
       assert.equal(config.port, 4100);
@@ -59,6 +63,8 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
   withEnvironment(
     {
       ...REQUIRED_ENV,
+      DO_DEPLOY_POLL_INTERVAL_SECONDS: undefined,
+      DO_DEPLOY_TIMEOUT_SECONDS: undefined,
       DIGITALOCEAN_TOKEN: undefined,
       DO_APP_ID_PROD: undefined,
       PORT: undefined,
@@ -66,6 +72,8 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
     () => {
       const config = loadConfig();
 
+      assert.equal(config.doDeployPollIntervalSeconds, 10);
+      assert.equal(config.doDeployTimeoutSeconds, 1200);
       assert.equal(config.digitaloceanToken, "");
       assert.equal(config.doAppIdProd, "");
       assert.equal(config.port, 3000);
@@ -81,6 +89,21 @@ test("loadConfig rejects invalid port", { concurrency: false }, () => {
     },
     () => {
       assert.throws(() => loadConfig(), /PORT must be a positive integer/);
+    },
+  );
+});
+
+test("loadConfig rejects invalid DO polling values", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      DO_DEPLOY_POLL_INTERVAL_SECONDS: "-1",
+    },
+    () => {
+      assert.throws(
+        () => loadConfig(),
+        /DO_DEPLOY_POLL_INTERVAL_SECONDS must be a positive integer/,
+      );
     },
   );
 });

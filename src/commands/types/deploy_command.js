@@ -55,23 +55,46 @@ class DeployCommand extends BaseCalypsoCommand {
       return this.buildExecutionResult("Deploy gate is clear, but deploy not configured.");
     }
 
-    const deployResult = await runtime.triggerProdDeployFn(runtime.deployConfig);
-    const deploymentSummary = await this.recordDeploymentAndMarkPullRequests({
-      runtime,
-      lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
-      externalDeploymentId: deployResult.externalDeployId,
-    });
+    try {
+      const deployResult = await runtime.triggerProdDeployFn(runtime.deployConfig);
+      const deploymentSummary = await this.recordDeploymentAndMarkPullRequests({
+        runtime,
+        lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
+        externalDeploymentId: deployResult.externalDeployId,
+      });
 
-    const deploymentId = deploymentSummary.externalDeploymentId || "n/a";
-    if (forceDeployment && blockingPullRequestCount > 0) {
+      const deploymentId = deploymentSummary.externalDeploymentId || "n/a";
+      const shouldNotifyDeploymentCompletion =
+        runtime.enableDeploymentCompletionNotifications &&
+        Boolean(deploymentSummary.externalDeploymentId);
+      if (forceDeployment && blockingPullRequestCount > 0) {
+        return this.buildExecutionResult(
+          `Force deploy triggered (id: ${deploymentId}). Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+          {
+            externalDeploymentId: deploymentSummary.externalDeploymentId,
+            shouldNotifyDeploymentCompletion,
+          },
+        );
+      }
+
       return this.buildExecutionResult(
-        `Force deploy triggered (id: ${deploymentId}). Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+        `Deploy triggered (id: ${deploymentId}). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+        {
+          externalDeploymentId: deploymentSummary.externalDeploymentId,
+          shouldNotifyDeploymentCompletion,
+        },
+      );
+    } catch (error) {
+      if (this.didDeploymentTransactionRollback(error)) {
+        return this.buildExecutionResult(
+          "Deploy failed while recording deployment state. Transaction was rolled back; no deploy records or PR statuses were committed.",
+        );
+      }
+
+      return this.buildExecutionResult(
+        `Deploy failed before deployment state was committed: ${error.message}`,
       );
     }
-
-    return this.buildExecutionResult(
-      `Deploy triggered (id: ${deploymentId}). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
-    );
   }
 
   async readDeployGateState(runtime) {
@@ -131,9 +154,20 @@ class DeployCommand extends BaseCalypsoCommand {
     } catch (error) {
       if (transactionStarted) {
         await pool.query("ROLLBACK");
+        throw this.buildRolledBackDeploymentError(error);
       }
       throw error;
     }
+  }
+
+  buildRolledBackDeploymentError(cause) {
+    const rolledBackError = new Error("Deployment state transaction rolled back.", { cause });
+    rolledBackError.code = "DEPLOY_STATE_ROLLED_BACK";
+    return rolledBackError;
+  }
+
+  didDeploymentTransactionRollback(error) {
+    return Boolean(error) && error.code === "DEPLOY_STATE_ROLLED_BACK";
   }
 }
 

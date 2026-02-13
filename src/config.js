@@ -16,6 +16,8 @@ function loadConfig() {
 
   return {
     databaseUrl: readRequiredEnvironmentVariable("DATABASE_URL"),
+    doDeployPollIntervalSeconds: readPositiveInteger("DO_DEPLOY_POLL_INTERVAL_SECONDS", 10),
+    doDeployTimeoutSeconds: readPositiveInteger("DO_DEPLOY_TIMEOUT_SECONDS", 1200),
     digitaloceanToken: readOptionalEnvironmentVariable("DIGITALOCEAN_TOKEN"),
     doAppIdProd: readOptionalEnvironmentVariable("DO_APP_ID_PROD"),
     githubMainBranch: readRequiredEnvironmentVariable("GITHUB_MAIN_BRANCH"),
@@ -65,6 +67,20 @@ function readPortNumber(name, fallbackPort) {
   }
 
   return parsedPort;
+}
+
+function readPositiveInteger(name, fallbackValue) {
+  const value = readOptionalEnvironmentVariable(name);
+  if (value === "") {
+    return fallbackValue;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return parsed;
 }
 
 module.exports = {
