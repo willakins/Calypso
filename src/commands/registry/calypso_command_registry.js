@@ -3,6 +3,7 @@ const { HelpCommand } = require("../types/help_command");
 const { StatusCommand } = require("../types/status_command");
 const { TestedCommand } = require("../types/tested_command");
 const { UnknownCommand } = require("../types/unknown_command");
+const { WhitelistCommand } = require("../types/whitelist_command");
 
 function createCalypsoCommandRegistry() {
   return new CalypsoCommandRegistry({
@@ -11,6 +12,7 @@ function createCalypsoCommandRegistry() {
       new StatusCommand(),
       new TestedCommand(),
       new DeployCommand(),
+      new WhitelistCommand(),
     ],
     fallbackCommand: new UnknownCommand(),
   });
@@ -43,6 +45,16 @@ class CalypsoCommandRegistry {
   async execute(parsedCommand, runtime) {
     const commandDefinition =
       this.commandsByName.get(parsedCommand.commandName) || this.fallbackCommand;
+
+    const accessDecision = await commandDefinition.checkCallerAccess({
+      parsedCommand,
+      runtime,
+    });
+    if (!accessDecision.allowed) {
+      return {
+        responseText: accessDecision.responseText || "Access denied for this command.",
+      };
+    }
 
     return commandDefinition.execute({
       parsedCommand,

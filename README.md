@@ -115,6 +115,7 @@ Optional:
 `SLACK_BOT_TOKEN`
 
 - Slack App -> `OAuth & Permissions` -> install/reinstall app -> copy `Bot User OAuth Token` (`xoxb-...`).
+- Add bot scope `users:read` so Calypso can detect workspace admins for deploy authorization.
 
 `SLACK_APP_TOKEN`
 
@@ -374,9 +375,16 @@ Rules:
 - Lists PRs tested in the selected recent timeframe.
 - Includes PR number, repo, status, tester, and tested timestamp.
 
+`/calypso whitelist <@USER>`
+
+- Restricted command for workspace admins or already-whitelisted users.
+- Adds a user to Calypso deploy whitelist.
+- Whitelisted users can run deploy commands even if they are not workspace admins.
+
 `/calypso deploy prod`
 
 - Blocks when untested blockers exist.
+- Access restricted to workspace admins and whitelisted users.
 - If no blockers and DigitalOcean env vars missing, returns "deploy not configured".
 - If configured and deploy succeeds:
   - inserts a `deployments` row

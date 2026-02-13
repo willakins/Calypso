@@ -26,6 +26,21 @@ class DeployCommand extends BaseCalypsoCommand {
     });
   }
 
+  async checkCallerAccess({ runtime }) {
+    const deployAccess = await runtime.resolveDeployAccessFn(runtime);
+    if (!deployAccess.canDeploy) {
+      return this.denyAccess(
+        [
+          "Deploy denied.",
+          "Only workspace admins or whitelisted users can deploy.",
+          "Ask a workspace admin to run `/calypso whitelist <@USER>`.",
+        ].join("\n"),
+      );
+    }
+
+    return this.allowAccess();
+  }
+
   async execute({ parsedCommand, runtime }) {
     if (!runtime.pool) {
       return this.buildExecutionResult("Deploy command unavailable: database pool is not configured.");

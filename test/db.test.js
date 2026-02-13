@@ -2,7 +2,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  addUserToDeployWhitelist,
   createPool,
+  isUserWhitelistedForDeploy,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
 } = require("../src/db");
@@ -75,4 +77,63 @@ test("listRecentlyTestedPullRequests returns queried rows", async () => {
   assert.deepEqual(rows, [row]);
   assert.match(captured.sql, /tested_at >= \$1/);
   assert.deepEqual(captured.params, [sinceTimestamp]);
+});
+
+test("isUserWhitelistedForDeploy returns true when user is present", async () => {
+  const pool = {
+    async query(_sql, _params) {
+      return { rowCount: 1 };
+    },
+  };
+
+  const isWhitelisted = await isUserWhitelistedForDeploy(pool, "U123");
+  assert.equal(isWhitelisted, true);
+});
+
+test("isUserWhitelistedForDeploy returns false when user is absent", async () => {
+  const pool = {
+    async query(_sql, _params) {
+      return { rowCount: 0 };
+    },
+  };
+
+  const isWhitelisted = await isUserWhitelistedForDeploy(pool, "U123");
+  assert.equal(isWhitelisted, false);
+});
+
+test("addUserToDeployWhitelist returns added=false when already present", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      if (calls.length === 1) {
+        return { rowCount: 1 };
+      }
+      return { rowCount: 0 };
+    },
+  };
+
+  const result = await addUserToDeployWhitelist(pool, "U123", "UADMIN");
+
+  assert.deepEqual(result, { added: false });
+  assert.equal(calls.length, 1);
+});
+
+test("addUserToDeployWhitelist inserts when user is not present", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      if (calls.length === 1) {
+        return { rowCount: 0 };
+      }
+      return { rowCount: 1 };
+    },
+  };
+
+  const result = await addUserToDeployWhitelist(pool, "U123", "UADMIN");
+
+  assert.deepEqual(result, { added: true });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].params, ["U123", "UADMIN"]);
 });

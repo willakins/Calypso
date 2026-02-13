@@ -11,6 +11,10 @@ class BaseCalypsoCommand {
     throw new Error(`${this.constructor.name} must implement parse()`);
   }
 
+  async checkCallerAccess(_context) {
+    return this.allowAccess();
+  }
+
   async execute({ parsedCommand }) {
     return this.buildExecutionResult(parsedCommand.responseText || "Unsupported command.");
   }
@@ -33,6 +37,19 @@ class BaseCalypsoCommand {
     return {
       responseText,
       ...additionalFields,
+    };
+  }
+
+  allowAccess() {
+    return {
+      allowed: true,
+    };
+  }
+
+  denyAccess(responseText) {
+    return {
+      allowed: false,
+      responseText,
     };
   }
 }

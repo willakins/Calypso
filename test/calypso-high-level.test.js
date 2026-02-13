@@ -7,6 +7,7 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   const state = createInMemoryState();
   const { app, commandHandler } = createCommandHandler({
     pool: createPoolTransactionRecorder(state),
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     deployConfig: {
       digitaloceanToken: "token",
       doAppIdProd: "app",

@@ -63,6 +63,27 @@ class TestedCommand extends BaseCalypsoCommand {
     });
   }
 
+  async checkCallerAccess({ parsedCommand, runtime }) {
+    const requiresElevatedAccess =
+      parsedCommand.action === "tested_single" || parsedCommand.action === "tested_all";
+    if (!requiresElevatedAccess) {
+      return this.allowAccess();
+    }
+
+    const deployAccess = await runtime.resolveDeployAccessFn(runtime);
+    if (!deployAccess.canDeploy) {
+      return this.denyAccess(
+        [
+          "Tested update denied.",
+          "Only workspace admins or whitelisted users can mark PRs as tested.",
+          "Ask a workspace admin to run `/calypso whitelist <@USER>`.",
+        ].join("\n"),
+      );
+    }
+
+    return this.allowAccess();
+  }
+
   async execute({ parsedCommand, runtime }) {
     if (!runtime.pool) {
       return this.buildExecutionResult("Tested command unavailable: database pool is not configured.");

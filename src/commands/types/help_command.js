@@ -10,6 +10,7 @@ const HELP_TEXT = [
   "`/calypso tested <PR_NUMBER>` Mark a PR as tested.",
   "`/calypso tested all` Mark all untested PRs as tested.",
   "`/calypso tested recent <day|week|month>` List recently tested PRs.",
+  "`/calypso whitelist <@USER>` Allow a user to run deploy commands (admin/whitelist).",
   "`/calypso deploy prod` Attempt prod deploy after gate check.",
   "`/calypso deploy prod force` Force deploy and bypass blockers.",
 ].join("\n");

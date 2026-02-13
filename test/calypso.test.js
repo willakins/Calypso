@@ -71,6 +71,13 @@ test("handleCalypsoCommand rejects invalid deploy input", () => {
   assert.match(result.responseText, /Usage: `\/calypso deploy prod`/);
 });
 
+test("handleCalypsoCommand routes whitelist command with mention", () => {
+  const result = handleCalypsoCommand({ text: "whitelist <@U123ABC>", user_id: "UADMIN" });
+
+  assert.equal(result.action, "whitelist_add");
+  assert.equal(result.targetUserId, "U123ABC");
+});
+
 test("handleCalypsoCommand returns unknown message for unsupported input", () => {
   const result = handleCalypsoCommand({ text: "foobar", user_id: "U123" });
 
@@ -152,6 +159,7 @@ test("registerCalypsoCommand reports not found for tested command", async () => 
 
   registerCalypsoCommand(app, {
     pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     markPullRequestTestedFn: async () => ({ found: false }),
   });
 
@@ -179,6 +187,7 @@ test("registerCalypsoCommand is idempotent for already tested PR", async () => {
 
   registerCalypsoCommand(app, {
     pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     markPullRequestTestedFn: async () => ({ found: true, alreadyTested: true }),
   });
 
@@ -195,6 +204,34 @@ test("registerCalypsoCommand is idempotent for already tested PR", async () => {
   assert.match(payload.text, /already marked tested/);
 });
 
+test("registerCalypsoCommand denies tested single for non-admin, non-whitelisted user", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: false }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "tested 77", user_id: "U123" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Tested update denied/);
+});
+
 test("registerCalypsoCommand marks all untested PRs as tested", async () => {
   let commandHandler;
 
@@ -206,6 +243,7 @@ test("registerCalypsoCommand marks all untested PRs as tested", async () => {
 
   registerCalypsoCommand(app, {
     pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     markAllUntestedPullRequestsTestedFn: async () => 3,
   });
 
@@ -220,6 +258,34 @@ test("registerCalypsoCommand marks all untested PRs as tested", async () => {
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Marked 3 untested PR\(s\) as tested/);
+});
+
+test("registerCalypsoCommand denies tested all for non-admin, non-whitelisted user", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: false }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "tested all", user_id: "U123" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Tested update denied/);
 });
 
 test("registerCalypsoCommand shows recently tested PRs for tested recent", async () => {
@@ -271,6 +337,7 @@ test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
 
   registerCalypsoCommand(app, {
     pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [{ repo: "croft-eng/croft", pr_number: 12, status: "untested" }],
     deployConfig: {},
@@ -287,6 +354,38 @@ test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Deploy blocked due to untested PRs/);
+});
+
+test("registerCalypsoCommand denies deploy for non-admin, non-whitelisted user", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: false }),
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    listBlockingPullRequestsFn: async () => [],
+    deployConfig: {},
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy prod", user_id: "U123" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Deploy denied/);
+  assert.match(payload.text, /Only workspace admins or whitelisted users can deploy/);
 });
 
 test("registerCalypsoCommand force deploy bypasses blockers", async () => {
@@ -308,6 +407,7 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
 
   registerCalypsoCommand(app, {
     pool,
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [{ repo: "croft-eng/croft", pr_number: 12, status: "untested" }],
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
@@ -353,6 +453,7 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   registerCalypsoCommand(app, {
     enableDeploymentCompletionNotifications: true,
     pool,
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-abc" }),
@@ -395,6 +496,7 @@ test("registerCalypsoCommand returns deploy not configured when clear", async ()
 
   registerCalypsoCommand(app, {
     pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
     deployConfig: {},
@@ -430,6 +532,7 @@ test("registerCalypsoCommand triggers deploy and records deployment when clear a
 
   registerCalypsoCommand(app, {
     pool,
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
@@ -475,6 +578,7 @@ test("registerCalypsoCommand does not mutate DB when deploy call fails", async (
 
   registerCalypsoCommand(app, {
     pool,
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
     triggerProdDeployFn: async () => {
@@ -525,6 +629,7 @@ test("registerCalypsoCommand reports rollback when deployment state transaction 
 
   registerCalypsoCommand(app, {
     pool,
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
@@ -552,4 +657,106 @@ test("registerCalypsoCommand reports rollback when deployment state transaction 
   assert.equal(marked, false);
   assert.deepEqual(queryCalls, ["BEGIN", "ROLLBACK"]);
   assert.match(payload.text, /Transaction was rolled back/);
+});
+
+test("registerCalypsoCommand whitelist command denies non-admin, non-whitelisted user", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: false }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "whitelist <@U999>", user_id: "U123" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Only workspace admins or whitelisted users can manage deploy whitelist/);
+});
+
+test("registerCalypsoCommand whitelist command adds user for admin", async () => {
+  let commandHandler;
+  const captured = {};
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true, source: "workspace_admin" }),
+    isWorkspaceAdminFn: async () => true,
+    addUserToDeployWhitelistFn: async (_pool, targetUserId, addedBy) => {
+      captured.targetUserId = targetUserId;
+      captured.addedBy = addedBy;
+      return { added: true };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "whitelist <@U999>", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(captured.targetUserId, "U999");
+  assert.equal(captured.addedBy, "UADMIN");
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Added <@U999> to deploy whitelist/);
+});
+
+test("registerCalypsoCommand whitelist command adds user for whitelisted caller", async () => {
+  let commandHandler;
+  const captured = {};
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true, source: "deploy_whitelist" }),
+    isWorkspaceAdminFn: async () => false,
+    addUserToDeployWhitelistFn: async (_pool, targetUserId, addedBy) => {
+      captured.targetUserId = targetUserId;
+      captured.addedBy = addedBy;
+      return { added: true };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "whitelist <@U777>", user_id: "UWHITELISTED" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(captured.targetUserId, "U777");
+  assert.equal(captured.addedBy, "UWHITELISTED");
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Added <@U777> to deploy whitelist/);
 });

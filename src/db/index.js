@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Pool } = require("pg");
 
-const INITIAL_MIGRATION_PATH = path.join(__dirname, "migrations", "001_init.sql");
+const MIGRATIONS_DIRECTORY_PATH = path.join(__dirname, "migrations");
 const EPOCH_UTC_TIMESTAMP_SQL = "TIMESTAMPTZ '1970-01-01 00:00:00+00'";
 const TLS_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
 
@@ -48,8 +48,19 @@ async function verifyConnection(pool) {
 }
 
 async function runMigrations(pool) {
-  const migrationSql = fs.readFileSync(INITIAL_MIGRATION_PATH, "utf8");
-  await pool.query(migrationSql);
+  const migrationFilePaths = readMigrationFilePaths(MIGRATIONS_DIRECTORY_PATH);
+  for (const migrationFilePath of migrationFilePaths) {
+    const migrationSql = fs.readFileSync(migrationFilePath, "utf8");
+    await pool.query(migrationSql);
+  }
+}
+
+function readMigrationFilePaths(migrationsDirectoryPath) {
+  return fs
+    .readdirSync(migrationsDirectoryPath)
+    .filter((filename) => filename.endsWith(".sql"))
+    .sort()
+    .map((filename) => path.join(migrationsDirectoryPath, filename));
 }
 
 async function getLastProdDeployAt(pool) {
@@ -211,9 +222,45 @@ async function listRecentlyTestedPullRequests(pool, sinceTimestamp) {
   return result.rows;
 }
 
+async function isUserWhitelistedForDeploy(pool, slackUserId) {
+  const query = `
+    SELECT 1
+    FROM deployment_whitelist
+    WHERE slack_user_id = $1
+    LIMIT 1
+  `;
+  const result = await pool.query(query, [slackUserId]);
+  return result.rowCount > 0;
+}
+
+async function addUserToDeployWhitelist(pool, slackUserId, addedBy) {
+  const existingRecord = await pool.query(
+    `
+      SELECT slack_user_id
+      FROM deployment_whitelist
+      WHERE slack_user_id = $1
+    `,
+    [slackUserId],
+  );
+  if (existingRecord.rowCount > 0) {
+    return { added: false };
+  }
+
+  await pool.query(
+    `
+      INSERT INTO deployment_whitelist (slack_user_id, added_by, updated_at)
+      VALUES ($1, $2, NOW())
+    `,
+    [slackUserId, addedBy],
+  );
+  return { added: true };
+}
+
 module.exports = {
+  addUserToDeployWhitelist,
   createPool,
   getLastProdDeployAt,
+  isUserWhitelistedForDeploy,
   insertDeployment,
   listRecentlyTestedPullRequests,
   listBlockingPullRequests,

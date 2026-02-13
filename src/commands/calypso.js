@@ -9,7 +9,7 @@ function handleCalypsoCommand({ text, user_id }) {
 function registerCalypsoCommand(app, options = {}) {
   const calypsoCommandService = createCalypsoCommandService(options);
 
-  app.command("/calypso", async ({ command, ack, respond }) => {
+  app.command("/calypso", async ({ client, command, ack, respond }) => {
     await ack();
 
     try {
@@ -19,6 +19,7 @@ function registerCalypsoCommand(app, options = {}) {
 
       const executionResult = await calypsoCommandService.execute(parsedCommand, {
         slackUserId: command.user_id,
+        slackClient: client,
       });
 
       await respond({
@@ -30,6 +31,7 @@ function registerCalypsoCommand(app, options = {}) {
         calypsoCommandService,
         command,
         executionResult,
+        slackClient: client,
         respond,
       });
     } catch (error) {
@@ -47,6 +49,7 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
   calypsoCommandService,
   command,
   executionResult,
+  slackClient,
   respond,
 }) {
   const shouldNotifyCompletion = Boolean(executionResult.shouldNotifyDeploymentCompletion);
@@ -59,6 +62,7 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
     const completionState = await calypsoCommandService.waitForProdDeploymentCompletion(
       externalDeploymentId,
       {
+        slackClient,
         slackUserId: command.user_id,
       },
     );
