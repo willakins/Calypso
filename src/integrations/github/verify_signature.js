@@ -5,15 +5,22 @@ function verifyGithubSignature({ payloadBuffer, signatureHeader, secret }) {
     return false;
   }
 
-  const expected = `sha256=${crypto.createHmac("sha256", secret).update(payloadBuffer).digest("hex")}`;
-  const expectedBuffer = Buffer.from(expected, "utf8");
-  const actualBuffer = Buffer.from(signatureHeader, "utf8");
+  const expectedSignature = createSignature(payloadBuffer, secret);
+  const actualSignature = signatureHeader;
+
+  const expectedBuffer = Buffer.from(expectedSignature, "utf8");
+  const actualBuffer = Buffer.from(actualSignature, "utf8");
 
   if (expectedBuffer.length !== actualBuffer.length) {
     return false;
   }
 
   return crypto.timingSafeEqual(expectedBuffer, actualBuffer);
+}
+
+function createSignature(payloadBuffer, secret) {
+  const digest = crypto.createHmac("sha256", secret).update(payloadBuffer).digest("hex");
+  return `sha256=${digest}`;
 }
 
 module.exports = {

@@ -1,0 +1,65 @@
+const { DeployCommand } = require("../types/deploy_command");
+const { HelpCommand } = require("../types/help_command");
+const { StatusCommand } = require("../types/status_command");
+const { TestedCommand } = require("../types/tested_command");
+const { UnknownCommand } = require("../types/unknown_command");
+
+function createCalypsoCommandRegistry() {
+  return new CalypsoCommandRegistry({
+    commandDefinitions: [
+      new HelpCommand(),
+      new StatusCommand(),
+      new TestedCommand(),
+      new DeployCommand(),
+    ],
+    fallbackCommand: new UnknownCommand(),
+  });
+}
+
+class CalypsoCommandRegistry {
+  constructor({ commandDefinitions, fallbackCommand }) {
+    this.fallbackCommand = fallbackCommand;
+    this.commandsByName = new Map(
+      commandDefinitions.map((commandDefinition) => [
+        commandDefinition.getCommandName(),
+        commandDefinition,
+      ]),
+    );
+  }
+
+  parse({ text }) {
+    const normalizedText = (text || "").trim();
+    const commandWords = splitIntoWords(normalizedText);
+    const commandName = resolveCommandName(commandWords);
+    const commandDefinition =
+      this.commandsByName.get(commandName) || this.fallbackCommand;
+
+    return commandDefinition.parse({
+      commandWords,
+      commandText: normalizedText,
+    });
+  }
+
+  async execute(parsedCommand, runtime) {
+    const commandDefinition =
+      this.commandsByName.get(parsedCommand.commandName) || this.fallbackCommand;
+
+    return commandDefinition.execute({
+      parsedCommand,
+      runtime,
+    });
+  }
+}
+
+function splitIntoWords(text) {
+  return text.split(/\s+/).filter(Boolean);
+}
+
+function resolveCommandName(commandWords) {
+  const keyword = (commandWords[0] || "").toLowerCase();
+  return keyword === "" ? "help" : keyword;
+}
+
+module.exports = {
+  createCalypsoCommandRegistry,
+};
