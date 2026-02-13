@@ -4,13 +4,43 @@ const { Pool } = require("pg");
 
 const INITIAL_MIGRATION_PATH = path.join(__dirname, "migrations", "001_init.sql");
 const EPOCH_UTC_TIMESTAMP_SQL = "TIMESTAMPTZ '1970-01-01 00:00:00+00'";
+const TLS_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
 
 function createPool(databaseConnectionString) {
   if (!databaseConnectionString || databaseConnectionString.trim() === "") {
     throw new Error("DATABASE_URL is required");
   }
 
-  return new Pool({ connectionString: databaseConnectionString });
+  return new Pool(buildPoolConfiguration(databaseConnectionString));
+}
+
+function buildPoolConfiguration(databaseConnectionString) {
+  const poolConfiguration = {
+    connectionString: databaseConnectionString,
+  };
+
+  if (isTlsRequiredByDatabaseUrl(databaseConnectionString)) {
+    // DigitalOcean managed Postgres commonly uses sslmode=require. In local/dev
+    // environments this stays disabled unless explicitly requested in DATABASE_URL.
+    poolConfiguration.ssl = { rejectUnauthorized: false };
+  }
+
+  return poolConfiguration;
+}
+
+function isTlsRequiredByDatabaseUrl(databaseConnectionString) {
+  const sslMode = readSslModeFromDatabaseUrl(databaseConnectionString);
+  return TLS_SSL_MODES.has(sslMode);
+}
+
+function readSslModeFromDatabaseUrl(databaseConnectionString) {
+  try {
+    const parsedDatabaseUrl = new URL(databaseConnectionString);
+    return (parsedDatabaseUrl.searchParams.get("sslmode") || "").toLowerCase();
+  } catch (_error) {
+    const match = databaseConnectionString.match(/(?:\?|&)sslmode=([^&]+)/i);
+    return match ? decodeURIComponent(match[1]).toLowerCase() : "";
+  }
 }
 
 async function verifyConnection(pool) {

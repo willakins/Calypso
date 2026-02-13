@@ -9,6 +9,7 @@ const { registerGithubWebhook } = require("./integrations/github/webhook");
 async function start() {
   const runtime = await loadRuntime();
 
+  wireHealthcheckRoute(runtime);
   wireSlackCommands(runtime);
   wireGithubWebhook(runtime);
 
@@ -50,6 +51,12 @@ function wireSlackCommands(runtime) {
   registerCalypsoCommand(runtime.slackApp, {
     pool: runtime.pool,
     deployConfig: buildDeployConfig(runtime.config),
+  });
+}
+
+function wireHealthcheckRoute(runtime) {
+  runtime.httpApp.get("/healthz", (_request, response) => {
+    response.status(200).json({ ok: true });
   });
 }
 
