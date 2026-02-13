@@ -1,0 +1,27 @@
+{
+  "name": "calypso",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node src/app.js",
+    "start": "node src/app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/willakins/Calypso.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/willakins/Calypso/issues"
+  },
+  "homepage": "https://github.com/willakins/Calypso#readme",
+  "dependencies": {
+    "@slack/bolt": "^4.6.0",
+    "dotenv": "^17.3.1"
+  }
+}
