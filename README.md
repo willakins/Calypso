@@ -82,7 +82,8 @@ test/
 ## Prerequisites
 
 - Node.js 18+ (Node 20 recommended).
-- A running Postgres instance.
+- `ngrok` installed and authenticated.
+- PostgreSQL CLI tools installed (`initdb`, `pg_ctl`, `psql`) for automated local stack start.
 - A Slack app with:
   - Socket Mode enabled.
   - Slash command `/calypso`.
@@ -107,6 +108,58 @@ Optional:
 - `DO_APP_ID_PROD`
 - `DEPLOY_CHANNEL_ID` (reserved for future use)
 
+### How To Get Each Value
+
+`SLACK_BOT_TOKEN`
+
+- Slack App -> `OAuth & Permissions` -> install/reinstall app -> copy `Bot User OAuth Token` (`xoxb-...`).
+
+`SLACK_APP_TOKEN`
+
+- Slack App -> `Socket Mode` -> enable -> generate app-level token with `connections:write` scope -> copy token (`xapp-...`).
+
+`DATABASE_URL`
+
+- If using `npm run start` managed local runtime, use:
+  - `postgresql://calypso_user@127.0.0.1:5433/postgres`
+- If using your own Postgres, set your own host/port/user/db:
+  - `postgresql://<user>:<password>@<host>:<port>/<database>`
+
+`GITHUB_WEBHOOK_SECRET`
+
+- Generate a random secret, for example:
+  - `openssl rand -hex 32`
+- Use the same value in `.env` and in GitHub repo webhook settings.
+
+`GITHUB_REPO`
+
+- Set to the exact full repo name:
+  - `<owner>/<repo>` (example: `willakins/Test-repo`)
+- Must exactly match `payload.repository.full_name` from GitHub webhook events.
+
+`GITHUB_MAIN_BRANCH`
+
+- Usually `main` (or your default protected branch, like `master`).
+- Must match the base branch of merged PRs you want Calypso to track.
+
+`PORT` (optional)
+
+- Local HTTP port for the webhook server and ngrok tunnel.
+- Default is `3000`; only set this if you need a different port.
+
+`DIGITALOCEAN_TOKEN` (optional unless using `/calypso deploy prod`)
+
+- DigitalOcean -> `API` -> `Tokens/Keys` -> generate personal access token.
+- Recommended custom scopes for this app-deploy flow:
+  - `app:update` (plus required read dependencies auto-added by DO).
+
+`DO_APP_ID_PROD` (optional unless using `/calypso deploy prod`)
+
+- DigitalOcean App Platform app UUID.
+- Find it with:
+  - `doctl apps list --format ID,Spec.Name`
+- Safe rollout: set this to a staging app first.
+
 ## Setup
 
 1. Install dependencies:
@@ -116,13 +169,33 @@ npm install
 ```
 
 2. Create `.env` with required values.
-3. Start the app:
+3. Start the full local stack (temporary Postgres + ngrok + app):
+
+```bash
+npm run start
+```
+
+This command will:
+
+- Initialize a temporary Postgres cluster at `.tmp/calypso-pg` (first run only).
+- Start Postgres on port `5433`.
+- Start ngrok on `PORT` (default `3000`).
+- Start the Calypso app.
+- Print the ngrok URL to use for GitHub webhook configuration.
+
+To stop everything and remove temporary DB/runtime files:
+
+```bash
+npm run stop
+```
+
+If you already run your own Postgres and tunnel manually, start only the app:
 
 ```bash
 npm run dev
 ```
 
-On startup Calypso will:
+On app startup Calypso will:
 
 - Verify DB connectivity (`SELECT 1`).
 - Run migrations (`001_init.sql`) idempotently.
