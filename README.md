@@ -381,6 +381,17 @@ Current tests cover:
 - DigitalOcean client request/response handling.
 - Formatting behavior.
 
+### Enforce PR Test Passes Before Merge
+
+This repo includes GitHub Actions workflow `CI` (`.github/workflows/ci.yml`) that runs `npm test` on every PR to `main`.
+
+To block merges when tests fail, enable branch protection on `main`:
+
+1. GitHub repo -> `Settings` -> `Branches` -> add/edit protection rule for `main`.
+2. Enable `Require status checks to pass before merging`.
+3. Select required check: `CI / test`.
+4. Save the rule.
+
 ## Local Validation Tips
 
 - Offline-first validation is supported.
