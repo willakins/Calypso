@@ -28,6 +28,13 @@ function ensureRequiredValueExists(value, name) {
 }
 
 function buildDeploymentRequest({ token, appId }) {
+  // DigitalOcean's app deployment API uses force_build for "Force Rebuild and Deploy".
+  // There is no documented API field for "clear build cache", so we intentionally
+  // rely on the platform default cache behavior.
+  const deploymentBody = {
+    force_build: true,
+  };
+
   return {
     url: buildDeploymentEndpointUrl(appId),
     requestInit: {
@@ -36,7 +43,7 @@ function buildDeploymentRequest({ token, appId }) {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ force_build: true }),
+      body: JSON.stringify(deploymentBody),
     },
   };
 }
