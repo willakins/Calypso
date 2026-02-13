@@ -1,7 +1,9 @@
 const {
   getLastProdDeployAt,
   insertDeployment,
+  listRecentlyTestedPullRequests,
   listBlockingPullRequests,
+  markAllUntestedPullRequestsTested,
   markPullRequestTested,
   markPullRequestsDeployedSince,
 } = require("../../db");
@@ -31,7 +33,9 @@ function createDefaultDependencies() {
     formatStatusResponseFn: formatStatusResponse,
     getLastProdDeployAtFn: getLastProdDeployAt,
     insertDeploymentFn: insertDeployment,
+    listRecentlyTestedPullRequestsFn: listRecentlyTestedPullRequests,
     listBlockingPullRequestsFn: listBlockingPullRequests,
+    markAllUntestedPullRequestsTestedFn: markAllUntestedPullRequestsTested,
     markPullRequestTestedFn: markPullRequestTested,
     markPullRequestsDeployedSinceFn: markPullRequestsDeployedSince,
     triggerProdDeployFn: triggerProductionDeployment,
@@ -48,8 +52,14 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     getLastProdDeployAtFn:
       mergedOptions.getLastProdDeployAtFn || defaultDependencies.getLastProdDeployAtFn,
     insertDeploymentFn: mergedOptions.insertDeploymentFn || defaultDependencies.insertDeploymentFn,
+    listRecentlyTestedPullRequestsFn:
+      mergedOptions.listRecentlyTestedPullRequestsFn ||
+      defaultDependencies.listRecentlyTestedPullRequestsFn,
     listBlockingPullRequestsFn:
       mergedOptions.listBlockingPullRequestsFn || defaultDependencies.listBlockingPullRequestsFn,
+    markAllUntestedPullRequestsTestedFn:
+      mergedOptions.markAllUntestedPullRequestsTestedFn ||
+      defaultDependencies.markAllUntestedPullRequestsTestedFn,
     markPullRequestTestedFn:
       mergedOptions.markPullRequestTestedFn || defaultDependencies.markPullRequestTestedFn,
     markPullRequestsDeployedSinceFn:

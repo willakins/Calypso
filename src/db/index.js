@@ -185,11 +185,39 @@ async function markPullRequestsDeployedSince(pool, lastDeployAt, deployedAt) {
   return result.rowCount;
 }
 
+async function markAllUntestedPullRequestsTested(pool, testedBy) {
+  const query = `
+    UPDATE pull_requests
+    SET status = 'tested',
+        tested_at = NOW(),
+        tested_by = $1,
+        updated_at = NOW()
+    WHERE status = 'untested'
+    RETURNING id
+  `;
+  const result = await pool.query(query, [testedBy || null]);
+  return result.rowCount;
+}
+
+async function listRecentlyTestedPullRequests(pool, sinceTimestamp) {
+  const query = `
+    SELECT repo, pr_number, title, status, tested_at, tested_by
+    FROM pull_requests
+    WHERE tested_at IS NOT NULL
+      AND tested_at >= $1
+    ORDER BY tested_at DESC, pr_number DESC
+  `;
+  const result = await pool.query(query, [sinceTimestamp]);
+  return result.rows;
+}
+
 module.exports = {
   createPool,
   getLastProdDeployAt,
   insertDeployment,
+  listRecentlyTestedPullRequests,
   listBlockingPullRequests,
+  markAllUntestedPullRequestsTested,
   markPullRequestsDeployedSince,
   markPullRequestTested,
   runMigrations,

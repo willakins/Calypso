@@ -6,26 +6,36 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   parse({ commandWords }) {
-    const hasEnvironmentArgument = commandWords.length === 2;
+    const hasEnvironmentArgument = commandWords.length === 2 || commandWords.length === 3;
     const environmentName = (commandWords[1] || "").toLowerCase();
-    const isProductionDeploy = hasEnvironmentArgument && environmentName === "prod";
+    const forceWord = (commandWords[2] || "").toLowerCase();
+    const isForceDeployWord = forceWord === "force" || forceWord === "forced";
+    const hasValidForceArgument = commandWords.length === 2 || isForceDeployWord;
+    const isProductionDeploy =
+      hasEnvironmentArgument && hasValidForceArgument && environmentName === "prod";
 
     if (!isProductionDeploy) {
-      return this.buildRespondParsedCommand("Usage: `/calypso deploy prod`");
+      return this.buildRespondParsedCommand(
+        "Usage: `/calypso deploy prod` or `/calypso deploy prod force`",
+      );
     }
 
     return this.buildParsedCommand({
       action: "deploy_prod",
+      forceDeployment: isForceDeployWord,
     });
   }
 
-  async execute({ runtime }) {
+  async execute({ parsedCommand, runtime }) {
     if (!runtime.pool) {
       return this.buildExecutionResult("Deploy command unavailable: database pool is not configured.");
     }
 
     const deployGateState = await this.readDeployGateState(runtime);
-    if (deployGateState.blockingPullRequests.length > 0) {
+    const blockingPullRequestCount = deployGateState.blockingPullRequests.length;
+    const forceDeployment = Boolean(parsedCommand.forceDeployment);
+
+    if (blockingPullRequestCount > 0 && !forceDeployment) {
       return this.buildExecutionResult(
         [
           "Deploy blocked due to untested PRs:",
@@ -37,6 +47,11 @@ class DeployCommand extends BaseCalypsoCommand {
     }
 
     if (!this.hasDeployConfiguration(runtime.deployConfig)) {
+      if (forceDeployment && blockingPullRequestCount > 0) {
+        return this.buildExecutionResult(
+          `Force deploy bypassed ${blockingPullRequestCount} blocking PR(s), but deploy not configured.`,
+        );
+      }
       return this.buildExecutionResult("Deploy gate is clear, but deploy not configured.");
     }
 
@@ -48,6 +63,12 @@ class DeployCommand extends BaseCalypsoCommand {
     });
 
     const deploymentId = deploymentSummary.externalDeploymentId || "n/a";
+    if (forceDeployment && blockingPullRequestCount > 0) {
+      return this.buildExecutionResult(
+        `Force deploy triggered (id: ${deploymentId}). Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+      );
+    }
+
     return this.buildExecutionResult(
       `Deploy triggered (id: ${deploymentId}). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
     );

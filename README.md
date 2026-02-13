@@ -353,6 +353,15 @@ Rules:
 - Idempotent when already tested.
 - Returns clear message if PR not found.
 
+`/calypso tested all`
+
+- Marks all currently `untested` PRs as `tested`.
+
+`/calypso tested recent <day|week|month>`
+
+- Lists PRs tested in the selected recent timeframe.
+- Includes PR number, repo, status, tester, and tested timestamp.
+
 `/calypso deploy prod`
 
 - Blocks when untested blockers exist.
@@ -363,6 +372,11 @@ Rules:
 - If deploy fails:
   - does not write deployment row
   - does not mark PRs deployed
+
+`/calypso deploy prod force` (or `/calypso deploy prod forced`)
+
+- Bypasses blocker checks and triggers deploy anyway.
+- Still requires deploy configuration (`DIGITALOCEAN_TOKEN`, `DO_APP_ID_PROD`).
 
 ## Testing
 

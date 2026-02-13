@@ -1,7 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createPool } = require("../src/db");
+const {
+  createPool,
+  listRecentlyTestedPullRequests,
+  markAllUntestedPullRequestsTested,
+} = require("../src/db");
 
 test("createPool requires DATABASE_URL", () => {
   assert.throws(() => createPool(""), /DATABASE_URL is required/);
@@ -29,4 +33,46 @@ test("createPool keeps SSL disabled for sslmode=disable", async () => {
   const pool = createPool("postgresql://user:pass@localhost:5432/calypso?sslmode=disable");
   assert.equal(pool.options.ssl, undefined);
   await pool.end();
+});
+
+test("markAllUntestedPullRequestsTested returns updated row count", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return { rowCount: 5 };
+    },
+  };
+
+  const updatedCount = await markAllUntestedPullRequestsTested(pool, "U123");
+
+  assert.equal(updatedCount, 5);
+  assert.match(captured.sql, /WHERE status = 'untested'/);
+  assert.deepEqual(captured.params, ["U123"]);
+});
+
+test("listRecentlyTestedPullRequests returns queried rows", async () => {
+  const sinceTimestamp = new Date("2026-02-12T00:00:00.000Z");
+  const row = {
+    repo: "croft-eng/croft",
+    pr_number: 99,
+    status: "tested",
+    tested_at: new Date("2026-02-13T00:00:00.000Z"),
+    tested_by: "U123",
+  };
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return { rows: [row] };
+    },
+  };
+
+  const rows = await listRecentlyTestedPullRequests(pool, sinceTimestamp);
+
+  assert.deepEqual(rows, [row]);
+  assert.match(captured.sql, /tested_at >= \$1/);
+  assert.deepEqual(captured.params, [sinceTimestamp]);
 });

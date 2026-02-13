@@ -27,21 +27,41 @@ test("handleCalypsoCommand routes status input", () => {
 test("handleCalypsoCommand routes tested input with PR number", () => {
   const result = handleCalypsoCommand({ text: "tested 42", user_id: "U123" });
 
-  assert.equal(result.action, "tested");
+  assert.equal(result.action, "tested_single");
   assert.equal(result.prNumber, 42);
+});
+
+test("handleCalypsoCommand routes tested all input", () => {
+  const result = handleCalypsoCommand({ text: "tested all", user_id: "U123" });
+
+  assert.equal(result.action, "tested_all");
+});
+
+test("handleCalypsoCommand routes tested recent input", () => {
+  const result = handleCalypsoCommand({ text: "tested recent week", user_id: "U123" });
+
+  assert.equal(result.action, "tested_recent");
+  assert.equal(result.timeframe, "week");
 });
 
 test("handleCalypsoCommand rejects tested input without PR number", () => {
   const result = handleCalypsoCommand({ text: "tested", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /Usage: `\/calypso tested <PR_NUMBER>`/);
+  assert.match(result.responseText, /Usage:/);
 });
 
 test("handleCalypsoCommand routes deploy prod input", () => {
   const result = handleCalypsoCommand({ text: "deploy prod", user_id: "U123" });
 
   assert.equal(result.action, "deploy_prod");
+});
+
+test("handleCalypsoCommand routes deploy prod force input", () => {
+  const result = handleCalypsoCommand({ text: "deploy prod force", user_id: "U123" });
+
+  assert.equal(result.action, "deploy_prod");
+  assert.equal(result.forceDeployment, true);
 });
 
 test("handleCalypsoCommand rejects invalid deploy input", () => {
@@ -175,6 +195,71 @@ test("registerCalypsoCommand is idempotent for already tested PR", async () => {
   assert.match(payload.text, /already marked tested/);
 });
 
+test("registerCalypsoCommand marks all untested PRs as tested", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    markAllUntestedPullRequestsTestedFn: async () => 3,
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "tested all", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Marked 3 untested PR\(s\) as tested/);
+});
+
+test("registerCalypsoCommand shows recently tested PRs for tested recent", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    listRecentlyTestedPullRequestsFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 123,
+        status: "tested",
+        tested_at: "2026-02-13T20:00:00.000Z",
+        tested_by: "U123",
+        title: "Patch release fix",
+      },
+    ],
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "tested recent day", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /PRs tested in the last day/);
+  assert.match(payload.text, /#123/);
+  assert.match(payload.text, /tested by U123/);
+});
+
 test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
   let commandHandler;
 
@@ -202,6 +287,51 @@ test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Deploy blocked due to untested PRs/);
+});
+
+test("registerCalypsoCommand force deploy bypasses blockers", async () => {
+  let commandHandler;
+  const queryCalls = [];
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  const pool = {
+    async query(sql) {
+      queryCalls.push(sql);
+      return { rows: [] };
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool,
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    listBlockingPullRequestsFn: async () => [{ repo: "croft-eng/croft", pr_number: 12, status: "untested" }],
+    triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
+    insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
+    markPullRequestsDeployedSinceFn: async () => 0,
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy prod force", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Force deploy triggered/);
+  assert.match(payload.text, /Bypassed 1 blocking PR\(s\)/);
+  assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
 });
 
 test("registerCalypsoCommand returns deploy not configured when clear", async () => {

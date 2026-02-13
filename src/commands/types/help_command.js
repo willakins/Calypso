@@ -8,7 +8,10 @@ const HELP_TEXT = [
   "`/calypso help` Show this message.",
   "`/calypso status` Show deploy blockers since last prod deploy.",
   "`/calypso tested <PR_NUMBER>` Mark a PR as tested.",
+  "`/calypso tested all` Mark all untested PRs as tested.",
+  "`/calypso tested recent <day|week|month>` List recently tested PRs.",
   "`/calypso deploy prod` Attempt prod deploy after gate check.",
+  "`/calypso deploy prod force` Force deploy and bypass blockers.",
 ].join("\n");
 
 class HelpCommand extends BaseCalypsoCommand {
