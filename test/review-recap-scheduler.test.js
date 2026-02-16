@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   findMostRecentScheduledSlot,
   runReviewRecapSchedulerTick,
-} = require("../src/review_recap/scheduler");
+} = require("../src/background_jobs/review_recap_scheduler");
 
 test("findMostRecentScheduledSlot resolves monday 9am America/New_York slot", () => {
   const slot = findMostRecentScheduledSlot({

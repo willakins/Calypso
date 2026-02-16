@@ -3,8 +3,8 @@ const crypto = require("node:crypto");
 const test = require("node:test");
 
 const { registerCalypsoCommand } = require("../src/commands/calypso");
-const { createGithubWebhookHandler } = require("../src/integrations/github/webhook");
-const { runReviewRecapSchedulerTick } = require("../src/review_recap/scheduler");
+const { createGithubWebhookHandler } = require("../src/platform/code_host/providers/github/webhook");
+const { runReviewRecapSchedulerTick } = require("../src/background_jobs/review_recap_scheduler");
 const { formatReviewRecapResponse } = require("../src/util/format");
 
 const WEBHOOK_SECRET = "secret";

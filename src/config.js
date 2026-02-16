@@ -2,52 +2,134 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
-const REQUIRED_ENVIRONMENT_VARIABLES = [
-  "SLACK_BOT_TOKEN",
-  "SLACK_APP_TOKEN",
-  "DATABASE_URL",
-  "GITHUB_WEBHOOK_SECRET",
-  "GITHUB_REPO",
-  "GITHUB_MAIN_BRANCH",
-];
-const DEFAULT_GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS = 24;
-const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
-const DEFAULT_GITHUB_API_VERSION = "2022-11-28";
-const DEFAULT_GITHUB_API_PAGE_SIZE = 100;
-const DEFAULT_GITHUB_API_MAX_PAGES = 100;
-const DEFAULT_GITHUB_API_USER_AGENT = "calypso-bot";
+const COMMUNICATION_PROVIDERS = Object.freeze({
+  slack: "slack",
+  microsoftTeams: "microsoft_teams",
+});
+const CODE_HOST_PROVIDERS = Object.freeze({
+  github: "github",
+  bitbucket: "bitbucket",
+});
+const DEPLOY_PROVIDERS = Object.freeze({
+  digitalocean: "digitalocean",
+  aws: "aws",
+});
+const DEFAULT_COMMUNICATION_PROVIDER = COMMUNICATION_PROVIDERS.slack;
+const DEFAULT_CODE_HOST_PROVIDER = CODE_HOST_PROVIDERS.github;
+const DEFAULT_DEPLOY_PROVIDER = DEPLOY_PROVIDERS.digitalocean;
+const DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS = 24;
+const DEFAULT_CODE_HOST_API_BASE_URL = "https://api.github.com";
+const DEFAULT_CODE_HOST_API_VERSION = "2022-11-28";
+const DEFAULT_CODE_HOST_API_PAGE_SIZE = 100;
+const DEFAULT_CODE_HOST_API_MAX_PAGES = 100;
+const DEFAULT_CODE_HOST_API_USER_AGENT = "calypso-bot";
 
 function loadConfig() {
-  assertRequiredEnvironmentVariablesExist(REQUIRED_ENVIRONMENT_VARIABLES);
+  const communicationProvider = readProviderSelection(
+    "COMMUNICATION_PROVIDER",
+    DEFAULT_COMMUNICATION_PROVIDER,
+    Object.values(COMMUNICATION_PROVIDERS),
+  );
+  const codeHostProvider = readProviderSelection(
+    "CODE_HOST_PROVIDER",
+    DEFAULT_CODE_HOST_PROVIDER,
+    Object.values(CODE_HOST_PROVIDERS),
+  );
+  const deployProvider = readProviderSelection(
+    "DEPLOY_PROVIDER",
+    DEFAULT_DEPLOY_PROVIDER,
+    Object.values(DEPLOY_PROVIDERS),
+  );
+
+  assertRequiredEnvironmentVariablesExist(
+    buildRequiredEnvironmentVariables({ communicationProvider, codeHostProvider }),
+  );
+
+  const communicationBotToken = readCommunicationValue({
+    communicationProvider,
+    name: "COMMUNICATION_BOT_TOKEN",
+  });
+  const communicationAppToken = readCommunicationValue({
+    communicationProvider,
+    name: "COMMUNICATION_APP_TOKEN",
+  });
+  const codeHostMainBranch = readCodeHostValue({
+    codeHostProvider,
+    name: "CODE_HOST_MAIN_BRANCH",
+  });
+  const codeHostRepository = readCodeHostValue({
+    codeHostProvider,
+    name: "CODE_HOST_REPOSITORY",
+  });
+  const codeHostWebhookSecret = readCodeHostValue({
+    codeHostProvider,
+    name: "CODE_HOST_WEBHOOK_SECRET",
+  });
+  const codeHostToken = readOptionalEnvironmentValue("CODE_HOST_TOKEN");
+  const codeHostOpenPrSyncIntervalHours = readPositiveInteger(
+    "CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS",
+    DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS,
+  );
+  const deployPollIntervalSeconds = readPositiveInteger(
+    "DEPLOY_POLL_INTERVAL_SECONDS",
+    10,
+  );
+  const deployTimeoutSeconds = readPositiveInteger(
+    "DEPLOY_TIMEOUT_SECONDS",
+    1200,
+  );
+  const deployToken = readOptionalEnvironmentValue("DEPLOY_TOKEN");
+  const deployProductionAppId = readOptionalEnvironmentValue("DEPLOY_PROD_APP_ID");
 
   return {
+    communicationProvider,
+    codeHostProvider,
+    deployProvider,
     databaseUrl: readRequiredEnvironmentVariable("DATABASE_URL"),
-    doDeployPollIntervalSeconds: readPositiveInteger("DO_DEPLOY_POLL_INTERVAL_SECONDS", 10),
-    doDeployTimeoutSeconds: readPositiveInteger("DO_DEPLOY_TIMEOUT_SECONDS", 1200),
-    digitaloceanToken: readOptionalEnvironmentVariable("DIGITALOCEAN_TOKEN"),
-    doAppIdProd: readOptionalEnvironmentVariable("DO_APP_ID_PROD"),
-    githubOpenPrSyncIntervalHours: readPositiveInteger(
-      "GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS",
-      DEFAULT_GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS,
-    ),
-    githubApiBaseUrl: DEFAULT_GITHUB_API_BASE_URL,
-    githubApiVersion: DEFAULT_GITHUB_API_VERSION,
-    githubApiPageSize: DEFAULT_GITHUB_API_PAGE_SIZE,
-    githubApiMaxPages: DEFAULT_GITHUB_API_MAX_PAGES,
-    githubApiUserAgent: DEFAULT_GITHUB_API_USER_AGENT,
-    githubMainBranch: readRequiredEnvironmentVariable("GITHUB_MAIN_BRANCH"),
-    githubRepo: readRequiredEnvironmentVariable("GITHUB_REPO"),
-    githubToken: readOptionalEnvironmentVariable("GITHUB_TOKEN"),
-    githubWebhookSecret: readRequiredEnvironmentVariable("GITHUB_WEBHOOK_SECRET"),
+    deployPollIntervalSeconds,
+    deployTimeoutSeconds,
+    deployToken,
+    deployProductionAppId,
+    codeHostOpenPrSyncIntervalHours,
+    codeHostApiBaseUrl: DEFAULT_CODE_HOST_API_BASE_URL,
+    codeHostApiVersion: DEFAULT_CODE_HOST_API_VERSION,
+    codeHostApiPageSize: DEFAULT_CODE_HOST_API_PAGE_SIZE,
+    codeHostApiMaxPages: DEFAULT_CODE_HOST_API_MAX_PAGES,
+    codeHostApiUserAgent: DEFAULT_CODE_HOST_API_USER_AGENT,
+    codeHostMainBranch,
+    codeHostRepository,
+    codeHostToken,
+    codeHostWebhookSecret,
     port: readPortNumber("PORT", 3000),
-    slackBotToken: readRequiredEnvironmentVariable("SLACK_BOT_TOKEN"),
-    slackAppToken: readRequiredEnvironmentVariable("SLACK_APP_TOKEN"),
+    communicationBotToken,
+    communicationAppToken,
   };
+}
+
+function buildRequiredEnvironmentVariables({ communicationProvider, codeHostProvider }) {
+  const requiredEnvironmentVariables = ["DATABASE_URL"];
+
+  if (communicationProvider === COMMUNICATION_PROVIDERS.slack) {
+    requiredEnvironmentVariables.push(
+      "COMMUNICATION_BOT_TOKEN",
+      "COMMUNICATION_APP_TOKEN",
+    );
+  }
+
+  if (codeHostProvider === CODE_HOST_PROVIDERS.github) {
+    requiredEnvironmentVariables.push(
+      "CODE_HOST_WEBHOOK_SECRET",
+      "CODE_HOST_REPOSITORY",
+      "CODE_HOST_MAIN_BRANCH",
+    );
+  }
+
+  return requiredEnvironmentVariables;
 }
 
 function assertRequiredEnvironmentVariablesExist(requiredNames) {
   const missingEnvironmentVariables = requiredNames.filter(
-    (name) => readOptionalEnvironmentVariable(name) === "",
+    (name) => readOptionalEnvironmentValue(name) === "",
   );
 
   if (missingEnvironmentVariables.length > 0) {
@@ -58,20 +140,48 @@ function assertRequiredEnvironmentVariablesExist(requiredNames) {
 }
 
 function readRequiredEnvironmentVariable(name) {
-  const value = readOptionalEnvironmentVariable(name);
+  const value = readOptionalEnvironmentValue(name);
   if (value === "") {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value;
 }
 
-function readOptionalEnvironmentVariable(name) {
+function readOptionalEnvironmentValue(name) {
   const value = process.env[name];
   return value ? value.trim() : "";
 }
 
+function readProviderSelection(name, fallback, supportedValues) {
+  const rawValue = readOptionalEnvironmentValue(name);
+  const selectedValue = rawValue === "" ? fallback : rawValue.toLowerCase();
+  if (supportedValues.includes(selectedValue)) {
+    return selectedValue;
+  }
+
+  throw new Error(
+    `${name} must be one of: ${supportedValues.join(", ")}`,
+  );
+}
+
+function readCommunicationValue({ communicationProvider, name }) {
+  if (communicationProvider === COMMUNICATION_PROVIDERS.slack) {
+    return readRequiredEnvironmentVariable(name);
+  }
+
+  return readOptionalEnvironmentValue(name);
+}
+
+function readCodeHostValue({ codeHostProvider, name }) {
+  if (codeHostProvider === CODE_HOST_PROVIDERS.github) {
+    return readRequiredEnvironmentVariable(name);
+  }
+
+  return readOptionalEnvironmentValue(name);
+}
+
 function readPortNumber(name, fallbackPort) {
-  const value = readOptionalEnvironmentVariable(name);
+  const value = readOptionalEnvironmentValue(name);
   if (value === "") {
     return fallbackPort;
   }
@@ -86,7 +196,7 @@ function readPortNumber(name, fallbackPort) {
 }
 
 function readPositiveInteger(name, fallbackValue) {
-  const value = readOptionalEnvironmentVariable(name);
+  const value = readOptionalEnvironmentValue(name);
   if (value === "") {
     return fallbackValue;
   }
@@ -100,11 +210,17 @@ function readPositiveInteger(name, fallbackValue) {
 }
 
 module.exports = {
-  DEFAULT_GITHUB_API_BASE_URL,
-  DEFAULT_GITHUB_API_MAX_PAGES,
-  DEFAULT_GITHUB_API_PAGE_SIZE,
-  DEFAULT_GITHUB_API_USER_AGENT,
-  DEFAULT_GITHUB_API_VERSION,
-  DEFAULT_GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS,
+  CODE_HOST_PROVIDERS,
+  COMMUNICATION_PROVIDERS,
+  DEFAULT_CODE_HOST_PROVIDER,
+  DEFAULT_COMMUNICATION_PROVIDER,
+  DEFAULT_DEPLOY_PROVIDER,
+  DEPLOY_PROVIDERS,
+  DEFAULT_CODE_HOST_API_BASE_URL,
+  DEFAULT_CODE_HOST_API_MAX_PAGES,
+  DEFAULT_CODE_HOST_API_PAGE_SIZE,
+  DEFAULT_CODE_HOST_API_USER_AGENT,
+  DEFAULT_CODE_HOST_API_VERSION,
+  DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS,
   loadConfig,
 };

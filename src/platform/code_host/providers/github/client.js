@@ -46,7 +46,7 @@ function createGithubClient(options) {
 
 function normalizeGithubClientSettings(options) {
   const settings = options || {};
-  assertNonEmptyString(settings.token, "GITHUB_TOKEN");
+  assertNonEmptyString(settings.token, "CODE_HOST_TOKEN");
   assertNonEmptyString(settings.apiBaseUrl, "github api base url");
   assertNonEmptyString(settings.apiVersion, "github api version");
   assertNonEmptyString(settings.apiUserAgent, "github api user agent");

@@ -6,7 +6,7 @@ const {
   OpenPullRequestSyncer,
   REVIEW_SYNC_TASK_NAME,
   UNTESTED_SYNC_TASK_NAME,
-} = require("../src/open_pr_sync/syncer");
+} = require("../src/background_jobs/syncer");
 
 test("OpenPullRequestSyncer runs separated review and untested tasks", async () => {
   const calls = [];
@@ -67,7 +67,7 @@ test("createDefaultOpenPullRequestSyncer accepts additional tasks", async () => 
   });
 
   await syncer.sync({
-    githubClient: {
+    codeHostClient: {
       async listOpenPullRequests() {
         return [];
       },
@@ -81,7 +81,7 @@ test("createDefaultOpenPullRequestSyncer accepts additional tasks", async () => 
     mainBranch: "main",
     nowFn: () => new Date("2026-02-16T12:00:00.000Z"),
     pool: {},
-    repositoryFullName: "croft-eng/croft",
+    repository: "croft-eng/croft",
   });
 
   assert.equal(customTaskRan, true);

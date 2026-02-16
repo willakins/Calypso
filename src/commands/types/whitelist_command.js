@@ -40,7 +40,7 @@ class WhitelistCommand extends BaseCalypsoCommand {
     const result = await runtime.addUserToDeployWhitelistFn(
       runtime.pool,
       parsedCommand.targetUserId,
-      runtime.slackUserId,
+      runtime.userId,
     );
 
     if (!result.added) {

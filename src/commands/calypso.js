@@ -16,22 +16,23 @@ function registerCalypsoCommand(app, options = {}) {
       const parsedCommand = parseCalypsoCommand({
         text: command.text,
       });
+      const userId = resolveCommandUserId(command);
 
       const executionResult = await calypsoCommandService.execute(parsedCommand, {
-        slackUserId: command.user_id,
-        slackClient: client,
+        userId,
+        communicationClient: client,
       });
 
       await respond({
-        response_type: normalizeSlackResponseType(executionResult.responseType),
+        response_type: normalizeResponseType(executionResult.responseType),
         text: executionResult.responseText,
       });
 
       await sendDeploymentCompletionFollowUpIfNeeded({
         calypsoCommandService,
-        command,
+        userId,
         executionResult,
-        slackClient: client,
+        communicationClient: client,
         respond,
       });
     } catch (error) {
@@ -47,9 +48,9 @@ function registerCalypsoCommand(app, options = {}) {
 
 async function sendDeploymentCompletionFollowUpIfNeeded({
   calypsoCommandService,
-  command,
+  communicationClient,
   executionResult,
-  slackClient,
+  userId,
   respond,
 }) {
   const shouldNotifyCompletion = Boolean(executionResult.shouldNotifyDeploymentCompletion);
@@ -62,29 +63,37 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
     const completionState = await calypsoCommandService.waitForProdDeploymentCompletion(
       externalDeploymentId,
       {
-        slackClient,
-        slackUserId: command.user_id,
+        communicationClient,
+        userId,
       },
     );
 
     await respond({
-      response_type: normalizeSlackResponseType(
+      response_type: normalizeResponseType(
         executionResult.followUpResponseType || executionResult.responseType,
       ),
-      text: `DigitalOcean deployment ${externalDeploymentId} finished successfully with phase ${completionState.phase}.`,
+      text: `Deployment ${externalDeploymentId} finished successfully with phase ${completionState.phase}.`,
     });
   } catch (error) {
     await respond({
-      response_type: normalizeSlackResponseType(
+      response_type: normalizeResponseType(
         executionResult.followUpResponseType || executionResult.responseType,
       ),
-      text: `DigitalOcean deployment ${externalDeploymentId} failed after trigger: ${error.message}`,
+      text: `Deployment ${externalDeploymentId} failed after trigger: ${error.message}`,
     });
   }
 }
 
-function normalizeSlackResponseType(responseType) {
+function normalizeResponseType(responseType) {
   return responseType === "in_channel" ? "in_channel" : "ephemeral";
+}
+
+function resolveCommandUserId(command) {
+  if (!command) {
+    return null;
+  }
+
+  return command.userId || command.user_id || null;
 }
 
 module.exports = {

@@ -22,7 +22,6 @@ const {
   setReviewRecapSchedule,
   setReviewRecapTimeZone,
 } = require("../../db");
-const { createDigitalOceanClient } = require("../../integrations/digitalocean/client");
 const { formatStatusResponse, isValidTimeZone } = require("../../util/format");
 const { createCalypsoCommandRegistry } = require("../registry/calypso_command_registry");
 
@@ -87,6 +86,7 @@ function createDefaultDependencies() {
     markPullRequestsDeployedSinceFn: markPullRequestsDeployedSince,
     readTimeFormatPreferenceFn: readTimeFormatPreference,
     readTimeZonePreferenceFn: readTimeZonePreference,
+    resolveUserDisplayNameFn: resolveUserDisplayNameFromCommunicationClient,
     resolveDeployAccessFn: resolveDeployAccess,
     runOpenPullRequestSyncNowFn: null,
     setConfiguredTimeFormatFn: setConfiguredTimeFormat,
@@ -95,13 +95,16 @@ function createDefaultDependencies() {
     setReviewRecapRecencyFn: setReviewRecapRecency,
     setReviewRecapScheduleFn: setReviewRecapSchedule,
     setReviewRecapTimeZoneFn: setReviewRecapTimeZone,
-    triggerProdDeployFn: triggerProductionDeployment,
-    waitForProdDeployCompletionFn: waitForProductionDeploymentCompletion,
+    triggerProdDeployFn: triggerProductionDeploymentUnavailable,
+    waitForProdDeployCompletionFn: waitForProductionDeploymentCompletionUnavailable,
   };
 }
 
 function buildRuntimeContext({ serviceOptions, commandContext, defaultDependencies }) {
   const mergedOptions = { ...serviceOptions, ...commandContext };
+  const userId = mergedOptions.userId || mergedOptions.slackUserId;
+  const communicationClient = mergedOptions.communicationClient || mergedOptions.slackClient || null;
+  const deployPlatform = mergedOptions.deployPlatform || null;
 
   return {
     addUserToDeployWhitelistFn:
@@ -145,6 +148,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.readTimeFormatPreferenceFn || defaultDependencies.readTimeFormatPreferenceFn,
     readTimeZonePreferenceFn:
       mergedOptions.readTimeZonePreferenceFn || defaultDependencies.readTimeZonePreferenceFn,
+    resolveUserDisplayNameFn:
+      mergedOptions.resolveUserDisplayNameFn || defaultDependencies.resolveUserDisplayNameFn,
     resolveDeployAccessFn:
       mergedOptions.resolveDeployAccessFn || defaultDependencies.resolveDeployAccessFn,
     runOpenPullRequestSyncNowFn:
@@ -161,36 +166,51 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.setReviewRecapScheduleFn || defaultDependencies.setReviewRecapScheduleFn,
     setReviewRecapTimeZoneFn:
       mergedOptions.setReviewRecapTimeZoneFn || defaultDependencies.setReviewRecapTimeZoneFn,
-    slackClient: mergedOptions.slackClient || null,
-    slackUserId: mergedOptions.slackUserId,
+    communicationClient,
+    userId,
+    // Backward-compatible aliases while commands migrate to neutral naming.
+    slackClient: communicationClient,
+    slackUserId: userId,
     enableDeploymentCompletionNotifications: Boolean(
       mergedOptions.enableDeploymentCompletionNotifications,
     ),
-    triggerProdDeployFn: mergedOptions.triggerProdDeployFn || defaultDependencies.triggerProdDeployFn,
+    triggerProdDeployFn:
+      mergedOptions.triggerProdDeployFn ||
+      deriveDeployTriggerFunction(deployPlatform) ||
+      defaultDependencies.triggerProdDeployFn,
     waitForProdDeployCompletionFn:
-      mergedOptions.waitForProdDeployCompletionFn || defaultDependencies.waitForProdDeployCompletionFn,
+      mergedOptions.waitForProdDeployCompletionFn ||
+      deriveDeployCompletionWaitFunction(deployPlatform) ||
+      defaultDependencies.waitForProdDeployCompletionFn,
   };
 }
 
-async function triggerProductionDeployment(deployConfig) {
-  const digitalOceanClient = createDigitalOceanClient({ token: deployConfig.digitaloceanToken });
-  return digitalOceanClient.triggerAppDeployment(deployConfig.doAppIdProd);
+function deriveDeployTriggerFunction(deployPlatform) {
+  if (!deployPlatform || typeof deployPlatform.triggerProductionDeployment !== "function") {
+    return null;
+  }
+
+  return deployPlatform.triggerProductionDeployment.bind(deployPlatform);
 }
 
-async function waitForProductionDeploymentCompletion(deployConfig, externalDeployId) {
-  const digitalOceanClient = createDigitalOceanClient({ token: deployConfig.digitaloceanToken });
-  return digitalOceanClient.waitForAppDeploymentCompletion(
-    deployConfig.doAppIdProd,
-    externalDeployId,
-    {
-      pollIntervalMs: deployConfig.doDeploymentPollIntervalMs,
-      timeoutMs: deployConfig.doDeploymentTimeoutMs,
-    },
-  );
+function deriveDeployCompletionWaitFunction(deployPlatform) {
+  if (!deployPlatform || typeof deployPlatform.waitForProductionDeploymentCompletion !== "function") {
+    return null;
+  }
+
+  return deployPlatform.waitForProductionDeploymentCompletion.bind(deployPlatform);
+}
+
+async function triggerProductionDeploymentUnavailable() {
+  throw new Error("Deploy provider is not configured.");
+}
+
+async function waitForProductionDeploymentCompletionUnavailable() {
+  throw new Error("Deploy provider is not configured.");
 }
 
 async function resolveDeployAccess(runtimeContext) {
-  const callerUserId = runtimeContext.slackUserId;
+  const callerUserId = runtimeContext.userId;
   if (!callerUserId) {
     return {
       canDeploy: false,
@@ -199,7 +219,7 @@ async function resolveDeployAccess(runtimeContext) {
   }
 
   const callerIsWorkspaceAdmin = await runtimeContext.isWorkspaceAdminFn(
-    runtimeContext.slackClient,
+    runtimeContext.communicationClient,
     callerUserId,
   );
   if (callerIsWorkspaceAdmin) {
@@ -241,7 +261,7 @@ async function readTimeFormatPreference(runtimeContext) {
   try {
     return await runtimeContext.getConfiguredTimeFormatFn(
       runtimeContext.pool,
-      runtimeContext.slackUserId,
+      runtimeContext.userId,
     );
   } catch (_error) {
     return DEFAULT_TIME_FORMAT;
@@ -256,20 +276,35 @@ async function readTimeZonePreference(runtimeContext) {
   try {
     return await runtimeContext.getConfiguredTimeZoneFn(
       runtimeContext.pool,
-      runtimeContext.slackUserId,
+      runtimeContext.userId,
     );
   } catch (_error) {
     return DEFAULT_TIME_ZONE;
   }
 }
 
-async function isWorkspaceAdmin(slackClient, slackUserId) {
-  if (!slackClient || !slackUserId) {
+async function resolveUserDisplayNameFromCommunicationClient(communicationClient, userId) {
+  if (!communicationClient || !userId || !communicationClient.users || !communicationClient.users.info) {
+    return null;
+  }
+
+  try {
+    const response = await communicationClient.users.info({ user: userId });
+    const user = response.user || {};
+    const profile = user.profile || {};
+    return profile.display_name || profile.real_name || user.name || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function isWorkspaceAdmin(communicationClient, userId) {
+  if (!communicationClient || !userId || !communicationClient.users || !communicationClient.users.info) {
     return false;
   }
 
   try {
-    const response = await slackClient.users.info({ user: slackUserId });
+    const response = await communicationClient.users.info({ user: userId });
     const user = response.user || {};
     return Boolean(user.is_admin || user.is_owner || user.is_primary_owner);
   } catch (_error) {

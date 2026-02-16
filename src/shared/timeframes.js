@@ -13,6 +13,11 @@ const TIMEFRAME_DEFINITIONS = Object.freeze({
   }),
 });
 
+const REVIEW_RECENCY_UNITS = Object.freeze({
+  day: "d",
+  week: "w",
+});
+
 function isValidTimeframe(timeframe) {
   const normalizedTimeframe = String(timeframe || "").toLowerCase().trim();
   return Boolean(TIMEFRAME_DEFINITIONS[normalizedTimeframe]);
@@ -33,8 +38,26 @@ function timeframeSince(timeframe, now = Date.now()) {
   return new Date(nowTimestamp - timeframeDefinition.windowMs);
 }
 
+function formatReviewRecencyLabel(recencyValue, recencyUnit) {
+  const normalizedRecencyValue = Number(recencyValue);
+  if (!Number.isInteger(normalizedRecencyValue) || normalizedRecencyValue <= 0) {
+    return "week";
+  }
+
+  const normalizedRecencyUnit = String(recencyUnit || "").toLowerCase().trim();
+  const unitLabelMap = {
+    [REVIEW_RECENCY_UNITS.day]: normalizedRecencyValue === 1 ? "day" : "days",
+    [REVIEW_RECENCY_UNITS.week]: normalizedRecencyValue === 1 ? "week" : "weeks",
+  };
+  const unitLabel = unitLabelMap[normalizedRecencyUnit] ||
+    (normalizedRecencyValue === 1 ? "week" : "weeks");
+  return normalizedRecencyValue === 1 ? unitLabel : `${normalizedRecencyValue} ${unitLabel}`;
+}
+
 module.exports = {
   TIMEFRAME_DEFINITIONS,
+  REVIEW_RECENCY_UNITS,
+  formatReviewRecencyLabel,
   isValidTimeframe,
   timeframeSince,
 };

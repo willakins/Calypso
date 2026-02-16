@@ -1,9 +1,9 @@
 function createDigitalOceanClient({ token }) {
-  ensureRequiredValueExists(token, "DIGITALOCEAN_TOKEN");
+  ensureRequiredValueExists(token, "DEPLOY_TOKEN");
 
   return {
     async triggerAppDeployment(appId) {
-      ensureRequiredValueExists(appId, "DO_APP_ID_PROD");
+      ensureRequiredValueExists(appId, "DEPLOY_PROD_APP_ID");
 
       const deploymentRequest = buildDeploymentRequest({ token, appId });
       const deploymentResponse = await fetch(
@@ -20,7 +20,7 @@ function createDigitalOceanClient({ token }) {
     },
 
     async waitForAppDeploymentCompletion(appId, deploymentId, options = {}) {
-      ensureRequiredValueExists(appId, "DO_APP_ID_PROD");
+      ensureRequiredValueExists(appId, "DEPLOY_PROD_APP_ID");
       ensureRequiredValueExists(deploymentId, "external deployment id");
 
       const pollIntervalMs = readPositiveInteger(options.pollIntervalMs, 10000);

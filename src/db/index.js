@@ -481,75 +481,75 @@ async function getReviewRecapConfig(pool) {
 
 async function setReviewRecapChannel(pool, targetChannelId, updatedBy) {
   const normalizedChannelId = normalizeReviewRecapChannelId(targetChannelId);
-  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  const normalizedUserId = normalizeUserId(updatedBy);
   if (!normalizedChannelId) {
     throw new Error(`Unsupported review recap channel id: ${targetChannelId}`);
   }
-  if (!normalizedSlackUserId) {
-    throw new Error("slack user id is required");
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
   }
 
   return upsertReviewRecapConfig(pool, {
     targetChannelId: normalizedChannelId,
-    updatedBy: normalizedSlackUserId,
+    updatedBy: normalizedUserId,
   });
 }
 
 async function setReviewRecapRecency(pool, recencyValue, recencyUnit, updatedBy) {
   const normalizedRecencyValue = normalizePositiveInteger(recencyValue);
   const normalizedRecencyUnit = normalizeReviewRecencyUnit(recencyUnit);
-  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  const normalizedUserId = normalizeUserId(updatedBy);
   if (!normalizedRecencyValue) {
     throw new Error(`Unsupported review recap recency value: ${recencyValue}`);
   }
   if (!normalizedRecencyUnit) {
     throw new Error(`Unsupported review recap recency unit: ${recencyUnit}`);
   }
-  if (!normalizedSlackUserId) {
-    throw new Error("slack user id is required");
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
   }
 
   return upsertReviewRecapConfig(pool, {
     recencyValue: normalizedRecencyValue,
     recencyUnit: normalizedRecencyUnit,
-    updatedBy: normalizedSlackUserId,
+    updatedBy: normalizedUserId,
   });
 }
 
 async function setReviewRecapSchedule(pool, scheduleWeekday, scheduleTime, updatedBy) {
   const normalizedScheduleWeekday = normalizeReviewScheduleWeekday(scheduleWeekday);
   const normalizedScheduleTime = normalizeReviewScheduleTime(scheduleTime);
-  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  const normalizedUserId = normalizeUserId(updatedBy);
   if (!normalizedScheduleWeekday) {
     throw new Error(`Unsupported review recap schedule weekday: ${scheduleWeekday}`);
   }
   if (!normalizedScheduleTime) {
     throw new Error(`Unsupported review recap schedule time: ${scheduleTime}`);
   }
-  if (!normalizedSlackUserId) {
-    throw new Error("slack user id is required");
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
   }
 
   return upsertReviewRecapConfig(pool, {
     scheduleWeekday: normalizedScheduleWeekday,
     scheduleTime: normalizedScheduleTime,
-    updatedBy: normalizedSlackUserId,
+    updatedBy: normalizedUserId,
   });
 }
 
 async function setReviewRecapTimeZone(pool, timeZone, updatedBy) {
   const normalizedTimeZone = normalizeTimeZone(timeZone);
-  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  const normalizedUserId = normalizeUserId(updatedBy);
   if (!normalizedTimeZone) {
     throw new Error(`Unsupported review recap timezone: ${timeZone}`);
   }
-  if (!normalizedSlackUserId) {
-    throw new Error("slack user id is required");
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
   }
 
   return upsertReviewRecapConfig(pool, {
     timeZone: normalizedTimeZone,
-    updatedBy: normalizedSlackUserId,
+    updatedBy: normalizedUserId,
   });
 }
 
@@ -627,25 +627,25 @@ async function upsertReviewRecapConfig(pool, updates) {
   return result.rows[0];
 }
 
-async function isUserWhitelistedForDeploy(pool, slackUserId) {
+async function isUserWhitelistedForDeploy(pool, userId) {
   const query = `
     SELECT 1
     FROM deployment_whitelist
-    WHERE slack_user_id = $1
+    WHERE user_id = $1
     LIMIT 1
   `;
-  const result = await pool.query(query, [slackUserId]);
+  const result = await pool.query(query, [userId]);
   return result.rowCount > 0;
 }
 
-async function addUserToDeployWhitelist(pool, slackUserId, addedBy) {
+async function addUserToDeployWhitelist(pool, userId, addedBy) {
   const existingRecord = await pool.query(
     `
-      SELECT slack_user_id
+      SELECT user_id
       FROM deployment_whitelist
-      WHERE slack_user_id = $1
+      WHERE user_id = $1
     `,
-    [slackUserId],
+    [userId],
   );
   if (existingRecord.rowCount > 0) {
     return { added: false };
@@ -653,17 +653,17 @@ async function addUserToDeployWhitelist(pool, slackUserId, addedBy) {
 
   await pool.query(
     `
-      INSERT INTO deployment_whitelist (slack_user_id, added_by, updated_at)
+      INSERT INTO deployment_whitelist (user_id, added_by, updated_at)
       VALUES ($1, $2, NOW())
     `,
-    [slackUserId, addedBy],
+    [userId, addedBy],
   );
   return { added: true };
 }
 
-async function getConfiguredTimeFormat(pool, slackUserId) {
-  const normalizedSlackUserId = normalizeSlackUserId(slackUserId);
-  if (!normalizedSlackUserId) {
+async function getConfiguredTimeFormat(pool, userId) {
+  const normalizedUserId = normalizeUserId(userId);
+  if (!normalizedUserId) {
     return DEFAULT_TIME_FORMAT;
   }
 
@@ -671,19 +671,19 @@ async function getConfiguredTimeFormat(pool, slackUserId) {
     `
       SELECT time_format
       FROM runtime_user_config
-      WHERE slack_user_id = $1
+      WHERE user_id = $1
       LIMIT 1
     `,
-    [normalizedSlackUserId],
+    [normalizedUserId],
   );
 
   const configuredValue = result.rows[0]?.time_format || DEFAULT_TIME_FORMAT;
   return normalizeTimeFormat(configuredValue) || DEFAULT_TIME_FORMAT;
 }
 
-async function getConfiguredTimeZone(pool, slackUserId) {
-  const normalizedSlackUserId = normalizeSlackUserId(slackUserId);
-  if (!normalizedSlackUserId) {
+async function getConfiguredTimeZone(pool, userId) {
+  const normalizedUserId = normalizeUserId(userId);
+  if (!normalizedUserId) {
     return DEFAULT_TIME_ZONE;
   }
 
@@ -691,10 +691,10 @@ async function getConfiguredTimeZone(pool, slackUserId) {
     `
       SELECT timezone
       FROM runtime_user_config
-      WHERE slack_user_id = $1
+      WHERE user_id = $1
       LIMIT 1
     `,
-    [normalizedSlackUserId],
+    [normalizedUserId],
   );
 
   return normalizeTimeZone(result.rows[0]?.timezone) || DEFAULT_TIME_ZONE;
@@ -702,26 +702,26 @@ async function getConfiguredTimeZone(pool, slackUserId) {
 
 async function setConfiguredTimeFormat(pool, timeFormat, updatedBy) {
   const normalizedTimeFormat = normalizeTimeFormat(timeFormat);
-  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  const normalizedUserId = normalizeUserId(updatedBy);
   if (!normalizedTimeFormat) {
     throw new Error(`Unsupported time format: ${timeFormat}`);
   }
-  if (!normalizedSlackUserId) {
-    throw new Error("slack user id is required");
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
   }
 
   const result = await pool.query(
     `
-      INSERT INTO runtime_user_config (slack_user_id, time_format, updated_by, updated_at)
+      INSERT INTO runtime_user_config (user_id, time_format, updated_by, updated_at)
       VALUES ($2, $1, $2, NOW())
-      ON CONFLICT (slack_user_id)
+      ON CONFLICT (user_id)
       DO UPDATE SET
         time_format = EXCLUDED.time_format,
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
       RETURNING time_format, updated_by, updated_at
     `,
-    [normalizedTimeFormat, normalizedSlackUserId],
+    [normalizedTimeFormat, normalizedUserId],
   );
 
   return result.rows[0];
@@ -729,26 +729,26 @@ async function setConfiguredTimeFormat(pool, timeFormat, updatedBy) {
 
 async function setConfiguredTimeZone(pool, timeZone, updatedBy) {
   const normalizedTimeZone = normalizeTimeZone(timeZone);
-  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  const normalizedUserId = normalizeUserId(updatedBy);
   if (!normalizedTimeZone) {
     throw new Error(`Unsupported timezone: ${timeZone}`);
   }
-  if (!normalizedSlackUserId) {
-    throw new Error("slack user id is required");
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
   }
 
   const result = await pool.query(
     `
-      INSERT INTO runtime_user_config (slack_user_id, timezone, updated_by, updated_at)
+      INSERT INTO runtime_user_config (user_id, timezone, updated_by, updated_at)
       VALUES ($2, $1, $2, NOW())
-      ON CONFLICT (slack_user_id)
+      ON CONFLICT (user_id)
       DO UPDATE SET
         timezone = EXCLUDED.timezone,
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
       RETURNING timezone, updated_by, updated_at
     `,
-    [normalizedTimeZone, normalizedSlackUserId],
+    [normalizedTimeZone, normalizedUserId],
   );
 
   return result.rows[0];
@@ -764,9 +764,9 @@ function normalizeTimeZone(timeZone) {
   return normalizedTimeZone === "" ? null : normalizedTimeZone;
 }
 
-function normalizeSlackUserId(slackUserId) {
-  const normalizedSlackUserId = String(slackUserId || "").trim();
-  return normalizedSlackUserId === "" ? null : normalizedSlackUserId;
+function normalizeUserId(userId) {
+  const normalizedUserId = String(userId || "").trim();
+  return normalizedUserId === "" ? null : normalizedUserId;
 }
 
 function normalizeReviewRecencyUnit(recencyUnit) {

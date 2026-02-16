@@ -126,7 +126,9 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   hasDeployConfiguration(deployConfig) {
-    return Boolean(deployConfig.digitaloceanToken) && Boolean(deployConfig.doAppIdProd);
+    const deployToken = deployConfig.deployToken || deployConfig.digitaloceanToken;
+    const deployProductionAppId = deployConfig.deployProductionAppId || deployConfig.doAppIdProd;
+    return Boolean(deployToken) && Boolean(deployProductionAppId);
   }
 
   async recordDeploymentAndMarkPullRequests({
@@ -137,7 +139,7 @@ class DeployCommand extends BaseCalypsoCommand {
     return this.withDatabaseTransaction(runtime.pool, async () => {
       const deploymentRecord = await runtime.insertDeploymentFn(runtime.pool, {
         environment: "prod",
-        provider: "digitalocean",
+        provider: runtime.deployConfig.deployProvider || "digitalocean",
         externalDeployId: externalDeploymentId,
       });
 

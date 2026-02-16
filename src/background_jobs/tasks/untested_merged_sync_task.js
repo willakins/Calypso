@@ -10,14 +10,16 @@ function createUntestedMergedSyncTask(options = {}) {
   return {
     name: UNTESTED_SYNC_TASK_NAME,
     async run(syncContext) {
-      const { githubClient, mainBranch, pool, repositoryFullName } = syncContext;
-      if (typeof githubClient.listClosedPullRequests !== "function") {
+      const { codeHostClient, repository } = syncContext;
+      const { mainBranch, pool } = syncContext;
+      if (typeof codeHostClient.listClosedPullRequests !== "function") {
         return buildEmptyUntestedSyncResult();
       }
 
       const lastProdDeployAt = await getLastProdDeployAtFn(pool);
-      const closedPullRequests = await githubClient.listClosedPullRequests({
-        repositoryFullName,
+      const closedPullRequests = await codeHostClient.listClosedPullRequests({
+        repository,
+        repositoryFullName: repository,
         baseBranch: mainBranch,
       });
 
@@ -29,7 +31,7 @@ function createUntestedMergedSyncTask(options = {}) {
       for (const pullRequest of mergedPullRequests) {
         const mergedPullRequestRecord = mapPullRequestToMergedUntestedRecord({
           pullRequest,
-          repositoryFullName,
+          repository,
         });
         if (!mergedPullRequestRecord) {
           continue;
@@ -63,7 +65,7 @@ function shouldSyncMergedPullRequest({ lastProdDeployAt, mainBranch, pullRequest
   return mergedTimestamp > lastProdDeployTimestamp;
 }
 
-function mapPullRequestToMergedUntestedRecord({ pullRequest, repositoryFullName }) {
+function mapPullRequestToMergedUntestedRecord({ pullRequest, repository }) {
   const prNumber = Number(pullRequest?.number);
   if (!Number.isInteger(prNumber) || prNumber <= 0) {
     return null;
@@ -74,7 +76,7 @@ function mapPullRequestToMergedUntestedRecord({ pullRequest, repositoryFullName 
   }
 
   return {
-    repo: repositoryFullName,
+    repo: repository,
     prNumber,
     title: pullRequest?.title || null,
     url: pullRequest?.html_url || null,

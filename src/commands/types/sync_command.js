@@ -33,7 +33,7 @@ class SyncCommand extends BaseCalypsoCommand {
   async execute({ runtime }) {
     if (typeof runtime.runOpenPullRequestSyncNowFn !== "function") {
       return this.buildExecutionResult(
-        "Sync unavailable: configure `GITHUB_TOKEN` and restart Calypso.",
+        "Sync unavailable: configure `CODE_HOST_TOKEN` and restart Calypso.",
       );
     }
 

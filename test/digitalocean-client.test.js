@@ -1,17 +1,17 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createDigitalOceanClient } = require("../src/integrations/digitalocean/client");
+const { createDigitalOceanClient } = require("../src/platform/deploy/providers/digitalocean/client");
 
 test("createDigitalOceanClient requires token", () => {
-  assert.throws(() => createDigitalOceanClient({ token: "" }), /DIGITALOCEAN_TOKEN is required/);
+  assert.throws(() => createDigitalOceanClient({ token: "" }), /DEPLOY_TOKEN is required/);
 });
 
 test("triggerAppDeployment requires app id", async () => {
   const client = createDigitalOceanClient({ token: "token" });
   await assert.rejects(
     () => client.triggerAppDeployment(""),
-    /DO_APP_ID_PROD is required/,
+    /DEPLOY_PROD_APP_ID is required/,
   );
 });
 

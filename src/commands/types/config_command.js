@@ -102,7 +102,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       await runtime.setConfiguredTimeFormatFn(
         runtime.pool,
         parsedCommand.timeFormat,
-        runtime.slackUserId,
+        runtime.userId,
       );
 
       return this.buildExecutionResult(
@@ -114,7 +114,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       await runtime.setReviewRecapChannelFn(
         runtime.pool,
         parsedCommand.targetChannelId,
-        runtime.slackUserId,
+        runtime.userId,
       );
 
       return this.buildExecutionResult(
@@ -127,7 +127,7 @@ class ConfigCommand extends BaseCalypsoCommand {
         runtime.pool,
         parsedCommand.recencyValue,
         parsedCommand.recencyUnit,
-        runtime.slackUserId,
+        runtime.userId,
       );
 
       return this.buildExecutionResult(
@@ -140,7 +140,7 @@ class ConfigCommand extends BaseCalypsoCommand {
         runtime.pool,
         parsedCommand.scheduleWeekday,
         parsedCommand.scheduleTime,
-        runtime.slackUserId,
+        runtime.userId,
       );
 
       return this.buildExecutionResult(
@@ -161,7 +161,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       await runtime.setReviewRecapTimeZoneFn(
         runtime.pool,
         parsedCommand.timeZone,
-        runtime.slackUserId,
+        runtime.userId,
       );
 
       return this.buildExecutionResult(
@@ -169,7 +169,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
-    await runtime.setConfiguredTimeZoneFn(runtime.pool, parsedCommand.timeZone, runtime.slackUserId);
+    await runtime.setConfiguredTimeZoneFn(runtime.pool, parsedCommand.timeZone, runtime.userId);
 
     return this.buildExecutionResult(
       `Timezone \`${parsedCommand.timeZone}\` is valid. Updated your timezone setting.`,

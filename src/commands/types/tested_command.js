@@ -1,5 +1,5 @@
 const { BaseCalypsoCommand } = require("./base_calypso_command");
-const { TIMEFRAME_DEFINITIONS, isValidTimeframe, timeframeSince } = require("../shared/timeframes");
+const { TIMEFRAME_DEFINITIONS, isValidTimeframe, timeframeSince } = require("../../shared/timeframes");
 const { formatTimestampByTimeFormat } = require("../../util/format");
 
 class TestedCommand extends BaseCalypsoCommand {
@@ -79,7 +79,7 @@ class TestedCommand extends BaseCalypsoCommand {
     if (parsedCommand.action === "tested_all") {
       const markedCount = await runtime.markAllUntestedPullRequestsTestedFn(
         runtime.pool,
-        runtime.slackUserId,
+        runtime.userId,
       );
 
       if (markedCount === 0) {
@@ -98,10 +98,7 @@ class TestedCommand extends BaseCalypsoCommand {
       );
       const timeFormat = await runtime.readTimeFormatPreferenceFn(runtime);
       const timeZone = await runtime.readTimeZonePreferenceFn(runtime);
-      const testedByNameById = await resolveTestedByNames(
-        recentlyTestedPullRequests,
-        runtime.slackClient,
-      );
+      const testedByNameById = await resolveTestedByNames(recentlyTestedPullRequests, runtime);
 
       if (recentlyTestedPullRequests.length === 0) {
         return this.buildExecutionResult(
@@ -122,7 +119,7 @@ class TestedCommand extends BaseCalypsoCommand {
     const testedResult = await runtime.markPullRequestTestedFn(
       runtime.pool,
       parsedCommand.prNumber,
-      runtime.slackUserId,
+      runtime.userId,
     );
 
     if (!testedResult.found) {
@@ -137,37 +134,26 @@ class TestedCommand extends BaseCalypsoCommand {
   }
 }
 
-async function resolveTestedByNames(recentlyTestedPullRequests, slackClient) {
+async function resolveTestedByNames(recentlyTestedPullRequests, runtime) {
   const testedByUserIds = [...new Set(
     recentlyTestedPullRequests
       .map((pullRequest) => pullRequest.tested_by)
       .filter(Boolean),
   )];
   const testedByNameById = new Map();
+  const resolveUserDisplayNameFn = runtime.resolveUserDisplayNameFn;
 
-  for (const slackUserId of testedByUserIds) {
-    const testedByName = await readSlackDisplayName(slackClient, slackUserId);
+  for (const userId of testedByUserIds) {
+    const testedByName =
+      typeof resolveUserDisplayNameFn === "function"
+        ? await resolveUserDisplayNameFn(runtime.communicationClient, userId)
+        : null;
     if (testedByName) {
-      testedByNameById.set(slackUserId, testedByName);
+      testedByNameById.set(userId, testedByName);
     }
   }
 
   return testedByNameById;
-}
-
-async function readSlackDisplayName(slackClient, slackUserId) {
-  if (!slackClient || !slackUserId || !slackClient.users || !slackClient.users.info) {
-    return null;
-  }
-
-  try {
-    const response = await slackClient.users.info({ user: slackUserId });
-    const user = response.user || {};
-    const profile = user.profile || {};
-    return profile.display_name || profile.real_name || user.name || null;
-  } catch (_error) {
-    return null;
-  }
 }
 
 function formatRecentlyTestedPullRequestLine(

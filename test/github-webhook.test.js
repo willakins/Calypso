@@ -2,8 +2,11 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const test = require("node:test");
 
-const { createGithubWebhookHandler } = require("../src/integrations/github/webhook");
-const { verifyGithubSignature } = require("../src/integrations/github/verify_signature");
+const {
+  createGithubWebhookHandler,
+  registerGithubWebhook,
+} = require("../src/platform/code_host/providers/github/webhook");
+const { verifyGithubSignature } = require("../src/platform/code_host/providers/github/verify_signature");
 
 function signPayload(secret, payloadBuffer) {
   return `sha256=${crypto.createHmac("sha256", secret).update(payloadBuffer).digest("hex")}`;
@@ -83,6 +86,27 @@ test("verifyGithubSignature validates a correct sha256 signature", () => {
 
   const valid = verifyGithubSignature({ payloadBuffer, signatureHeader, secret });
   assert.equal(valid, true);
+});
+
+test("registerGithubWebhook registers both configured webhook paths", () => {
+  const registeredPaths = [];
+  const app = {
+    post(path, _rawMiddleware, _handler) {
+      registeredPaths.push(path);
+    },
+  };
+
+  registerGithubWebhook(app, {
+    pool: {},
+    github: {
+      mainBranch: "main",
+      repositoryFullName: "croft-eng/croft",
+      webhookSecret: "secret",
+    },
+    paths: ["/github/webhook", "/codehost/webhook"],
+  });
+
+  assert.deepEqual(registeredPaths, ["/github/webhook", "/codehost/webhook"]);
 });
 
 test("github webhook returns 401 on invalid signature", async () => {

@@ -14,10 +14,12 @@ function createReviewSyncTask(options = {}) {
   return {
     name: REVIEW_SYNC_TASK_NAME,
     async run(syncContext) {
-      const { githubClient, mainBranch, nowFn, pool, repositoryFullName } = syncContext;
+      const { codeHostClient, repository } = syncContext;
+      const { mainBranch, nowFn, pool } = syncContext;
 
-      const openPullRequests = await githubClient.listOpenPullRequests({
-        repositoryFullName,
+      const openPullRequests = await codeHostClient.listOpenPullRequests({
+        repository,
+        repositoryFullName: repository,
         baseBranch: mainBranch,
       });
 
@@ -26,10 +28,10 @@ function createReviewSyncTask(options = {}) {
       let upsertedCount = 0;
       for (const pullRequest of openPullRequests) {
         const mappedReviewState = await mapOpenPullRequestToReviewState({
-          githubClient,
+          codeHostClient,
           mainBranch,
           pullRequest,
-          repositoryFullName,
+          repository,
         });
         if (!mappedReviewState) {
           continue;
@@ -41,7 +43,7 @@ function createReviewSyncTask(options = {}) {
       }
 
       const closedCount = await markStaleOpenPullRequestsClosedFn(pool, {
-        repo: repositoryFullName,
+        repo: repository,
         baseBranch: mainBranch,
         openPrNumbers,
         closedAt: syncedAt,
@@ -57,10 +59,10 @@ function createReviewSyncTask(options = {}) {
 }
 
 async function mapOpenPullRequestToReviewState({
-  githubClient,
+  codeHostClient,
   mainBranch,
   pullRequest,
-  repositoryFullName,
+  repository,
 }) {
   const prNumber = Number(pullRequest?.number);
   if (!Number.isInteger(prNumber) || prNumber <= 0) {
@@ -74,13 +76,14 @@ async function mapOpenPullRequestToReviewState({
 
   const isDraft = Boolean(pullRequest?.draft);
   const openedAt = pullRequest?.created_at || pullRequest?.updated_at || new Date().toISOString();
-  const reviews = await githubClient.listPullRequestReviews({
-    repositoryFullName,
+  const reviews = await codeHostClient.listPullRequestReviews({
+    repository,
+    repositoryFullName: repository,
     prNumber,
   });
 
   return {
-    repo: repositoryFullName,
+    repo: repository,
     prNumber,
     title: pullRequest?.title || null,
     url: pullRequest?.html_url || null,

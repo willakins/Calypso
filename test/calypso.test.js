@@ -332,7 +332,7 @@ test("registerCalypsoCommand reports sync unavailable when token is not configur
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Sync unavailable/);
-  assert.match(payload.text, /GITHUB_TOKEN/);
+  assert.match(payload.text, /CODE_HOST_TOKEN/);
 });
 
 test("registerCalypsoCommand returns sync failure details when manual sync throws", async () => {
@@ -888,7 +888,7 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   assert.equal(responses[1].response_type, "in_channel");
   assert.match(
     responses[1].text,
-    /DigitalOcean deployment dep-abc finished successfully with phase ACTIVE/,
+    /Deployment dep-abc finished successfully with phase ACTIVE/,
   );
 });
 

@@ -4,15 +4,22 @@ const {
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntested,
-} = require("../../db");
+} = require("../../../../db");
 const { verifyGithubSignature } = require("./verify_signature");
 
 function registerGithubWebhook(httpApp, options) {
-  httpApp.post(
-    "/github/webhook",
-    express.raw({ type: "application/json" }),
-    createGithubWebhookHandler(options),
-  );
+  const webhookPaths = Array.isArray(options.paths) && options.paths.length > 0
+    ? options.paths
+    : ["/github/webhook"];
+  const webhookHandler = createGithubWebhookHandler(options);
+
+  for (const webhookPath of webhookPaths) {
+    httpApp.post(
+      webhookPath,
+      express.raw({ type: "application/json" }),
+      webhookHandler,
+    );
+  }
 }
 
 function createGithubWebhookHandler(options) {
@@ -162,9 +169,9 @@ function readGithubSettings(options) {
 
   const legacyConfig = options.config || {};
   return {
-    mainBranch: legacyConfig.githubMainBranch,
-    repositoryFullName: legacyConfig.githubRepo,
-    webhookSecret: legacyConfig.githubWebhookSecret,
+    mainBranch: legacyConfig.codeHostMainBranch || legacyConfig.githubMainBranch,
+    repositoryFullName: legacyConfig.codeHostRepository || legacyConfig.githubRepo,
+    webhookSecret: legacyConfig.codeHostWebhookSecret || legacyConfig.githubWebhookSecret,
   };
 }
 

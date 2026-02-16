@@ -1,23 +1,22 @@
-const { App } = require("@slack/bolt");
 const express = require("express");
 
-const { registerCalypsoCommand } = require("./commands/calypso");
 const { loadConfig } = require("./config");
 const { createPool, runMigrations, verifyConnection } = require("./db");
-const { createGithubClient } = require("./integrations/github/client");
-const { registerGithubWebhook } = require("./integrations/github/webhook");
 const {
   runOpenPullRequestSyncTick,
   startOpenPullRequestSyncScheduler,
-} = require("./open_pr_sync/scheduler");
-const { startReviewRecapScheduler } = require("./review_recap/scheduler");
+} = require("./background_jobs/scheduler");
+const { createCodeHostPlatform } = require("./platform/code_host/factory");
+const { createCommunicationPlatform } = require("./platform/communication/factory");
+const { createDeployPlatform } = require("./platform/deploy/factory");
+const { startReviewRecapScheduler } = require("./background_jobs/review_recap_scheduler");
 
 async function start() {
   const runtime = await loadRuntime();
 
   wireHealthcheckRoute(runtime);
-  wireSlackCommands(runtime);
-  wireGithubWebhook(runtime);
+  wireCommunicationCommands(runtime);
+  wireCodeHostWebhook(runtime);
 
   await startServices(runtime);
   startBackgroundSchedulers(runtime);
@@ -28,27 +27,32 @@ async function start() {
 async function loadRuntime() {
   const config = loadConfig();
   const pool = createPool(config.databaseUrl);
-  const slackApp = createSlackApp(config);
   const httpApp = express();
-  const githubSyncClient = buildGithubSyncClient(config);
+  const communicationPlatform = createCommunicationPlatform({
+    provider: config.communicationProvider,
+    config,
+  });
+  const codeHostPlatform = createCodeHostPlatform({
+    provider: config.codeHostProvider,
+    config,
+  });
+  const deployPlatform = createDeployPlatform({
+    provider: config.deployProvider,
+    config,
+  });
+  const codeHostSyncClient = codeHostPlatform.createSyncClient();
 
   await initializeDatabase(pool);
 
   return {
     config,
-    githubSyncClient,
+    communicationPlatform,
+    codeHostPlatform,
+    codeHostSyncClient,
+    deployPlatform,
     httpApp,
     pool,
-    slackApp,
   };
-}
-
-function createSlackApp(config) {
-  return new App({
-    token: config.slackBotToken,
-    appToken: config.slackAppToken,
-    socketMode: true,
-  });
 }
 
 async function initializeDatabase(pool) {
@@ -56,11 +60,16 @@ async function initializeDatabase(pool) {
   await runMigrations(pool);
 }
 
-function wireSlackCommands(runtime) {
-  registerCalypsoCommand(runtime.slackApp, {
+function wireCommunicationCommands(runtime) {
+  runtime.communicationPlatform.registerCalypsoCommand({
     enableDeploymentCompletionNotifications: true,
     pool: runtime.pool,
+    deployPlatform: runtime.deployPlatform,
+    isWorkspaceAdminFn: async (_communicationClient, userId) =>
+      runtime.communicationPlatform.isWorkspaceAdmin(userId),
     deployConfig: buildDeployConfig(runtime.config),
+    resolveUserDisplayNameFn: async (_communicationClient, userId) =>
+      runtime.communicationPlatform.resolveUserDisplayName(userId),
     runOpenPullRequestSyncNowFn: buildRunOpenPullRequestSyncNow(runtime),
   });
 }
@@ -73,86 +82,79 @@ function wireHealthcheckRoute(runtime) {
 
 function buildDeployConfig(config) {
   return {
-    doDeploymentPollIntervalMs: config.doDeployPollIntervalSeconds * 1000,
-    doDeploymentTimeoutMs: config.doDeployTimeoutSeconds * 1000,
-    digitaloceanToken: config.digitaloceanToken,
-    doAppIdProd: config.doAppIdProd,
+    deployProvider: config.deployProvider,
+    deploymentPollIntervalMs: config.deployPollIntervalSeconds * 1000,
+    deploymentTimeoutMs: config.deployTimeoutSeconds * 1000,
+    deployToken: config.deployToken,
+    deployProductionAppId: config.deployProductionAppId,
   };
 }
 
-function wireGithubWebhook(runtime) {
-  registerGithubWebhook(runtime.httpApp, {
+function wireCodeHostWebhook(runtime) {
+  runtime.codeHostPlatform.registerWebhookRoutes(runtime.httpApp, {
     pool: runtime.pool,
-    github: buildGithubConfig(runtime.config),
   });
 }
 
-function buildGithubConfig(config) {
-  return {
-    mainBranch: config.githubMainBranch,
-    repositoryFullName: config.githubRepo,
-    webhookSecret: config.githubWebhookSecret,
-  };
-}
-
 async function startServices(runtime) {
-  await startHttpServer(runtime.httpApp, runtime.config.port);
-  await runtime.slackApp.start();
+  await startHttpServer(runtime.httpApp, runtime.config.port, {
+    codeHostProvider: runtime.config.codeHostProvider,
+  });
+  await runtime.communicationPlatform.start();
 }
 
 function startBackgroundSchedulers(runtime) {
   runtime.reviewRecapScheduler = startReviewRecapScheduler({
+    communicationClient: runtime.communicationPlatform,
     pool: runtime.pool,
-    slackClient: runtime.slackApp.client,
   });
 
   runtime.openPullRequestSyncScheduler = startOpenPullRequestSyncScheduler({
-    githubClient: runtime.githubSyncClient,
-    mainBranch: runtime.config.githubMainBranch,
+    codeHostClient: runtime.codeHostSyncClient,
+    mainBranch: runtime.config.codeHostMainBranch,
     pool: runtime.pool,
-    repositoryFullName: runtime.config.githubRepo,
-    syncIntervalMs: runtime.config.githubOpenPrSyncIntervalHours * 60 * 60 * 1000,
-  });
-}
-
-function buildGithubSyncClient(config) {
-  if (!config.githubToken) {
-    return null;
-  }
-
-  return createGithubClient({
-    apiBaseUrl: config.githubApiBaseUrl,
-    apiMaxPages: config.githubApiMaxPages,
-    apiPageSize: config.githubApiPageSize,
-    apiUserAgent: config.githubApiUserAgent,
-    apiVersion: config.githubApiVersion,
-    token: config.githubToken,
+    repository: runtime.config.codeHostRepository,
+    syncIntervalMs: runtime.config.codeHostOpenPrSyncIntervalHours * 60 * 60 * 1000,
   });
 }
 
 function buildRunOpenPullRequestSyncNow(runtime) {
-  if (!runtime.githubSyncClient) {
+  if (!runtime.codeHostSyncClient) {
     return null;
   }
 
   return () =>
     runOpenPullRequestSyncTick({
-      githubClient: runtime.githubSyncClient,
+      codeHostClient: runtime.codeHostSyncClient,
       logger: console,
-      mainBranch: runtime.config.githubMainBranch,
+      mainBranch: runtime.config.codeHostMainBranch,
       pool: runtime.pool,
-      repositoryFullName: runtime.config.githubRepo,
+      repository: runtime.config.codeHostRepository,
       swallowErrors: false,
     });
 }
 
-function startHttpServer(httpApp, port) {
+function startHttpServer(httpApp, port, options = {}) {
+  const providerLabel = formatProviderLabel(options.codeHostProvider || "code-host");
   return new Promise((resolve) => {
     httpApp.listen(port, () => {
-      console.log(`GitHub webhook server listening on port ${port}.`);
+      console.log(`${providerLabel} webhook server listening on port ${port}.`);
       resolve();
     });
   });
+}
+
+function formatProviderLabel(providerName) {
+  const normalizedProviderName = String(providerName || "").trim().toLowerCase();
+  if (normalizedProviderName === "") {
+    return "Code-host";
+  }
+
+  return normalizedProviderName
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 start().catch((error) => {

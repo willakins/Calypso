@@ -1,10 +1,13 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createGithubClient } = require("../src/integrations/github/client");
+const { createGithubClient } = require("../src/platform/code_host/providers/github/client");
 
 test("createGithubClient requires token", () => {
-  assert.throws(() => createGithubClient(buildClientOptions({ token: "" })), /GITHUB_TOKEN is required/);
+  assert.throws(
+    () => createGithubClient(buildClientOptions({ token: "" })),
+    /CODE_HOST_TOKEN is required/,
+  );
 });
 
 test("listOpenPullRequests paginates and returns records", async () => {

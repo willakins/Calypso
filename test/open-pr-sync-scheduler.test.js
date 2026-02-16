@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   deriveReviewStateFromReviews,
   runOpenPullRequestSyncTick,
-} = require("../src/open_pr_sync/scheduler");
+} = require("../src/background_jobs/scheduler");
 
 test("deriveReviewStateFromReviews resolves final state across review timeline", () => {
   const reviewState = deriveReviewStateFromReviews([
@@ -26,7 +26,7 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
   };
 
   const result = await runOpenPullRequestSyncTick({
-    githubClient: {
+    codeHostClient: {
       async listOpenPullRequests() {
         return [
           {
@@ -71,7 +71,7 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
     },
     nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
     pool: {},
-    repositoryFullName: "croft-eng/croft",
+    repository: "croft-eng/croft",
     upsertPullRequestAsUntestedFromSyncFn: async (_pool, record) => {
       calls.mergedUpserted.push(record);
       return record;
@@ -106,7 +106,7 @@ test("runOpenPullRequestSyncTick ignores open PRs not on tracked branch", async 
   };
 
   await runOpenPullRequestSyncTick({
-    githubClient: {
+    codeHostClient: {
       async listOpenPullRequests() {
         return [
           {
@@ -139,7 +139,7 @@ test("runOpenPullRequestSyncTick ignores open PRs not on tracked branch", async 
     },
     nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
     pool: {},
-    repositoryFullName: "croft-eng/croft",
+    repository: "croft-eng/croft",
     upsertPullRequestAsUntestedFromSyncFn: async () => null,
     upsertOpenPullRequestReviewStateFn: async (_pool, record) => {
       calls.upserted.push(record);
@@ -158,7 +158,7 @@ test("runOpenPullRequestSyncTick uses default now when nowFn is not provided", a
   };
 
   const result = await runOpenPullRequestSyncTick({
-    githubClient: {
+    codeHostClient: {
       async listOpenPullRequests() {
         return [];
       },
@@ -180,7 +180,7 @@ test("runOpenPullRequestSyncTick uses default now when nowFn is not provided", a
       return 0;
     },
     pool: {},
-    repositoryFullName: "croft-eng/croft",
+    repository: "croft-eng/croft",
     upsertPullRequestAsUntestedFromSyncFn: async () => null,
     upsertOpenPullRequestReviewStateFn: async () => null,
   });
@@ -197,7 +197,7 @@ test("runOpenPullRequestSyncTick upserts merged pull requests newer than last pr
   };
 
   const result = await runOpenPullRequestSyncTick({
-    githubClient: {
+    codeHostClient: {
       async listOpenPullRequests() {
         return [];
       },
@@ -239,7 +239,7 @@ test("runOpenPullRequestSyncTick upserts merged pull requests newer than last pr
     markStaleOpenPullRequestsClosedFn: async () => 0,
     nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
     pool: {},
-    repositoryFullName: "croft-eng/croft",
+    repository: "croft-eng/croft",
     upsertPullRequestAsUntestedFromSyncFn: async (_pool, record) => {
       calls.mergedUpserted.push(record);
       return record;

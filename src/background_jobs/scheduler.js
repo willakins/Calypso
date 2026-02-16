@@ -17,20 +17,20 @@ const { buildEmptyUntestedSyncResult } = require("./tasks/untested_merged_sync_t
 
 function startOpenPullRequestSyncScheduler(options) {
   const {
-    githubClient,
+    codeHostClient,
     getLastProdDeployAtFn = getLastProdDeployAt,
     logger = console,
     mainBranch,
     markStaleOpenPullRequestsClosedFn = markStaleOpenPullRequestsClosed,
     nowFn = () => new Date(),
     pool,
-    repositoryFullName,
+    repository,
     syncIntervalMs,
     upsertOpenPullRequestReviewStateFn = upsertOpenPullRequestReviewState,
     upsertPullRequestAsUntestedFromSyncFn = upsertPullRequestAsUntestedFromSync,
   } = options;
 
-  if (!pool || !githubClient || !repositoryFullName || !mainBranch || !isValidIntervalMs(syncIntervalMs)) {
+  if (!pool || !codeHostClient || !repository || !mainBranch || !isValidIntervalMs(syncIntervalMs)) {
     logger.warn(
       "Open PR sync scheduler disabled: missing dependencies or invalid sync interval.",
     );
@@ -41,14 +41,14 @@ function startOpenPullRequestSyncScheduler(options) {
 
   async function tick() {
     await runOpenPullRequestSyncTick({
-      githubClient,
+      codeHostClient,
       getLastProdDeployAtFn,
       logger,
       mainBranch,
       markStaleOpenPullRequestsClosedFn,
       nowFn,
       pool,
-      repositoryFullName,
+      repository,
       upsertOpenPullRequestReviewStateFn,
       upsertPullRequestAsUntestedFromSyncFn,
     });
@@ -67,14 +67,14 @@ function startOpenPullRequestSyncScheduler(options) {
 }
 
 async function runOpenPullRequestSyncTick({
-  githubClient,
+  codeHostClient,
   getLastProdDeployAtFn = getLastProdDeployAt,
   logger,
   mainBranch,
   markStaleOpenPullRequestsClosedFn = markStaleOpenPullRequestsClosed,
   nowFn = () => new Date(),
   pool,
-  repositoryFullName,
+  repository,
   swallowErrors = true,
   upsertOpenPullRequestReviewStateFn = upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntestedFromSyncFn = upsertPullRequestAsUntestedFromSync,
@@ -88,11 +88,11 @@ async function runOpenPullRequestSyncTick({
     });
 
     const syncSummary = await syncer.sync({
-      githubClient,
+      codeHostClient,
       mainBranch,
       nowFn,
       pool,
-      repositoryFullName,
+      repository,
     });
     const reviewSync = syncSummary[REVIEW_SYNC_TASK_NAME] || buildEmptyReviewSyncResult();
     const untestedSync = syncSummary[UNTESTED_SYNC_TASK_NAME] || buildEmptyUntestedSyncResult();

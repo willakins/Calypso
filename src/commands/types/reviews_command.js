@@ -1,5 +1,5 @@
 const { BaseCalypsoCommand } = require("./base_calypso_command");
-const { TIMEFRAME_DEFINITIONS, isValidTimeframe, timeframeSince } = require("../shared/timeframes");
+const { isValidTimeframe, timeframeSince } = require("../../shared/timeframes");
 const { formatTimestampByTimeFormat } = require("../../util/format");
 
 class ReviewsCommand extends BaseCalypsoCommand {

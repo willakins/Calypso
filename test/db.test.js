@@ -234,7 +234,7 @@ test("setConfiguredTimeFormat rejects unsupported values", async () => {
   }, /Unsupported time format/);
 });
 
-test("setConfiguredTimeFormat requires slack user id", async () => {
+test("setConfiguredTimeFormat requires user id", async () => {
   const pool = {
     async query() {
       return { rows: [] };
@@ -243,7 +243,7 @@ test("setConfiguredTimeFormat requires slack user id", async () => {
 
   await assert.rejects(async () => {
     await setConfiguredTimeFormat(pool, "human", "");
-  }, /slack user id is required/);
+  }, /user id is required/);
 });
 
 test("getConfiguredTimeZone returns configured value", async () => {
@@ -327,7 +327,7 @@ test("setConfiguredTimeZone rejects unsupported values", async () => {
   }, /Unsupported timezone/);
 });
 
-test("setConfiguredTimeZone requires slack user id", async () => {
+test("setConfiguredTimeZone requires user id", async () => {
   const pool = {
     async query() {
       return { rows: [] };
@@ -336,7 +336,7 @@ test("setConfiguredTimeZone requires slack user id", async () => {
 
   await assert.rejects(async () => {
     await setConfiguredTimeZone(pool, "America/New_York", "");
-  }, /slack user id is required/);
+  }, /user id is required/);
 });
 
 test("upsertOpenPullRequestReviewState upserts expected fields", async () => {

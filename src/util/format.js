@@ -1,3 +1,25 @@
+const { formatReviewRecencyLabel } = require("../shared/timeframes");
+
+const TIMESTAMP_STYLES = {
+  human: "human",
+  legacyUtc: "legacy_utc",
+};
+
+const UTC_MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 function formatStatusResponse({ lastDeployAt, blockers, timeFormat, timeZone }) {
   const lastDeploymentTimestamp = formatTimestampByTimeFormat(lastDeployAt, { timeFormat, timeZone });
   const hasBlockingPullRequests = Array.isArray(blockers) && blockers.length > 0;
@@ -32,21 +54,6 @@ function formatReviewRecapResponse({
   ].join("\n");
 }
 
-function formatReviewRecencyLabel(recencyValue, recencyUnit) {
-  const normalizedRecencyValue = Number(recencyValue);
-  if (!Number.isInteger(normalizedRecencyValue) || normalizedRecencyValue <= 0) {
-    return "week";
-  }
-
-  const normalizedRecencyUnit = String(recencyUnit || "").toLowerCase().trim();
-  const unitLabelMap = {
-    d: normalizedRecencyValue === 1 ? "day" : "days",
-    w: normalizedRecencyValue === 1 ? "week" : "weeks",
-  };
-  const unitLabel = unitLabelMap[normalizedRecencyUnit] || (normalizedRecencyValue === 1 ? "week" : "weeks");
-  return normalizedRecencyValue === 1 ? unitLabel : `${normalizedRecencyValue} ${unitLabel}`;
-}
-
 function formatWaitingPullRequestLine({ pullRequest, timeZone }) {
   const pullRequestTitle = pullRequest.title || "(no title)";
   const pullRequestReference = `${pullRequest.repo}#${pullRequest.pr_number}`;
@@ -78,11 +85,6 @@ function formatBlockingPullRequestLine(pullRequest) {
   const pullRequestTitleSuffix = pullRequest.title ? ` - ${pullRequest.title}` : "";
   return `• ${pullRequest.repo}#${pullRequest.pr_number} (${pullRequest.status})${pullRequestTitleSuffix}`;
 }
-
-const TIMESTAMP_STYLES = {
-  human: "human",
-  legacyUtc: "legacy_utc",
-};
 
 function formatTimestampWithTimezone(value, options = {}) {
   const parsedDate = value instanceof Date ? value : new Date(value);
@@ -227,21 +229,6 @@ function readOrdinalSuffix(dayOfMonth) {
       return "th";
   }
 }
-
-const UTC_MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
 
 module.exports = {
   TIMESTAMP_STYLES,

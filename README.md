@@ -1,16 +1,17 @@
 # Calypso
 
-Calypso is a Slack-based deployment gatekeeper for a single GitHub repository.
+Calypso is a platform-abstracted deployment gatekeeper for a single repository workflow.
+It currently runs with Slack + GitHub + DigitalOcean by default, while exposing provider
+abstractions for communication, code-host, and deploy integrations.
 It tracks merged pull requests in Postgres, requires explicit testing confirmation,
-and blocks production deploys when untested changes exist.
-It also tracks open pull-request review state and posts a scheduled Slack recap for PRs waiting on review.
+blocks production deploys when untested changes exist, and posts scheduled review recap messages.
 
 ## What It Does
 
-- Ingests merged GitHub pull requests into `pull_requests` as `untested`.
+- Ingests merged code-host pull requests into `pull_requests` as `untested`.
 - Tracks open PR review lifecycle in `open_pr_review_state`.
-- Reconciles open PR review state from GitHub once per day (when `GITHUB_TOKEN` is configured).
-- Exposes a Slack slash command: `/calypso`.
+- Reconciles open PR review state from code host once per day (when code-host API token is configured).
+- Exposes a communication-platform command surface (`/calypso` for Slack).
 - Supports status and release workflow commands:
   - `/calypso help`
   - `/calypso config time-format:human|long`
@@ -26,18 +27,21 @@ It also tracks open pull-request review state and posts a scheduled Slack recap 
   - `/calypso deploy prod`
 - Enforces deploy blocking rules:
   - A blocker is any PR with `merged_at > last_prod_deploy_at` and `status` not in `tested`, `deployed`.
-- Optionally triggers DigitalOcean App Platform deploy when gate is clear.
-- Runtime display config is per Slack user (defaults: time format `human`, timezone `America/New_York`).
+- Optionally triggers deploy-platform production deploy when gate is clear.
+- Runtime display config is per communication user (defaults: time format `human`, timezone `America/New_York`).
 - Review recap schedule config is workspace-wide (defaults: Monday 9:00 AM `America/New_York`, recency `1w`).
 
 ## Architecture
 
 Calypso is a single Node.js service composed of:
 
-- Slack Bolt app (Socket Mode) for `/calypso` commands.
-- Express HTTP server for `POST /github/webhook`.
+- Communication platform provider (Slack implemented; Microsoft Teams scaffolded).
+- Code-host platform provider (GitHub implemented; Bitbucket scaffolded).
+- Deploy platform provider (DigitalOcean implemented; AWS scaffolded).
+- Express HTTP server for webhooks.
 - Postgres persistence through `pg`.
-- Optional DigitalOcean deploy integration.
+
+Unimplemented providers intentionally fail fast at startup when selected.
 
 ### Command System Design
 
@@ -81,24 +85,42 @@ src/
   db/
     index.js
     migrations/001_init.sql
-    migrations/002_deployment_whitelist.sql
-    migrations/003_runtime_config.sql
-    migrations/004_runtime_config_timezone.sql
-    migrations/005_runtime_user_config.sql
-    migrations/006_open_pr_reviews_and_recap_config.sql
-  integrations/
-    github/
-      client.js
-      webhook.js
-      verify_signature.js
-    digitalocean/
-      client.js
-  open_pr_sync/
+  background_jobs/
     scheduler.js
+    review_recap_scheduler.js
+    syncer.js
+    tasks/
+      review_sync_task.js
+      untested_merged_sync_task.js
+  platform/
+    shared/
+      errors.js
+    communication/
+      base_communication_platform.js
+      factory.js
+      providers/
+        slack_communication_platform.js
+        microsoft_teams_communication_platform.js
+    code_host/
+      base_code_host_platform.js
+      factory.js
+      providers/
+        github_code_host_platform.js
+        bitbucket_code_host_platform.js
+        github/
+          client.js
+          webhook.js
+          verify_signature.js
+    deploy/
+      base_deploy_platform.js
+      factory.js
+      providers/
+        digitalocean_deploy_platform.js
+        aws_deploy_platform.js
+        digitalocean/
+          client.js
   util/
     format.js
-  review_recap/
-    scheduler.js
 test/
   *.test.js
 ```
@@ -116,34 +138,72 @@ test/
 
 ## Environment Variables
 
-Required:
+Always required:
 
-- `SLACK_BOT_TOKEN`
-- `SLACK_APP_TOKEN`
 - `DATABASE_URL`
-- `GITHUB_WEBHOOK_SECRET`
-- `GITHUB_REPO` (example: `croft-eng/croft`)
-- `GITHUB_MAIN_BRANCH` (example: `main`)
+- `COMMUNICATION_PROVIDER` (default: `slack`)
+- `CODE_HOST_PROVIDER` (default: `github`)
+- `DEPLOY_PROVIDER` (default: `digitalocean`)
+
+Required when `COMMUNICATION_PROVIDER=slack`:
+
+- `COMMUNICATION_BOT_TOKEN`
+- `COMMUNICATION_APP_TOKEN`
+
+Required when `CODE_HOST_PROVIDER=github`:
+
+- `CODE_HOST_WEBHOOK_SECRET`
+- `CODE_HOST_REPOSITORY` (example: `croft-eng/croft`)
+- `CODE_HOST_MAIN_BRANCH` (example: `main`)
 
 Optional:
 
 - `PORT` (default `3000`)
-- `DIGITALOCEAN_TOKEN`
-- `DO_APP_ID_PROD`
-- `DO_DEPLOY_POLL_INTERVAL_SECONDS` (default `10`)
-- `DO_DEPLOY_TIMEOUT_SECONDS` (default `1200`)
-- `GITHUB_TOKEN` (recommended for daily open-PR reconciliation)
-- `GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS` (default `24`)
-- `DEPLOY_CHANNEL_ID` (reserved for future use)
+- `DEPLOY_TOKEN`
+- `DEPLOY_PROD_APP_ID`
+- `DEPLOY_POLL_INTERVAL_SECONDS` (default `10`)
+- `DEPLOY_TIMEOUT_SECONDS` (default `1200`)
+- `CODE_HOST_TOKEN` (recommended for daily open-PR reconciliation)
+- `CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS` (default `24`)
+
+Provider support matrix:
+
+- Communication:
+  - `slack`: implemented
+  - `microsoft_teams`: scaffold only (startup fail-fast)
+- Code host:
+  - `github`: implemented
+  - `bitbucket`: scaffold only (startup fail-fast)
+- Deploy:
+  - `digitalocean`: implemented
+  - `aws`: scaffold only (startup fail-fast)
 
 ### How To Get Each Value
 
-`SLACK_BOT_TOKEN`
+`COMMUNICATION_PROVIDER`
+
+- Provider selector for communication integration.
+- Supported values: `slack` (implemented), `microsoft_teams` (startup fail-fast scaffold).
+- Default: `slack`.
+
+`CODE_HOST_PROVIDER`
+
+- Provider selector for code-host integration.
+- Supported values: `github` (implemented), `bitbucket` (startup fail-fast scaffold).
+- Default: `github`.
+
+`DEPLOY_PROVIDER`
+
+- Provider selector for deploy integration.
+- Supported values: `digitalocean` (implemented), `aws` (startup fail-fast scaffold).
+- Default: `digitalocean`.
+
+`COMMUNICATION_BOT_TOKEN`
 
 - Slack App -> `OAuth & Permissions` -> install/reinstall app -> copy `Bot User OAuth Token` (`xoxb-...`).
 - Add bot scope `users:read` so Calypso can detect workspace admins for deploy authorization.
 
-`SLACK_APP_TOKEN`
+`COMMUNICATION_APP_TOKEN`
 
 - Slack App -> `Socket Mode` -> enable -> generate app-level token with `connections:write` scope -> copy token (`xapp-...`).
 
@@ -156,30 +216,30 @@ Optional:
 - If using DigitalOcean Managed PostgreSQL, use the connection string from DO with:
   - `?sslmode=require` (Calypso enables TLS automatically when this is present)
 
-`GITHUB_WEBHOOK_SECRET`
+`CODE_HOST_WEBHOOK_SECRET`
 
 - Generate a random secret, for example:
   - `openssl rand -hex 32`
 - Use the same value in `.env` and in GitHub repo webhook settings.
 
-`GITHUB_REPO`
+`CODE_HOST_REPOSITORY`
 
 - Set to the exact full repo name:
   - `<owner>/<repo>` (example: `willakins/Test-repo`)
 - Must exactly match `payload.repository.full_name` from GitHub webhook events.
 
-`GITHUB_MAIN_BRANCH`
+`CODE_HOST_MAIN_BRANCH`
 
 - Usually `main` (or your default protected branch, like `master`).
 - Must match the base branch of merged PRs you want Calypso to track.
 
-`GITHUB_TOKEN` (optional, enables daily PR reconciliation)
+`CODE_HOST_TOKEN` (optional, enables daily PR reconciliation)
 
 - GitHub -> Settings -> Developer settings -> Personal access tokens (fine-grained or classic).
 - Minimum needed access for this repo: read pull requests.
 - Used only for scheduled read-only sync of open PR and review state.
 
-`GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS` (optional)
+`CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS` (optional)
 
 - How often Calypso reconciles open PR review state from GitHub API.
 - Default: `24`.
@@ -189,25 +249,25 @@ Optional:
 - Local HTTP port for the webhook server and ngrok tunnel.
 - Default is `3000`; only set this if you need a different port.
 
-`DIGITALOCEAN_TOKEN` (optional unless using `/calypso deploy prod`)
+`DEPLOY_TOKEN` (optional unless using `/calypso deploy prod`)
 
 - DigitalOcean -> `API` -> `Tokens/Keys` -> generate personal access token.
 - Recommended custom scopes for this app-deploy flow:
   - `app:update` (plus required read dependencies auto-added by DO).
 
-`DO_APP_ID_PROD` (optional unless using `/calypso deploy prod`)
+`DEPLOY_PROD_APP_ID` (optional unless using `/calypso deploy prod`)
 
 - DigitalOcean App Platform app UUID.
 - Find it with:
   - `doctl apps list --format ID,Spec.Name`
 - Safe rollout: set this to a staging app first.
 
-`DO_DEPLOY_POLL_INTERVAL_SECONDS` (optional)
+`DEPLOY_POLL_INTERVAL_SECONDS` (optional)
 
 - Poll interval for checking deployment completion status after deploy trigger.
 - Default: `10` seconds.
 
-`DO_DEPLOY_TIMEOUT_SECONDS` (optional)
+`DEPLOY_TIMEOUT_SECONDS` (optional)
 
 - Max time Calypso waits for deployment completion follow-up message.
 - Default: `1200` seconds (20 minutes).
@@ -233,7 +293,7 @@ This command will:
 - Start Postgres on port `5433`.
 - Start ngrok on `PORT` (default `3000`).
 - Start the Calypso app.
-- Print the ngrok URL to use for GitHub webhook configuration.
+- Print the ngrok URL to use for code-host webhook configuration.
 
 To stop everything and remove temporary DB/runtime files:
 
@@ -251,8 +311,9 @@ On app startup Calypso will:
 
 - Verify DB connectivity (`SELECT 1`).
 - Run migrations (`src/db/migrations/*.sql`) idempotently.
+- Construct selected communication/code-host/deploy providers (fail-fast if selected provider is scaffold-only).
 - Start webhook server on `PORT`.
-- Start Slack Socket Mode.
+- Start communication platform runtime (Socket Mode for Slack).
 
 ## Docker
 
@@ -282,20 +343,24 @@ Recommended setup:
 2. Copy the cluster connection string and set `DATABASE_URL` with `sslmode=require`.
 3. Create an App Platform app from this repo using the `Dockerfile`.
 4. Set all required env vars in App Platform:
-   - `SLACK_BOT_TOKEN`
-   - `SLACK_APP_TOKEN`
+   - `COMMUNICATION_PROVIDER=slack`
+   - `CODE_HOST_PROVIDER=github`
+   - `DEPLOY_PROVIDER=digitalocean`
+   - `COMMUNICATION_BOT_TOKEN`
+   - `COMMUNICATION_APP_TOKEN`
    - `DATABASE_URL`
-   - `GITHUB_WEBHOOK_SECRET`
-   - `GITHUB_REPO`
-   - `GITHUB_MAIN_BRANCH`
+   - `CODE_HOST_WEBHOOK_SECRET`
+   - `CODE_HOST_REPOSITORY`
+   - `CODE_HOST_MAIN_BRANCH`
 5. Optional deploy vars:
-   - `DIGITALOCEAN_TOKEN`
-   - `DO_APP_ID_PROD`
+   - `DEPLOY_TOKEN`
+   - `DEPLOY_PROD_APP_ID`
 
 Operational notes:
 
-- Use a stable public app URL for GitHub webhook target:
-  - `https://<your-app-domain>/github/webhook`
+- Use a stable public app URL for webhook target:
+  - `https://<your-app-domain>/github/webhook` (legacy-compatible path)
+  - `https://<your-app-domain>/codehost/webhook` (provider-neutral alias)
 - Slack Socket Mode does not require a public ingress for slash commands.
 - Keep one running Calypso instance for consistent webhook ingestion.
 
@@ -322,17 +387,20 @@ Use this when deploying Calypso as an always-on service in DigitalOcean App Plat
 
 Set these as encrypted environment variables in App Platform:
 
-- `SLACK_BOT_TOKEN`
-- `SLACK_APP_TOKEN`
+- `COMMUNICATION_PROVIDER=slack`
+- `CODE_HOST_PROVIDER=github`
+- `DEPLOY_PROVIDER=digitalocean`
+- `COMMUNICATION_BOT_TOKEN`
+- `COMMUNICATION_APP_TOKEN`
 - `DATABASE_URL` (with `sslmode=require`)
-- `GITHUB_WEBHOOK_SECRET`
-- `GITHUB_REPO`
-- `GITHUB_MAIN_BRANCH`
+- `CODE_HOST_WEBHOOK_SECRET`
+- `CODE_HOST_REPOSITORY`
+- `CODE_HOST_MAIN_BRANCH`
 
 Optional:
 
-- `DIGITALOCEAN_TOKEN`
-- `DO_APP_ID_PROD`
+- `DEPLOY_TOKEN`
+- `DEPLOY_PROD_APP_ID`
 
 ### 4. Configure health checks
 
@@ -341,15 +409,15 @@ Calypso exposes `GET /healthz` for platform health checks. In App Platform:
 1. Use HTTP health check path: `/healthz`
 2. Keep expected status in the `2xx` range
 
-### 5. Wire GitHub webhook to the hosted app
+### 5. Wire code-host webhook to the hosted app
 
 1. After first successful deploy, copy the app URL (for example `https://calypso-xxxx.ondigitalocean.app`).
 2. In your GitHub repo webhook settings:
-   - Payload URL: `https://<your-app-domain>/github/webhook`
+   - Payload URL: `https://<your-app-domain>/codehost/webhook` (or `/github/webhook`)
    - Content type: `application/json`
-   - Secret: same value as `GITHUB_WEBHOOK_SECRET`
+   - Secret: same value as `CODE_HOST_WEBHOOK_SECRET`
    - Events: `Pull requests`
-3. Trigger a test merge to `GITHUB_MAIN_BRANCH`.
+3. Trigger a test merge to `CODE_HOST_MAIN_BRANCH`.
 4. Confirm webhook delivery is `200` in GitHub and row is created/updated in `pull_requests`.
 
 ### 6. Smoke test in Slack
@@ -373,26 +441,27 @@ Expected:
 - Keep only one primary always-on Calypso instance.
 - Rotate secrets after deployment if they were ever exposed in logs/chat.
 
-## GitHub Webhook
+## Code-Host Webhook
 
 Endpoint:
 
-- `POST /github/webhook`
+- `POST /github/webhook` (backward-compatible)
+- `POST /codehost/webhook` (provider-neutral alias)
 
 Rules:
 
 - Requires valid `X-Hub-Signature-256` HMAC signature.
 - Processes `pull_request` and `pull_request_review` events.
-- Only processes events for configured `GITHUB_MAIN_BRANCH` and configured `GITHUB_REPO`.
+- Only processes events for configured `CODE_HOST_MAIN_BRANCH` and configured `CODE_HOST_REPOSITORY`.
 - Merged PR close events upsert to deploy-gating table as `untested`.
 - Open PR lifecycle and review submissions update `open_pr_review_state`.
 
 ## Daily Open PR Sync
 
 - Runs as a background scheduler in the app runtime.
-- Performs a full open-PR reconciliation for `GITHUB_REPO` + `GITHUB_MAIN_BRANCH`.
-- Frequency is controlled by `GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS` (default every 24 hours).
-- Requires `GITHUB_TOKEN`; without it, webhook-based tracking still works but no periodic backfill runs.
+- Performs a full open-PR reconciliation for `CODE_HOST_REPOSITORY` + `CODE_HOST_MAIN_BRANCH`.
+- Frequency is controlled by `CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS` (default every 24 hours).
+- Requires `CODE_HOST_TOKEN`; without it, webhook-based tracking still works but no periodic backfill runs.
 - Upserts all currently open PR review-state rows and marks stale local open rows as `closed`.
 - Backfills merged PRs newer than last prod deploy into deploy-gating state as `untested` (without downgrading already `tested`/`deployed` rows).
 
@@ -475,7 +544,7 @@ Rules:
 `/calypso deploy prod force` (or `/calypso deploy prod forced`)
 
 - Bypasses blocker checks and triggers deploy anyway.
-- Still requires deploy configuration (`DIGITALOCEAN_TOKEN`, `DO_APP_ID_PROD`).
+- Still requires deploy configuration (`DEPLOY_TOKEN`, `DEPLOY_PROD_APP_ID`).
 
 ## Weekly Review Recap
 
@@ -531,4 +600,4 @@ To block merges when tests fail, enable branch protection on `main`:
 
 - Never commit `.env` or secrets.
 - If secrets are exposed, rotate immediately.
-- Keep `GITHUB_WEBHOOK_SECRET` and API tokens scoped and rotated periodically.
+- Keep `CODE_HOST_WEBHOOK_SECRET` and API tokens scoped and rotated periodically.

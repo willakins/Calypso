@@ -10,6 +10,7 @@ const SCHEDULE_LOOKBACK_MINUTES = 8 * 24 * 60;
 
 function startReviewRecapScheduler(options) {
   const {
+    communicationClient = null,
     getReviewRecapConfigFn = getReviewRecapConfig,
     listOpenPullRequestsWaitingOnReviewSinceFn = listOpenPullRequestsWaitingOnReviewSince,
     markReviewRecapSentFn = markReviewRecapSent,
@@ -20,9 +21,10 @@ function startReviewRecapScheduler(options) {
     pool,
     slackClient,
   } = options;
+  const messageClient = communicationClient || createSlackMessageClientAdapter(slackClient);
 
-  if (!pool || !slackClient || !slackClient.chat || typeof slackClient.chat.postMessage !== "function") {
-    logger.warn("Review recap scheduler disabled: missing pool or Slack chat client.");
+  if (!pool || !messageClient || typeof messageClient.postChannelMessage !== "function") {
+    logger.warn("Review recap scheduler disabled: missing pool or communication message client.");
     return {
       stop() {},
     };
@@ -40,9 +42,9 @@ function startReviewRecapScheduler(options) {
       formatReviewRecapResponseFn,
       nowFn,
       logger,
+      messageClient,
       pool,
       schedulerState,
-      slackClient,
     });
   }
 
@@ -65,11 +67,18 @@ async function runReviewRecapSchedulerTick({
   formatReviewRecapResponseFn,
   nowFn,
   logger,
+  messageClient,
+  slackClient,
   pool,
   schedulerState,
-  slackClient,
 }) {
   try {
+    const effectiveMessageClient = messageClient || createSlackMessageClientAdapter(slackClient);
+    if (!effectiveMessageClient || typeof effectiveMessageClient.postChannelMessage !== "function") {
+      logger.warn("Review recap scheduler tick skipped: no communication message client configured.");
+      return;
+    }
+
     const now = nowFn();
     const config = await getReviewRecapConfigFn(pool);
     if (!config.targetChannelId) {
@@ -105,8 +114,8 @@ async function runReviewRecapSchedulerTick({
       timeZone: config.timeZone,
     });
 
-    await slackClient.chat.postMessage({
-      channel: config.targetChannelId,
+    await effectiveMessageClient.postChannelMessage({
+      channelId: config.targetChannelId,
       text: message,
       mrkdwn: true,
     });
@@ -116,6 +125,22 @@ async function runReviewRecapSchedulerTick({
     logger.error("Review recap scheduler tick failed.");
     logger.error(error.message);
   }
+}
+
+function createSlackMessageClientAdapter(slackClient) {
+  if (!slackClient || !slackClient.chat || typeof slackClient.chat.postMessage !== "function") {
+    return null;
+  }
+
+  return {
+    async postChannelMessage({ channelId, mrkdwn, text }) {
+      await slackClient.chat.postMessage({
+        channel: channelId,
+        mrkdwn,
+        text,
+      });
+    },
+  };
 }
 
 function logNoChannelConfigured({ logger, now, schedulerState }) {
