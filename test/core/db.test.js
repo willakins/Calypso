@@ -26,7 +26,7 @@ const {
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntestedFromSync,
-} = require("../src/db");
+} = require("../../src/db");
 
 test("createPool requires DATABASE_URL", () => {
   assert.throws(() => createPool(""), /DATABASE_URL is required/);

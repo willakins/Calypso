@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createDigitalOceanClient } = require("../src/platform/deploy/providers/digitalocean/client");
+const { createDigitalOceanClient } = require("../../src/platform/deploy/providers/digitalocean/client");
 
 test("createDigitalOceanClient requires token", () => {
   assert.throws(() => createDigitalOceanClient({ token: "" }), /DEPLOY_TOKEN is required/);

@@ -1,6 +1,6 @@
 const { App } = require("@slack/bolt");
 
-const { registerCalypsoCommand } = require("../../../commands/calypso");
+const { registerCalypsoCommand } = require("../../../commands/command_router");
 const { BaseCommunicationPlatform } = require("../base_communication_platform");
 
 class SlackCommunicationPlatform extends BaseCommunicationPlatform {

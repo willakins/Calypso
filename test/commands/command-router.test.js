@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { handleCalypsoCommand, registerCalypsoCommand } = require("../src/commands/calypso");
+const { handleCalypsoCommand, registerCalypsoCommand } = require("../../src/commands/command_router");
 
 test("handleCalypsoCommand returns help for empty input", () => {
   const result = handleCalypsoCommand({ text: "", user_id: "U123" });
@@ -1516,7 +1516,6 @@ test("registerCalypsoCommand config command updates communication provider", asy
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Updated communication provider to `slack`/);
-  assert.match(payload.text, /Restart Calypso for this change to take effect/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "slack");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
@@ -1552,7 +1551,6 @@ test("registerCalypsoCommand config command updates code-host provider", async (
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Updated code-host provider to `github`/);
-  assert.match(payload.text, /Restart Calypso for this change to take effect/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "github");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
@@ -1588,7 +1586,6 @@ test("registerCalypsoCommand config command updates deploy provider", async () =
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Updated deploy provider to `digitalocean`/);
-  assert.match(payload.text, /Restart Calypso for this change to take effect/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "digitalocean");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
@@ -1694,7 +1691,6 @@ test("registerCalypsoCommand config command updates aws deploy provider", async 
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Updated deploy provider to `aws`/);
-  assert.match(payload.text, /Restart Calypso for this change to take effect/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "aws");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");

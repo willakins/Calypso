@@ -1,4 +1,4 @@
-const { BaseCalypsoCommand } = require("./base_calypso_command");
+const { BaseCalypsoCommand } = require("./base_command");
 const {
   CODE_HOST_PROVIDERS,
   COMMUNICATION_PROVIDERS,
@@ -295,11 +295,7 @@ function buildProviderArgumentPattern(prefix, providers) {
 }
 
 function buildProviderUpdateMessage({ baseText }) {
-  const messageLines = [
-    baseText,
-    "Restart Calypso for this change to take effect.",
-  ];
-  return messageLines.join(" ");
+  return baseText;
 }
 
 function buildProviderUnavailableMessage(provider) {

@@ -60,7 +60,7 @@ Commands are structured for extensibility:
 To add a new command:
 
 1. Create a new command class in `src/commands/types/`.
-2. Register it in `src/commands/registry/calypso_command_registry.js`.
+2. Register it in `src/commands/registry/command_registry.js`.
 
 ## Project Layout
 
@@ -69,15 +69,15 @@ src/
   app.js
   config.js
   commands/
-    calypso.js
+    command_router.js
     parsing/
-      calypso_command_parser.js
+      command_parser.js
     registry/
-      calypso_command_registry.js
+      command_registry.js
     services/
-      calypso_command_service.js
+      command_service.js
     types/
-      base_calypso_command.js
+      base_command.js
       help_command.js
       config_command.js
       status_command.js
@@ -537,17 +537,17 @@ Rules:
 `/calypso config communication-provider:slack|microsoft_teams`
 
 - Sets communication platform provider in runtime config.
-- Takes effect after app restart.
+- Takes effect immediately for `/calypso` command handling.
 
 `/calypso config code-host-provider:github|bitbucket`
 
 - Sets code-host platform provider in runtime config.
-- Takes effect after app restart.
+- Takes effect immediately for `/calypso` command handling.
 
 `/calypso config deploy-provider:digitalocean|aws`
 
 - Sets deploy platform provider in runtime config.
-- Takes effect after app restart.
+- Takes effect immediately for `/calypso` command handling.
 
 `/calypso sync`
 

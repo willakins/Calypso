@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   MicrosoftTeamsCommunicationPlatform,
-} = require("../src/platform/communication/providers/microsoft_teams_communication_platform");
+} = require("../../src/platform/communication/providers/microsoft_teams_communication_platform");
 
 test("microsoft teams platform registers command route and responds", async () => {
   const platform = new MicrosoftTeamsCommunicationPlatform({

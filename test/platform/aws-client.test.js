@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createAwsCodePipelineClient } = require("../src/platform/deploy/providers/aws/client");
+const { createAwsCodePipelineClient } = require("../../src/platform/deploy/providers/aws/client");
 
 test("createAwsCodePipelineClient requires credentials and region", () => {
   assert.throws(

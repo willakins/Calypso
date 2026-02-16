@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createGithubClient } = require("../src/platform/code_host/providers/github/client");
+const { createGithubClient } = require("../../src/platform/code_host/providers/github/client");
 
 test("createGithubClient requires token", () => {
   assert.throws(

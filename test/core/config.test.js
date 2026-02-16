@@ -9,7 +9,7 @@ const {
   DEFAULT_DEPLOY_PROVIDER,
   DEPLOY_PROVIDERS,
   loadConfig,
-} = require("../src/config");
+} = require("../../src/config");
 
 const REQUIRED_ENV = {
   DATABASE_URL: "postgresql://user:pass@localhost:5432/calypso",

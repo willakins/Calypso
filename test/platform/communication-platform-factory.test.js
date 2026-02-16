@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { COMMUNICATION_PROVIDERS } = require("../src/config");
-const { createCommunicationPlatform } = require("../src/platform/communication/factory");
+const { COMMUNICATION_PROVIDERS } = require("../../src/config");
+const { createCommunicationPlatform } = require("../../src/platform/communication/factory");
 
 test("createCommunicationPlatform builds microsoft teams provider", () => {
   const platform = createCommunicationPlatform({

@@ -5,8 +5,8 @@ const test = require("node:test");
 const {
   createGithubWebhookHandler,
   registerGithubWebhook,
-} = require("../src/platform/code_host/providers/github/webhook");
-const { verifyGithubSignature } = require("../src/platform/code_host/providers/github/verify_signature");
+} = require("../../src/platform/code_host/providers/github/webhook");
+const { verifyGithubSignature } = require("../../src/platform/code_host/providers/github/verify_signature");
 
 function signPayload(secret, payloadBuffer) {
   return `sha256=${crypto.createHmac("sha256", secret).update(payloadBuffer).digest("hex")}`;

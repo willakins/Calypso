@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createBitbucketClient } = require("../src/platform/code_host/providers/bitbucket/client");
+const { createBitbucketClient } = require("../../src/platform/code_host/providers/bitbucket/client");
 
 test("createBitbucketClient requires token", () => {
   assert.throws(

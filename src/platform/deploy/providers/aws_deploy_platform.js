@@ -17,7 +17,7 @@ class AwsDeployPlatform extends BaseDeployPlatform {
     const deployPipelineName = deployConfig.deployProductionAppId;
     const awsClient = this.buildAwsClient(deployConfig);
 
-    return awsClient.waitForPipelineDeploymentCompletion(
+    const completion = await awsClient.waitForPipelineDeploymentCompletion(
       deployPipelineName,
       externalDeployId,
       {
@@ -25,6 +25,11 @@ class AwsDeployPlatform extends BaseDeployPlatform {
         timeoutMs: deployConfig.deploymentTimeoutMs,
       },
     );
+
+    return {
+      ...completion,
+      phase: completion.status,
+    };
   }
 
   buildAwsClient(deployConfig) {

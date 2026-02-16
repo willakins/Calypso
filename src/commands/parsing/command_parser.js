@@ -1,4 +1,4 @@
-const { createCalypsoCommandRegistry } = require("../registry/calypso_command_registry");
+const { createCalypsoCommandRegistry } = require("../registry/command_registry");
 
 const registryByBotName = new Map();
 

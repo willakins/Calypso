@@ -1,5 +1,5 @@
-const { parseCalypsoCommand } = require("./parsing/calypso_command_parser");
-const { createCalypsoCommandService } = require("./services/calypso_command_service");
+const { parseCalypsoCommand } = require("./parsing/command_parser");
+const { createCalypsoCommandService } = require("./services/command_service");
 const { DEFAULT_BOT_NAME } = require("../config");
 
 function handleCalypsoCommand({ text, user_id, botName }) {
@@ -67,6 +67,7 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
       externalDeploymentId,
       {
         communicationClient,
+        deployProvider: executionResult.deployProvider,
         userId,
       },
     );

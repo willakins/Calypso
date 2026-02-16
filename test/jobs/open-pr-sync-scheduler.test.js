@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   deriveReviewStateFromReviews,
   runOpenPullRequestSyncTick,
-} = require("../src/background_jobs/scheduler");
+} = require("../../src/background_jobs/scheduler");
 
 test("deriveReviewStateFromReviews resolves final state across review timeline", () => {
   const reviewState = deriveReviewStateFromReviews([

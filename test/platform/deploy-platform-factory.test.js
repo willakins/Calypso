@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { DEPLOY_PROVIDERS } = require("../src/config");
-const { createDeployPlatform } = require("../src/platform/deploy/factory");
+const { DEPLOY_PROVIDERS } = require("../../src/config");
+const { createDeployPlatform } = require("../../src/platform/deploy/factory");
 
 test("createDeployPlatform builds digitalocean provider", () => {
   const platform = createDeployPlatform({ provider: DEPLOY_PROVIDERS.digitalocean });

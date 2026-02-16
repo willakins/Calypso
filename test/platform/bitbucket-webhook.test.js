@@ -5,8 +5,8 @@ const test = require("node:test");
 const {
   createBitbucketWebhookHandler,
   registerBitbucketWebhook,
-} = require("../src/platform/code_host/providers/bitbucket/webhook");
-const { verifyBitbucketSignature } = require("../src/platform/code_host/providers/bitbucket/verify_signature");
+} = require("../../src/platform/code_host/providers/bitbucket/webhook");
+const { verifyBitbucketSignature } = require("../../src/platform/code_host/providers/bitbucket/verify_signature");
 
 function signPayload(secret, payloadBuffer) {
   return `sha256=${crypto.createHmac("sha256", secret).update(payloadBuffer).digest("hex")}`;

@@ -27,7 +27,7 @@ const {
 } = require("../../db");
 const { DEFAULT_BOT_NAME } = require("../../config");
 const { formatStatusResponse, isValidTimeZone } = require("../../util/format");
-const { createCalypsoCommandRegistry } = require("../registry/calypso_command_registry");
+const { createCalypsoCommandRegistry } = require("../registry/command_registry");
 
 function createCalypsoCommandService(serviceOptions = {}) {
   const commandRegistry = createCalypsoCommandRegistry({
@@ -115,12 +115,19 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
   const userId = mergedOptions.userId || mergedOptions.slackUserId;
   const communicationClient = mergedOptions.communicationClient || mergedOptions.slackClient || null;
   const deployPlatform = mergedOptions.deployPlatform || null;
+  const deployConfig = {
+    ...(serviceOptions.deployConfig || {}),
+    ...(commandContext.deployConfig || {}),
+  };
+  if (commandContext.deployProvider) {
+    deployConfig.deployProvider = commandContext.deployProvider;
+  }
 
   return {
     botName: String(mergedOptions.botName || defaultDependencies.defaultBotName),
     addUserToDeployWhitelistFn:
       mergedOptions.addUserToDeployWhitelistFn || defaultDependencies.addUserToDeployWhitelistFn,
-    deployConfig: mergedOptions.deployConfig || {},
+    deployConfig,
     formatStatusResponseFn:
       mergedOptions.formatStatusResponseFn || defaultDependencies.formatStatusResponseFn,
     getLastProdDeployAtFn:

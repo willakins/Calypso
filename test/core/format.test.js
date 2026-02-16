@@ -8,7 +8,7 @@ const {
   formatTimestampAsUtcLegacy,
   formatTimestampWithTimezone,
   isValidTimeZone,
-} = require("../src/util/format");
+} = require("../../src/util/format");
 
 test("formatStatusResponse returns no-blockers message", () => {
   const message = formatStatusResponse({

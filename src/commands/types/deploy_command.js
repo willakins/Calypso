@@ -1,4 +1,4 @@
-const { BaseCalypsoCommand } = require("./base_calypso_command");
+const { BaseCalypsoCommand } = require("./base_command");
 
 class DeployCommand extends BaseCalypsoCommand {
   constructor() {
@@ -72,10 +72,13 @@ class DeployCommand extends BaseCalypsoCommand {
 
     try {
       const deployResult = await runtime.triggerProdDeployFn(runtime.deployConfig);
+      const deployProvider =
+        deployResult.deployProvider || runtime.deployConfig.deployProvider || "digitalocean";
       const deploymentSummary = await this.recordDeploymentAndMarkPullRequests({
         runtime,
         lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
         externalDeploymentId: deployResult.externalDeployId,
+        provider: deployProvider,
       });
 
       const deploymentId = deploymentSummary.externalDeploymentId || "n/a";
@@ -87,6 +90,7 @@ class DeployCommand extends BaseCalypsoCommand {
           `Force deploy to prod is in progress (id: ${deploymentId}). Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
           this.buildDeploymentExecutionFields({
             externalDeploymentId: deploymentSummary.externalDeploymentId,
+            deployProvider,
             shouldNotifyDeploymentCompletion,
           }),
         );
@@ -96,6 +100,7 @@ class DeployCommand extends BaseCalypsoCommand {
         `Deploy to prod is in progress (id: ${deploymentId}). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
         this.buildDeploymentExecutionFields({
           externalDeploymentId: deploymentSummary.externalDeploymentId,
+          deployProvider,
           shouldNotifyDeploymentCompletion,
         }),
       );
@@ -126,31 +131,29 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   hasDeployConfiguration(deployConfig) {
-    const deployProvider = String(deployConfig.deployProvider || "digitalocean").toLowerCase();
-    const deployProductionAppId = deployConfig.deployProductionAppId || deployConfig.doAppIdProd;
-
-    if (deployProvider === "aws") {
-      return Boolean(
-        deployProductionAppId &&
-          deployConfig.deployRegion &&
-          deployConfig.deployAccessKeyId &&
-          deployConfig.deploySecretAccessKey,
-      );
-    }
-
     const deployToken = deployConfig.deployToken || deployConfig.digitaloceanToken;
-    return Boolean(deployToken) && Boolean(deployProductionAppId);
+    const deployProductionAppId = deployConfig.deployProductionAppId || deployConfig.doAppIdProd;
+    const hasDigitalOceanConfig = Boolean(deployToken) && Boolean(deployProductionAppId);
+    const hasAwsConfig = Boolean(
+      deployProductionAppId &&
+        deployConfig.deployRegion &&
+        deployConfig.deployAccessKeyId &&
+        deployConfig.deploySecretAccessKey,
+    );
+
+    return hasDigitalOceanConfig || hasAwsConfig;
   }
 
   async recordDeploymentAndMarkPullRequests({
     runtime,
     lastProductionDeploymentAt,
     externalDeploymentId,
+    provider,
   }) {
     return this.withDatabaseTransaction(runtime.pool, async () => {
       const deploymentRecord = await runtime.insertDeploymentFn(runtime.pool, {
         environment: "prod",
-        provider: runtime.deployConfig.deployProvider || "digitalocean",
+        provider: provider || runtime.deployConfig.deployProvider || "digitalocean",
         externalDeployId: externalDeploymentId,
       });
 
@@ -212,11 +215,13 @@ class DeployCommand extends BaseCalypsoCommand {
 
   buildDeploymentExecutionFields({
     externalDeploymentId,
+    deployProvider,
     shouldNotifyDeploymentCompletion,
   }) {
     return {
       deployTriggered: true,
       externalDeploymentId,
+      deployProvider: deployProvider || null,
       shouldNotifyDeploymentCompletion,
     };
   }

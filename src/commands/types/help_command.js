@@ -1,4 +1,4 @@
-const { BaseCalypsoCommand } = require("./base_calypso_command");
+const { BaseCalypsoCommand } = require("./base_command");
 const { DEFAULT_BOT_NAME } = require("../../config");
 
 class HelpCommand extends BaseCalypsoCommand {
@@ -95,7 +95,7 @@ function buildConfigHelpText(botName) {
     "`/calypso config communication-provider:slack|microsoft_teams`",
     "`/calypso config code-host-provider:github|bitbucket`",
     "`/calypso config deploy-provider:digitalocean|aws`",
-    "Provider changes apply after restart.",
+    "Provider changes apply to command handling immediately.",
     "",
     "*Review Recap Config*",
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",

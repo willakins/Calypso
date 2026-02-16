@@ -2,10 +2,10 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const test = require("node:test");
 
-const { registerCalypsoCommand } = require("../src/commands/calypso");
-const { createGithubWebhookHandler } = require("../src/platform/code_host/providers/github/webhook");
-const { runReviewRecapSchedulerTick } = require("../src/background_jobs/review_recap_scheduler");
-const { formatReviewRecapResponse } = require("../src/util/format");
+const { registerCalypsoCommand } = require("../../src/commands/command_router");
+const { createGithubWebhookHandler } = require("../../src/platform/code_host/providers/github/webhook");
+const { runReviewRecapSchedulerTick } = require("../../src/background_jobs/review_recap_scheduler");
+const { formatReviewRecapResponse } = require("../../src/util/format");
 
 const WEBHOOK_SECRET = "secret";
 

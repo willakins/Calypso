@@ -1,6 +1,6 @@
 const express = require("express");
 
-const { DEFAULT_BOT_NAME, loadConfig } = require("./config");
+const { DEFAULT_BOT_NAME, loadConfig, resolveCodeHostApiBaseUrl } = require("./config");
 const {
   createPool,
   getRuntimeProviderConfig,
@@ -82,6 +82,8 @@ async function initializeDatabase(pool) {
 }
 
 function wireCommunicationCommands(runtime) {
+  const dynamicDeployFunctions = buildDynamicDeployFunctions(runtime);
+
   runtime.communicationPlatform.registerCalypsoCommand({
     botName: runtime.config.botName,
     enableDeploymentCompletionNotifications: true,
@@ -90,6 +92,8 @@ function wireCommunicationCommands(runtime) {
     isWorkspaceAdminFn: async (_communicationClient, userId) =>
       runtime.communicationPlatform.isWorkspaceAdmin(userId),
     deployConfig: buildDeployConfig(runtime.config),
+    triggerProdDeployFn: dynamicDeployFunctions.triggerProdDeployFn,
+    waitForProdDeployCompletionFn: dynamicDeployFunctions.waitForProdDeployCompletionFn,
     resolveUserDisplayNameFn: async (_communicationClient, userId) =>
       runtime.communicationPlatform.resolveUserDisplayName(userId),
     runOpenPullRequestSyncNowFn: buildRunOpenPullRequestSyncNow(runtime),
@@ -151,19 +155,107 @@ function startBackgroundSchedulers(runtime) {
 }
 
 function buildRunOpenPullRequestSyncNow(runtime) {
-  if (!runtime.codeHostSyncClient) {
-    return null;
-  }
+  return async () => {
+    const codeHostProvider = await resolveCodeHostProviderForCommand(runtime);
+    const codeHostPlatform = createCodeHostPlatform({
+      provider: codeHostProvider,
+      config: buildRuntimeCodeHostConfig(runtime, codeHostProvider),
+    });
+    const codeHostClient = codeHostPlatform.createSyncClient();
+    if (!codeHostClient) {
+      return {
+        unavailableReason: "Sync unavailable: configure `CODE_HOST_TOKEN`.",
+      };
+    }
 
-  return () =>
-    runOpenPullRequestSyncTick({
-      codeHostClient: runtime.codeHostSyncClient,
+    return runOpenPullRequestSyncTick({
+      codeHostClient,
       logger: console,
       mainBranch: runtime.config.codeHostMainBranch,
       pool: runtime.pool,
       repository: runtime.config.codeHostRepository,
       swallowErrors: false,
     });
+  };
+}
+
+function buildDynamicDeployFunctions(runtime) {
+  return {
+    triggerProdDeployFn: async (deployConfig) => {
+      const deployProvider = await resolveDeployProviderForCommand(runtime, deployConfig);
+      const deployPlatform = createDeployPlatform({
+        provider: deployProvider,
+        config: runtime.config,
+      });
+      const deployResult = await deployPlatform.triggerProductionDeployment({
+        ...deployConfig,
+        deployProvider,
+      });
+
+      return {
+        ...deployResult,
+        deployProvider,
+      };
+    },
+
+    waitForProdDeployCompletionFn: async (deployConfig, externalDeployId) => {
+      const deployProvider = await resolveDeployProviderForCommand(runtime, deployConfig);
+      const deployPlatform = createDeployPlatform({
+        provider: deployProvider,
+        config: runtime.config,
+      });
+
+      return deployPlatform.waitForProductionDeploymentCompletion(
+        {
+          ...deployConfig,
+          deployProvider,
+        },
+        externalDeployId,
+      );
+    },
+  };
+}
+
+async function resolveDeployProviderForCommand(runtime, deployConfig = {}) {
+  const runtimeProviderConfig = await readRuntimeProviderConfigSafe(runtime);
+  return (
+    String(deployConfig.deployProvider || "").trim().toLowerCase() ||
+    runtimeProviderConfig.deployProvider ||
+    runtime.config.deployProvider
+  );
+}
+
+async function resolveCodeHostProviderForCommand(runtime) {
+  const runtimeProviderConfig = await readRuntimeProviderConfigSafe(runtime);
+  return runtimeProviderConfig.codeHostProvider || runtime.config.codeHostProvider;
+}
+
+function buildRuntimeCodeHostConfig(runtime, codeHostProvider) {
+  return {
+    ...runtime.config,
+    codeHostProvider,
+    codeHostApiBaseUrl: resolveCodeHostApiBaseUrl(codeHostProvider),
+  };
+}
+
+async function readRuntimeProviderConfigSafe(runtime) {
+  if (!runtime.pool) {
+    return {
+      communicationProvider: runtime.config.communicationProvider,
+      codeHostProvider: runtime.config.codeHostProvider,
+      deployProvider: runtime.config.deployProvider,
+    };
+  }
+
+  try {
+    return await getRuntimeProviderConfig(runtime.pool);
+  } catch (_error) {
+    return {
+      communicationProvider: runtime.config.communicationProvider,
+      codeHostProvider: runtime.config.codeHostProvider,
+      deployProvider: runtime.config.deployProvider,
+    };
+  }
 }
 
 function startHttpServer(httpApp, port, options = {}) {

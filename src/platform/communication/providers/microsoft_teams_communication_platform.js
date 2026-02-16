@@ -1,4 +1,4 @@
-const { registerCalypsoCommand } = require("../../../commands/calypso");
+const { registerCalypsoCommand } = require("../../../commands/command_router");
 const { BaseCommunicationPlatform } = require("../base_communication_platform");
 
 const DEFAULT_TEAMS_COMMAND_PATH = "/communication/commands";

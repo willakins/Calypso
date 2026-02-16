@@ -1,4 +1,4 @@
-const { BaseCalypsoCommand } = require("./base_calypso_command");
+const { BaseCalypsoCommand } = require("./base_command");
 
 class UnknownCommand extends BaseCalypsoCommand {
   constructor() {

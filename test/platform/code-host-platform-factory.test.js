@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { CODE_HOST_PROVIDERS } = require("../src/config");
-const { createCodeHostPlatform } = require("../src/platform/code_host/factory");
+const { CODE_HOST_PROVIDERS } = require("../../src/config");
+const { createCodeHostPlatform } = require("../../src/platform/code_host/factory");
 
 function buildGithubConfig(overrides = {}) {
   return {

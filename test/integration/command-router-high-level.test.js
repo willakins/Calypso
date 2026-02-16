@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { registerCalypsoCommand } = require("../src/commands/calypso");
+const { registerCalypsoCommand } = require("../../src/commands/command_router");
 
 test("high-level command lifecycle: status -> tested -> deploy -> status", async () => {
   const state = createInMemoryState();

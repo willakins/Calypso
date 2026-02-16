@@ -6,7 +6,7 @@ const {
   OpenPullRequestSyncer,
   REVIEW_SYNC_TASK_NAME,
   UNTESTED_SYNC_TASK_NAME,
-} = require("../src/background_jobs/syncer");
+} = require("../../src/background_jobs/syncer");
 
 test("OpenPullRequestSyncer runs separated review and untested tasks", async () => {
   const calls = [];
