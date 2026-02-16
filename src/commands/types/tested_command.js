@@ -1,6 +1,6 @@
 const { BaseCalypsoCommand } = require("./base_command");
 const { TIMEFRAME_DEFINITIONS, isValidTimeframe, timeframeSince } = require("../../shared/timeframes");
-const { formatTimestampByTimeFormat } = require("../../util/format");
+const { formatPullRequestReference, formatTimestampByTimeFormat } = require("../../util/format");
 
 class TestedCommand extends BaseCalypsoCommand {
   constructor() {
@@ -162,6 +162,11 @@ function formatRecentlyTestedPullRequestLine(
   timeFormat,
   timeZone,
 ) {
+  const pullRequestReference = formatPullRequestReference({
+    repo: pullRequest.repo,
+    prNumber: pullRequest.pr_number,
+    url: pullRequest.url,
+  });
   const testedByUserId = pullRequest.tested_by || null;
   const testedBy =
     (testedByUserId && testedByNameById.get(testedByUserId)) || testedByUserId || "unknown user";
@@ -169,7 +174,7 @@ function formatRecentlyTestedPullRequestLine(
     ? formatTimestampByTimeFormat(pullRequest.tested_at, { timeFormat, timeZone })
     : "at an unknown time";
   const titleSuffix = pullRequest.title ? ` - ${pullRequest.title}` : "";
-  return `• ${pullRequest.repo}#${pullRequest.pr_number}${titleSuffix} (${pullRequest.status}) tested by ${testedBy} ${testedAt}`;
+  return `• ${pullRequestReference}${titleSuffix} (${pullRequest.status}) tested by ${testedBy} ${testedAt}`;
 }
 
 module.exports = {

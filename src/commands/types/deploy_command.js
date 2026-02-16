@@ -1,4 +1,5 @@
 const { BaseCalypsoCommand } = require("./base_command");
+const { formatPullRequestReference } = require("../../util/format");
 
 class DeployCommand extends BaseCalypsoCommand {
   constructor() {
@@ -55,7 +56,8 @@ class DeployCommand extends BaseCalypsoCommand {
         [
           "Deploy blocked due to untested PRs:",
           ...deployGateState.blockingPullRequests.map(
-            (pr) => `• ${pr.repo}#${pr.pr_number} (${pr.status})`,
+            (pr) =>
+              `• ${formatPullRequestReference({ repo: pr.repo, prNumber: pr.pr_number, url: pr.url })} (${pr.status})`,
           ),
         ].join("\n"),
       );

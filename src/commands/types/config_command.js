@@ -131,6 +131,10 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildExecutionResult("Config command unavailable: database pool is not configured.");
     }
 
+    if (parsedCommand.action === "respond") {
+      return this.buildExecutionResult(parsedCommand.responseText || buildConfigUsageMessage());
+    }
+
     if (parsedCommand.action === "config_time_format") {
       await runtime.setConfiguredTimeFormatFn(
         runtime.pool,
@@ -235,6 +239,10 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
+    if (parsedCommand.action !== "config_timezone") {
+      return this.buildExecutionResult(buildConfigUsageMessage());
+    }
+
     if (!runtime.isValidTimeZoneFn(parsedCommand.timeZone)) {
       return this.buildExecutionResult(
         [
@@ -254,6 +262,25 @@ class ConfigCommand extends BaseCalypsoCommand {
       ].join(" "),
     );
   }
+
+  resolveResponseType({ parsedCommand }) {
+    if (isWorkspaceScopedConfigAction(parsedCommand.action)) {
+      return "in_channel";
+    }
+
+    return "ephemeral";
+  }
+}
+
+function isWorkspaceScopedConfigAction(action) {
+  return (
+    action === "config_review_recap_channel" ||
+    action === "config_review_recap_recency" ||
+    action === "config_review_recap_schedule" ||
+    action === "config_communication_provider" ||
+    action === "config_code_host_provider" ||
+    action === "config_deploy_provider"
+  );
 }
 
 function normalizeSlackChannelId(rawChannelInput) {

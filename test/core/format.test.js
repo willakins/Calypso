@@ -26,6 +26,7 @@ test("formatStatusResponse returns blocker lines with and without title", () => 
       {
         repo: "croft-eng/croft",
         pr_number: 11,
+        url: "https://github.com/croft-eng/croft/pull/11",
         status: "untested",
         title: "Add deploy gate",
       },
@@ -39,7 +40,10 @@ test("formatStatusResponse returns blocker lines with and without title", () => 
   });
 
   assert.match(message, /Blocking PRs since last prod deploy \(on February 13th, 2026 at 12:00 PM EST\):/);
-  assert.match(message, /• croft-eng\/croft#11 \(untested\) - Add deploy gate/);
+  assert.match(
+    message,
+    /• <https:\/\/github.com\/croft-eng\/croft\/pull\/11\|croft-eng\/croft#11> \(untested\) - Add deploy gate/,
+  );
   assert.match(message, /• croft-eng\/croft#12 \(untested\)/);
 });
 

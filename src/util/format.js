@@ -56,8 +56,11 @@ function formatReviewRecapResponse({
 
 function formatWaitingPullRequestLine({ pullRequest, timeZone }) {
   const pullRequestTitle = pullRequest.title || "(no title)";
-  const pullRequestReference = `${pullRequest.repo}#${pullRequest.pr_number}`;
-  const pullRequestLink = pullRequest.url ? `<${pullRequest.url}|${pullRequestReference}>` : pullRequestReference;
+  const pullRequestLink = formatPullRequestReference({
+    repo: pullRequest.repo,
+    prNumber: pullRequest.pr_number,
+    url: pullRequest.url,
+  });
   const formattedTimestamp = formatTimestampWithTimezone(pullRequest.opened_for_review_at, {
     style: TIMESTAMP_STYLES.human,
     timeZone: timeZone || "America/New_York",
@@ -82,8 +85,24 @@ function buildBlockersMessage(lastDeploymentTimestamp, blockers) {
 }
 
 function formatBlockingPullRequestLine(pullRequest) {
+  const pullRequestReference = formatPullRequestReference({
+    repo: pullRequest.repo,
+    prNumber: pullRequest.pr_number,
+    url: pullRequest.url,
+  });
   const pullRequestTitleSuffix = pullRequest.title ? ` - ${pullRequest.title}` : "";
-  return `• ${pullRequest.repo}#${pullRequest.pr_number} (${pullRequest.status})${pullRequestTitleSuffix}`;
+  return `• ${pullRequestReference} (${pullRequest.status})${pullRequestTitleSuffix}`;
+}
+
+function formatPullRequestReference({ repo, prNumber, url }) {
+  const normalizedRepo = String(repo || "").trim();
+  const normalizedPrNumber = Number.isFinite(Number(prNumber)) ? Number(prNumber) : String(prNumber || "");
+  const plainReference = `${normalizedRepo}#${normalizedPrNumber}`;
+  if (!url) {
+    return plainReference;
+  }
+
+  return `<${url}|${plainReference}>`;
 }
 
 function formatTimestampWithTimezone(value, options = {}) {
@@ -234,6 +253,7 @@ module.exports = {
   TIMESTAMP_STYLES,
   formatReviewRecapResponse,
   formatReviewRecencyLabel,
+  formatPullRequestReference,
   formatTimestampAsUtcLegacy,
   formatTimestampByTimeFormat,
   formatTimestampWithTimezone,

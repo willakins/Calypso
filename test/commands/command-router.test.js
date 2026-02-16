@@ -509,6 +509,7 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
         repo: "croft-eng/croft",
         pr_number: 55,
         title: "Add observability",
+        url: "https://github.com/croft-eng/croft/pull/55",
         author_login: "octocat",
         opened_for_review_at: "2026-02-13T22:00:17.000Z",
       },
@@ -528,7 +529,7 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Open PRs waiting on review:/);
-  assert.match(payload.text, /croft-eng\/croft#55 - Add observability/);
+  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/55\|croft-eng\/croft#55> - Add observability/);
   assert.match(payload.text, /created by octocat/);
   assert.match(payload.text, /opened for review on February 13th, 2026 at 5:00 PM EST/);
 });
@@ -548,6 +549,7 @@ test("registerCalypsoCommand filters waiting reviews by github user", async () =
         repo: "croft-eng/croft",
         pr_number: 11,
         title: "One",
+        url: "https://github.com/croft-eng/croft/pull/11",
         author_login: "octocat",
         opened_for_review_at: "2026-02-13T22:00:17.000Z",
       },
@@ -555,6 +557,7 @@ test("registerCalypsoCommand filters waiting reviews by github user", async () =
         repo: "croft-eng/croft",
         pr_number: 12,
         title: "Two",
+        url: "https://github.com/croft-eng/croft/pull/12",
         author_login: "hubot",
         opened_for_review_at: "2026-02-13T22:00:17.000Z",
       },
@@ -574,8 +577,8 @@ test("registerCalypsoCommand filters waiting reviews by github user", async () =
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /for github user octocat/);
-  assert.match(payload.text, /croft-eng\/croft#11 - One/);
-  assert.doesNotMatch(payload.text, /croft-eng\/croft#12 - Two/);
+  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/11\|croft-eng\/croft#11> - One/);
+  assert.doesNotMatch(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|croft-eng\/croft#12> - Two/);
 });
 
 test("registerCalypsoCommand shows no-results message for reviews timeframe filter", async () => {
@@ -761,6 +764,7 @@ test("registerCalypsoCommand shows recently tested PRs for tested recent", async
       {
         repo: "croft-eng/croft",
         pr_number: 123,
+        url: "https://github.com/croft-eng/croft/pull/123",
         status: "tested",
         tested_at: "2026-02-13T20:00:00.000Z",
         tested_by: "U123",
@@ -791,7 +795,7 @@ test("registerCalypsoCommand shows recently tested PRs for tested recent", async
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /PRs tested in the last day/);
-  assert.match(payload.text, /#123/);
+  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/123\|croft-eng\/croft#123>/);
   assert.match(payload.text, /tested by Willa on February 13th, 2026 at 3:00 PM EST/);
 });
 
@@ -808,7 +812,14 @@ test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
     pool: {},
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
-    listBlockingPullRequestsFn: async () => [{ repo: "croft-eng/croft", pr_number: 12, status: "untested" }],
+    listBlockingPullRequestsFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 12,
+        url: "https://github.com/croft-eng/croft/pull/12",
+        status: "untested",
+      },
+    ],
     deployConfig: {},
   });
 
@@ -823,6 +834,7 @@ test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Deploy blocked due to untested PRs/);
+  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|croft-eng\/croft#12> \(untested\)/);
 });
 
 test("registerCalypsoCommand denies deploy for non-admin, non-whitelisted user", async () => {
@@ -1296,6 +1308,36 @@ test("registerCalypsoCommand config command denies non-admin, non-whitelisted us
   assert.match(payload.text, /Config update denied/);
 });
 
+test("registerCalypsoCommand config command returns usage when argument is missing", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /^Usage:/);
+  assert.match(payload.text, /`\/calypso config time-format:human`/);
+  assert.match(payload.text, /`\/calypso config timezone:America\/New_York`/);
+});
+
 test("registerCalypsoCommand config command updates timezone when valid", async () => {
   let commandHandler;
   const capturedCalls = [];
@@ -1407,7 +1449,7 @@ test("registerCalypsoCommand config command updates review recap channel", async
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated review recap channel to <#C999ABC>/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].targetChannelId, "C999ABC");
@@ -1442,7 +1484,7 @@ test("registerCalypsoCommand config command updates review recap recency", async
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated review recap recency to `2w`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].recencyValue, 2);
@@ -1478,7 +1520,7 @@ test("registerCalypsoCommand config command updates review recap schedule", asyn
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated review recap schedule to `tue@10:15`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].scheduleWeekday, "tue");
@@ -1514,7 +1556,7 @@ test("registerCalypsoCommand config command updates communication provider", asy
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated communication provider to `slack`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "slack");
@@ -1549,7 +1591,7 @@ test("registerCalypsoCommand config command updates code-host provider", async (
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated code-host provider to `github`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "github");
@@ -1584,7 +1626,7 @@ test("registerCalypsoCommand config command updates deploy provider", async () =
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated deploy provider to `digitalocean`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "digitalocean");
@@ -1619,7 +1661,7 @@ test("registerCalypsoCommand config command updates microsoft teams provider", a
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated communication provider to `microsoft_teams`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "microsoft_teams");
@@ -1654,7 +1696,7 @@ test("registerCalypsoCommand config command updates bitbucket code-host provider
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated code-host provider to `bitbucket`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "bitbucket");
@@ -1689,7 +1731,7 @@ test("registerCalypsoCommand config command updates aws deploy provider", async 
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated deploy provider to `aws`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "aws");

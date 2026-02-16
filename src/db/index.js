@@ -118,7 +118,7 @@ async function getLastProdDeployAt(pool) {
 
 async function listBlockingPullRequests(pool, lastDeployAt) {
   const query = `
-    SELECT repo, pr_number, title, status, merged_at
+    SELECT repo, pr_number, title, url, status, merged_at
     FROM pull_requests
     WHERE merged_at > $1
       AND status NOT IN ('tested', 'deployed')
@@ -305,7 +305,7 @@ async function markAllUntestedPullRequestsTested(pool, testedBy) {
 
 async function listRecentlyTestedPullRequests(pool, sinceTimestamp) {
   const query = `
-    SELECT repo, pr_number, title, status, tested_at, tested_by
+    SELECT repo, pr_number, title, url, status, tested_at, tested_by
     FROM pull_requests
     WHERE tested_at IS NOT NULL
       AND tested_at >= $1
