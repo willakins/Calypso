@@ -13,7 +13,7 @@ function registerGithubWebhook(httpApp, options) {
   const webhookHandler = createGithubWebhookHandler(options);
   registerRawJsonWebhookRoutes(httpApp, {
     paths: options.paths,
-    defaultPath: "/github/webhook",
+    defaultPath: "/codehost/webhook",
     handler: webhookHandler,
   });
 }

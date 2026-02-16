@@ -19,7 +19,7 @@ function buildGithubConfig(overrides = {}) {
   };
 }
 
-test("createCodeHostPlatform builds github provider and registers both webhook paths", () => {
+test("createCodeHostPlatform builds github provider and registers configured webhook path", () => {
   const platform = createCodeHostPlatform({
     provider: CODE_HOST_PROVIDERS.github,
     config: buildGithubConfig(),
@@ -34,7 +34,7 @@ test("createCodeHostPlatform builds github provider and registers both webhook p
 
   platform.registerWebhookRoutes(httpApp, { pool: {} });
 
-  assert.deepEqual(paths, ["/github/webhook", "/codehost/webhook"]);
+  assert.deepEqual(paths, ["/codehost/webhook"]);
   assert.equal(typeof platform.createSyncClient, "function");
 });
 

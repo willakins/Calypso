@@ -172,7 +172,7 @@ main() {
   echo "- DATABASE_URL: $DATABASE_URL"
   if [[ -n "$ngrok_public_url" ]]; then
     echo "- ngrok URL: $ngrok_public_url"
-    echo "  GitHub webhook URL: $ngrok_public_url/github/webhook"
+    echo "  Code-host webhook URL: $ngrok_public_url/codehost/webhook"
   else
     echo "- ngrok URL: unavailable (check $NGROK_LOG_FILE)"
   fi

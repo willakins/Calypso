@@ -346,7 +346,6 @@ This local command starts:
 4. Configure your code-host webhook to the printed ngrok URL:
 
 - `https://<ngrok-domain>/codehost/webhook`
-- `https://<ngrok-domain>/github/webhook` (legacy-compatible)
 
 5. Stop local runtime:
 
@@ -366,7 +365,7 @@ Calypso is already set up for this:
 
 - Dockerized runtime (`Dockerfile`).
 - HTTP health endpoint (`GET /healthz`).
-- Public webhook routes (`/codehost/webhook`, `/github/webhook`).
+- Public webhook route (`/codehost/webhook`).
 - Startup migrations run automatically.
 
 Use these steps:
@@ -396,7 +395,6 @@ Use these steps:
 7. Deploy the app.
 8. Set your code-host webhook URL to:
    - `https://<your-app-domain>/codehost/webhook`
-   - or `https://<your-app-domain>/github/webhook`
 9. Smoke test:
    - `/calypso help`
    - `/calypso status`
@@ -417,8 +415,7 @@ docker run --rm -p 3000:3000 --env-file .env calypso:local
 
 Endpoint:
 
-- `POST /github/webhook` (backward-compatible)
-- `POST /codehost/webhook` (provider-neutral alias)
+- `POST /codehost/webhook`
 
 Rules:
 

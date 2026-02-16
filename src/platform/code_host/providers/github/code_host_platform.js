@@ -32,7 +32,7 @@ class GithubCodeHostPlatform extends BaseCodeHostPlatform {
         repositoryFullName: this.config.codeHostRepository || this.config.githubRepo,
         webhookSecret: this.config.codeHostWebhookSecret || this.config.githubWebhookSecret,
       },
-      paths: ["/github/webhook", "/codehost/webhook"],
+      paths: ["/codehost/webhook"],
     });
   }
 }

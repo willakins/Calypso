@@ -88,7 +88,7 @@ test("verifyGithubSignature validates a correct sha256 signature", () => {
   assert.equal(valid, true);
 });
 
-test("registerGithubWebhook registers both configured webhook paths", () => {
+test("registerGithubWebhook registers configured webhook path", () => {
   const registeredPaths = [];
   const app = {
     post(path, _rawMiddleware, _handler) {
@@ -103,10 +103,10 @@ test("registerGithubWebhook registers both configured webhook paths", () => {
       repositoryFullName: "croft-eng/croft",
       webhookSecret: "secret",
     },
-    paths: ["/github/webhook", "/codehost/webhook"],
+    paths: ["/codehost/webhook"],
   });
 
-  assert.deepEqual(registeredPaths, ["/github/webhook", "/codehost/webhook"]);
+  assert.deepEqual(registeredPaths, ["/codehost/webhook"]);
 });
 
 test("github webhook returns 401 on invalid signature", async () => {
