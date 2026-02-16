@@ -21,12 +21,13 @@ async function start() {
 
   wireHealthcheckRoute(runtime);
   wireCommunicationCommands(runtime);
+  wireCommunicationRoutes(runtime);
   wireCodeHostWebhook(runtime);
 
   await startServices(runtime);
   startBackgroundSchedulers(runtime);
 
-  console.log(`${runtime.config.botName} is running in Socket Mode with database migrations applied.`);
+  console.log(`${runtime.config.botName} is running with database migrations applied.`);
 }
 
 async function loadRuntime() {
@@ -101,6 +102,12 @@ function wireHealthcheckRoute(runtime) {
   });
 }
 
+function wireCommunicationRoutes(runtime) {
+  if (typeof runtime.communicationPlatform.registerHttpRoutes === "function") {
+    runtime.communicationPlatform.registerHttpRoutes(runtime.httpApp);
+  }
+}
+
 function buildDeployConfig(config) {
   return {
     deployProvider: config.deployProvider,
@@ -108,6 +115,10 @@ function buildDeployConfig(config) {
     deploymentTimeoutMs: config.deployTimeoutSeconds * 1000,
     deployToken: config.deployToken,
     deployProductionAppId: config.deployProductionAppId,
+    deployRegion: config.deployRegion,
+    deployAccessKeyId: config.deployAccessKeyId,
+    deploySecretAccessKey: config.deploySecretAccessKey,
+    deploySessionToken: config.deploySessionToken,
   };
 }
 

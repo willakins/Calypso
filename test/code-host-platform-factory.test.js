@@ -47,11 +47,49 @@ test("github code-host provider returns null sync client when github token is mi
   assert.equal(platform.createSyncClient(), null);
 });
 
-test("createCodeHostPlatform fails fast for bitbucket provider", () => {
-  assert.throws(
-    () => createCodeHostPlatform({ provider: CODE_HOST_PROVIDERS.bitbucket, config: {} }),
-    /Provider 'bitbucket' for code-host is not implemented/,
-  );
+test("createCodeHostPlatform builds bitbucket provider and registers webhook paths", () => {
+  const platform = createCodeHostPlatform({
+    provider: CODE_HOST_PROVIDERS.bitbucket,
+    config: {
+      codeHostApiBaseUrl: "https://api.bitbucket.org/2.0",
+      codeHostApiMaxPages: 100,
+      codeHostApiPageSize: 50,
+      codeHostApiUserAgent: "calypso-bot",
+      codeHostMainBranch: "main",
+      codeHostRepository: "workspace/repo",
+      codeHostToken: "bb-token",
+      codeHostWebhookSecret: "secret",
+    },
+  });
+
+  const paths = [];
+  const httpApp = {
+    post(path) {
+      paths.push(path);
+    },
+  };
+  platform.registerWebhookRoutes(httpApp, { pool: {} });
+
+  assert.deepEqual(paths, ["/bitbucket/webhook", "/codehost/webhook"]);
+  assert.equal(typeof platform.createSyncClient, "function");
+});
+
+test("bitbucket code-host provider returns null sync client when token is missing", () => {
+  const platform = createCodeHostPlatform({
+    provider: CODE_HOST_PROVIDERS.bitbucket,
+    config: {
+      codeHostApiBaseUrl: "https://api.bitbucket.org/2.0",
+      codeHostApiMaxPages: 100,
+      codeHostApiPageSize: 50,
+      codeHostApiUserAgent: "calypso-bot",
+      codeHostMainBranch: "main",
+      codeHostRepository: "workspace/repo",
+      codeHostToken: "",
+      codeHostWebhookSecret: "secret",
+    },
+  });
+
+  assert.equal(platform.createSyncClient(), null);
 });
 
 test("createCodeHostPlatform rejects unknown providers", () => {

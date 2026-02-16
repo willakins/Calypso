@@ -11,6 +11,10 @@ class BaseCommunicationPlatform {
     throw new Error(`${this.provider} communication platform must implement registerCalypsoCommand().`);
   }
 
+  registerHttpRoutes(_httpApp) {
+    return;
+  }
+
   getCommandClient() {
     throw new Error(`${this.provider} communication platform must implement getCommandClient().`);
   }

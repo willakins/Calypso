@@ -1,25 +1,21 @@
-const express = require("express");
-
 const {
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntested,
 } = require("../../../../db");
+const {
+  createCodeHostWebhookHandler,
+  registerRawJsonWebhookRoutes,
+} = require("../shared/webhook_common");
 const { verifyGithubSignature } = require("./verify_signature");
 
 function registerGithubWebhook(httpApp, options) {
-  const webhookPaths = Array.isArray(options.paths) && options.paths.length > 0
-    ? options.paths
-    : ["/github/webhook"];
   const webhookHandler = createGithubWebhookHandler(options);
-
-  for (const webhookPath of webhookPaths) {
-    httpApp.post(
-      webhookPath,
-      express.raw({ type: "application/json" }),
-      webhookHandler,
-    );
-  }
+  registerRawJsonWebhookRoutes(httpApp, {
+    paths: options.paths,
+    defaultPath: "/github/webhook",
+    handler: webhookHandler,
+  });
 }
 
 function createGithubWebhookHandler(options) {
@@ -31,45 +27,23 @@ function createGithubWebhookHandler(options) {
   } = options;
   const githubSettings = readGithubSettings(options);
 
-  return async (request, response) => {
-    if (!isRequestSignatureValid(request, githubSettings.webhookSecret)) {
-      return response.status(401).json({ ok: false, error: "invalid signature" });
-    }
-
-    const payload = tryParseJsonPayload(request.body);
-    if (!payload) {
-      return response.status(400).json({ ok: false, error: "invalid json payload" });
-    }
-
-    const eventName = readGithubEventName(request);
-    if (!isSupportedGithubWebhookEvent(eventName)) {
-      return response.status(200).json({ ok: true, ignored: true });
-    }
-
-    if (!isPullRequestForTrackedMain(payload, githubSettings)) {
-      return response.status(200).json({ ok: true, ignored: true });
-    }
-
-    try {
-      const result = await processWebhookEvent({
+  return createCodeHostWebhookHandler({
+    providerLabel: "GitHub",
+    webhookSecret: githubSettings.webhookSecret,
+    isRequestSignatureValid,
+    readEventName: readGithubEventName,
+    isSupportedEvent: isSupportedGithubWebhookEvent,
+    isPullRequestForTrackedMain: (payload) => isPullRequestForTrackedMain(payload, githubSettings),
+    processEvent: ({ eventName, payload }) =>
+      processWebhookEvent({
         eventName,
         payload,
         pool,
         upsertPullRequestAsUntestedFn,
         upsertOpenPullRequestReviewStateFn,
         updatePullRequestReviewSubmissionFn,
-      });
-
-      return response.status(200).json({
-        ok: true,
-        ...result,
-      });
-    } catch (error) {
-      console.error("Failed to process GitHub webhook.");
-      console.error(error.message);
-      return response.status(500).json({ ok: false, error: "internal error" });
-    }
-  };
+      }),
+  });
 }
 
 async function processWebhookEvent({
@@ -181,14 +155,6 @@ function isRequestSignatureValid(request, webhookSecret) {
     signatureHeader: request.get("x-hub-signature-256"),
     secret: webhookSecret,
   });
-}
-
-function tryParseJsonPayload(rawBodyBuffer) {
-  try {
-    return JSON.parse(rawBodyBuffer.toString("utf8"));
-  } catch (_error) {
-    return null;
-  }
 }
 
 function readGithubEventName(request) {

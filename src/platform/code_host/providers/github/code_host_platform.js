@@ -1,6 +1,6 @@
-const { createGithubClient } = require("./github/client");
-const { registerGithubWebhook } = require("./github/webhook");
-const { BaseCodeHostPlatform } = require("../base_code_host_platform");
+const { createGithubClient } = require("./client");
+const { registerGithubWebhook } = require("./webhook");
+const { BaseCodeHostPlatform } = require("../../base_code_host_platform");
 
 class GithubCodeHostPlatform extends BaseCodeHostPlatform {
   constructor({ config }) {

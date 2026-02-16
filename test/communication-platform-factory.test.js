@@ -4,14 +4,14 @@ const test = require("node:test");
 const { COMMUNICATION_PROVIDERS } = require("../src/config");
 const { createCommunicationPlatform } = require("../src/platform/communication/factory");
 
-test("createCommunicationPlatform fails fast for microsoft teams", () => {
-  assert.throws(
-    () => createCommunicationPlatform({
-      provider: COMMUNICATION_PROVIDERS.microsoftTeams,
-      config: {},
-    }),
-    /Provider 'microsoft_teams' for communication is not implemented/,
-  );
+test("createCommunicationPlatform builds microsoft teams provider", () => {
+  const platform = createCommunicationPlatform({
+    provider: COMMUNICATION_PROVIDERS.microsoftTeams,
+    config: {},
+  });
+
+  assert.ok(platform);
+  assert.equal(platform.provider, COMMUNICATION_PROVIDERS.microsoftTeams);
 });
 
 test("createCommunicationPlatform rejects unknown providers", () => {

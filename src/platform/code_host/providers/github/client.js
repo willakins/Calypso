@@ -1,3 +1,11 @@
+const {
+  assertNonEmptyString,
+  assertPositiveInteger,
+  buildRequestUrl,
+  splitRepositoryFullName,
+  throwIfRequestFailed,
+} = require("../shared/client_common");
+
 function createGithubClient(options) {
   const clientSettings = normalizeGithubClientSettings(options);
 
@@ -68,7 +76,7 @@ async function fetchAllPagesFromGithub({ clientSettings, endpointPath, queryPara
   let pageNumber = 1;
 
   while (pageNumber <= clientSettings.apiMaxPages) {
-    const requestUrl = buildGithubRequestUrl({
+    const requestUrl = buildRequestUrl({
       apiBaseUrl: clientSettings.apiBaseUrl,
       endpointPath,
       queryParameters: {
@@ -82,7 +90,7 @@ async function fetchAllPagesFromGithub({ clientSettings, endpointPath, queryPara
       method: "GET",
       headers: buildGithubRequestHeaders(clientSettings),
     });
-    await throwIfGithubRequestFailed(response, requestUrl);
+    await throwIfRequestFailed({ providerName: "GitHub", response, requestUrl });
 
     const pageRecords = await response.json();
     if (!Array.isArray(pageRecords)) {
@@ -102,16 +110,6 @@ async function fetchAllPagesFromGithub({ clientSettings, endpointPath, queryPara
   );
 }
 
-function buildGithubRequestUrl({ apiBaseUrl, endpointPath, queryParameters }) {
-  const requestUrl = new URL(endpointPath, apiBaseUrl);
-  for (const [key, value] of Object.entries(queryParameters)) {
-    if (value !== undefined && value !== null && value !== "") {
-      requestUrl.searchParams.set(key, String(value));
-    }
-  }
-  return requestUrl.toString();
-}
-
 function buildGithubRequestHeaders(clientSettings) {
   return {
     Accept: "application/vnd.github+json",
@@ -119,43 +117,6 @@ function buildGithubRequestHeaders(clientSettings) {
     "X-GitHub-Api-Version": clientSettings.apiVersion,
     "User-Agent": clientSettings.apiUserAgent,
   };
-}
-
-async function throwIfGithubRequestFailed(response, requestUrl) {
-  if (response.ok) {
-    return;
-  }
-
-  const responseBody = await response.text();
-  throw new Error(
-    `GitHub API request failed (${response.status}) for ${requestUrl}: ${responseBody}`,
-  );
-}
-
-function splitRepositoryFullName(repositoryFullName) {
-  const normalizedRepositoryFullName = String(repositoryFullName || "").trim();
-  const repositoryParts = normalizedRepositoryFullName.split("/");
-  if (repositoryParts.length !== 2 || !repositoryParts[0] || !repositoryParts[1]) {
-    throw new Error(`Invalid repository full name: ${repositoryFullName}`);
-  }
-
-  return {
-    owner: repositoryParts[0],
-    name: repositoryParts[1],
-  };
-}
-
-function assertNonEmptyString(value, name) {
-  if (!value) {
-    throw new Error(`${name} is required`);
-  }
-}
-
-function assertPositiveInteger(value, name) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
 }
 
 module.exports = {

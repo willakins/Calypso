@@ -37,13 +37,13 @@ blocks production deploys when untested changes exist, and posts scheduled revie
 
 Calypso is a single Node.js service composed of:
 
-- Communication platform provider (Slack implemented; Microsoft Teams scaffolded).
-- Code-host platform provider (GitHub implemented; Bitbucket scaffolded).
-- Deploy platform provider (DigitalOcean implemented; AWS scaffolded).
+- Communication platform provider (Slack implemented; Microsoft Teams implemented).
+- Code-host platform provider (GitHub implemented; Bitbucket implemented).
+- Deploy platform provider (DigitalOcean implemented; AWS CodePipeline implemented).
 - Express HTTP server for webhooks.
 - Postgres persistence through `pg`.
 
-Unimplemented providers intentionally fail fast at startup when selected.
+Unknown providers fail fast at startup.
 
 ### Command System Design
 
@@ -107,9 +107,13 @@ src/
       base_code_host_platform.js
       factory.js
       providers/
-        github_code_host_platform.js
-        bitbucket_code_host_platform.js
         github/
+          code_host_platform.js
+          client.js
+          webhook.js
+          verify_signature.js
+        bitbucket/
+          code_host_platform.js
           client.js
           webhook.js
           verify_signature.js
@@ -119,6 +123,8 @@ src/
       providers/
         digitalocean_deploy_platform.js
         aws_deploy_platform.js
+        aws/
+          client.js
         digitalocean/
           client.js
   util/
@@ -153,7 +159,7 @@ Required when `COMMUNICATION_PROVIDER=slack`:
 - `COMMUNICATION_BOT_TOKEN`
 - `COMMUNICATION_APP_TOKEN`
 
-Required when `CODE_HOST_PROVIDER=github`:
+Required when `CODE_HOST_PROVIDER=github` or `CODE_HOST_PROVIDER=bitbucket`:
 
 - `CODE_HOST_WEBHOOK_SECRET`
 - `CODE_HOST_REPOSITORY` (example: `croft-eng/croft`)
@@ -173,33 +179,51 @@ Provider support matrix:
 
 - Communication:
   - `slack`: implemented
-  - `microsoft_teams`: scaffold only (startup fail-fast)
+  - `microsoft_teams`: implemented
 - Code host:
   - `github`: implemented
-  - `bitbucket`: scaffold only (startup fail-fast)
+  - `bitbucket`: implemented
 - Deploy:
   - `digitalocean`: implemented
-  - `aws`: scaffold only (startup fail-fast)
+  - `aws`: implemented (CodePipeline)
 
 ### How To Get Each Value
 
 `COMMUNICATION_PROVIDER`
 
 - Provider selector for communication integration.
-- Supported values: `slack` (implemented), `microsoft_teams` (startup fail-fast scaffold).
+- Supported values: `slack` (implemented), `microsoft_teams` (implemented).
 - Default: `slack`.
 
 `CODE_HOST_PROVIDER`
 
 - Provider selector for code-host integration.
-- Supported values: `github` (implemented), `bitbucket` (startup fail-fast scaffold).
+- Supported values: `github` (implemented), `bitbucket` (implemented).
 - Default: `github`.
 
 `DEPLOY_PROVIDER`
 
 - Provider selector for deploy integration.
-- Supported values: `digitalocean` (implemented), `aws` (startup fail-fast scaffold).
+- Supported values: `digitalocean` (implemented), `aws` (implemented via CodePipeline).
 - Default: `digitalocean`.
+
+`DEPLOY_REGION`
+
+- Deploy provider region.
+- Used by AWS CodePipeline deploy provider.
+- Default: `us-east-1`.
+
+`DEPLOY_ACCESS_KEY_ID`
+
+- Access key id used by AWS deploy provider request signing.
+
+`DEPLOY_SECRET_ACCESS_KEY`
+
+- Secret access key used by AWS deploy provider request signing.
+
+`DEPLOY_SESSION_TOKEN`
+
+- Optional session token for temporary AWS credentials.
 
 `BOT_NAME`
 
@@ -214,6 +238,21 @@ Provider support matrix:
 `COMMUNICATION_APP_TOKEN`
 
 - Slack App -> `Socket Mode` -> enable -> generate app-level token with `connections:write` scope -> copy token (`xapp-...`).
+
+`COMMUNICATION_COMMAND_PATH`
+
+- Provider-agnostic HTTP path for incoming communication command requests.
+- Used by `microsoft_teams` provider for Calypso command ingestion.
+- Default: `/communication/commands`.
+
+`COMMUNICATION_WEBHOOK_URL`
+
+- Provider-agnostic outbound webhook URL for communication platforms that support webhook posting.
+- Used by `microsoft_teams` for in-channel recap posts and follow-up channel messages.
+
+`COMMUNICATION_ADMIN_USER_IDS`
+
+- Optional comma-separated user IDs treated as workspace admins when `COMMUNICATION_PROVIDER=microsoft_teams`.
 
 `DATABASE_URL`
 
@@ -319,7 +358,7 @@ On app startup Calypso will:
 
 - Verify DB connectivity (`SELECT 1`).
 - Run migrations (`src/db/migrations/*.sql`) idempotently.
-- Construct selected communication/code-host/deploy providers (fail-fast if selected provider is scaffold-only).
+- Construct selected communication/code-host/deploy providers.
 - Start webhook server on `PORT`.
 - Start communication platform runtime (Socket Mode for Slack).
 

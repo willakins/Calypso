@@ -1,10 +1,10 @@
 const { CODE_HOST_PROVIDERS, DEFAULT_CODE_HOST_PROVIDER } = require("../../config");
-const { BitbucketCodeHostPlatform } = require("./providers/bitbucket_code_host_platform");
-const { GithubCodeHostPlatform } = require("./providers/github_code_host_platform");
+const { BitbucketCodeHostPlatform } = require("./providers/bitbucket/code_host_platform");
+const { GithubCodeHostPlatform } = require("./providers/github/code_host_platform");
 
 const CODE_HOST_PLATFORM_BUILDERS = Object.freeze({
   [CODE_HOST_PROVIDERS.github]: ({ config }) => new GithubCodeHostPlatform({ config }),
-  [CODE_HOST_PROVIDERS.bitbucket]: () => new BitbucketCodeHostPlatform(),
+  [CODE_HOST_PROVIDERS.bitbucket]: ({ config }) => new BitbucketCodeHostPlatform({ config }),
 });
 
 function createCodeHostPlatform(options = {}) {

@@ -1594,9 +1594,9 @@ test("registerCalypsoCommand config command updates deploy provider", async () =
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 
-test("registerCalypsoCommand config command rejects unavailable communication provider", async () => {
+test("registerCalypsoCommand config command updates microsoft teams provider", async () => {
   let commandHandler;
-  let setterCalled = false;
+  const capturedCalls = [];
   const app = {
     command(_name, handler) {
       commandHandler = handler;
@@ -1606,9 +1606,9 @@ test("registerCalypsoCommand config command rejects unavailable communication pr
   registerCalypsoCommand(app, {
     pool: {},
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
-    setConfiguredCommunicationProviderFn: async () => {
-      setterCalled = true;
-      return {};
+    setConfiguredCommunicationProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { communication_provider: provider, updated_by: updatedBy };
     },
   });
 
@@ -1623,14 +1623,15 @@ test("registerCalypsoCommand config command rejects unavailable communication pr
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Provider `microsoft_teams` is not available yet/);
-  assert.match(payload.text, /Supported communication provider\(s\): `slack`/);
-  assert.equal(setterCalled, false);
+  assert.match(payload.text, /Updated communication provider to `microsoft_teams`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].provider, "microsoft_teams");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 
-test("registerCalypsoCommand config command rejects unavailable code-host provider", async () => {
+test("registerCalypsoCommand config command updates bitbucket code-host provider", async () => {
   let commandHandler;
-  let setterCalled = false;
+  const capturedCalls = [];
   const app = {
     command(_name, handler) {
       commandHandler = handler;
@@ -1640,9 +1641,9 @@ test("registerCalypsoCommand config command rejects unavailable code-host provid
   registerCalypsoCommand(app, {
     pool: {},
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
-    setConfiguredCodeHostProviderFn: async () => {
-      setterCalled = true;
-      return {};
+    setConfiguredCodeHostProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { code_host_provider: provider, updated_by: updatedBy };
     },
   });
 
@@ -1657,14 +1658,15 @@ test("registerCalypsoCommand config command rejects unavailable code-host provid
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Provider `bitbucket` is not available yet/);
-  assert.match(payload.text, /Supported code-host provider\(s\): `github`/);
-  assert.equal(setterCalled, false);
+  assert.match(payload.text, /Updated code-host provider to `bitbucket`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].provider, "bitbucket");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 
-test("registerCalypsoCommand config command rejects unavailable deploy provider", async () => {
+test("registerCalypsoCommand config command updates aws deploy provider", async () => {
   let commandHandler;
-  let setterCalled = false;
+  const capturedCalls = [];
   const app = {
     command(_name, handler) {
       commandHandler = handler;
@@ -1674,9 +1676,9 @@ test("registerCalypsoCommand config command rejects unavailable deploy provider"
   registerCalypsoCommand(app, {
     pool: {},
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
-    setConfiguredDeployProviderFn: async () => {
-      setterCalled = true;
-      return {};
+    setConfiguredDeployProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { deploy_provider: provider, updated_by: updatedBy };
     },
   });
 
@@ -1691,7 +1693,9 @@ test("registerCalypsoCommand config command rejects unavailable deploy provider"
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Provider `aws` is not available yet/);
-  assert.match(payload.text, /Supported deploy provider\(s\): `digitalocean`/);
-  assert.equal(setterCalled, false);
+  assert.match(payload.text, /Updated deploy provider to `aws`/);
+  assert.match(payload.text, /Restart Calypso for this change to take effect/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].provider, "aws");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });

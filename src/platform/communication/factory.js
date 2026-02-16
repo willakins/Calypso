@@ -6,7 +6,8 @@ const { SlackCommunicationPlatform } = require("./providers/slack_communication_
 
 const COMMUNICATION_PLATFORM_BUILDERS = Object.freeze({
   [COMMUNICATION_PROVIDERS.slack]: ({ config }) => new SlackCommunicationPlatform({ config }),
-  [COMMUNICATION_PROVIDERS.microsoftTeams]: () => new MicrosoftTeamsCommunicationPlatform(),
+  [COMMUNICATION_PROVIDERS.microsoftTeams]: ({ config }) =>
+    new MicrosoftTeamsCommunicationPlatform({ config }),
 });
 
 function createCommunicationPlatform(options = {}) {

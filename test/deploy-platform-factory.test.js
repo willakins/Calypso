@@ -11,11 +11,11 @@ test("createDeployPlatform builds digitalocean provider", () => {
   assert.equal(typeof platform.waitForProductionDeploymentCompletion, "function");
 });
 
-test("createDeployPlatform fails fast for aws provider", () => {
-  assert.throws(
-    () => createDeployPlatform({ provider: DEPLOY_PROVIDERS.aws }),
-    /Provider 'aws' for deploy is not implemented/,
-  );
+test("createDeployPlatform builds aws provider", () => {
+  const platform = createDeployPlatform({ provider: DEPLOY_PROVIDERS.aws });
+
+  assert.equal(typeof platform.triggerProductionDeployment, "function");
+  assert.equal(typeof platform.waitForProductionDeploymentCompletion, "function");
 });
 
 test("createDeployPlatform rejects unknown providers", () => {

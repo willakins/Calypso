@@ -126,8 +126,19 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   hasDeployConfiguration(deployConfig) {
-    const deployToken = deployConfig.deployToken || deployConfig.digitaloceanToken;
+    const deployProvider = String(deployConfig.deployProvider || "digitalocean").toLowerCase();
     const deployProductionAppId = deployConfig.deployProductionAppId || deployConfig.doAppIdProd;
+
+    if (deployProvider === "aws") {
+      return Boolean(
+        deployProductionAppId &&
+          deployConfig.deployRegion &&
+          deployConfig.deployAccessKeyId &&
+          deployConfig.deploySecretAccessKey,
+      );
+    }
+
+    const deployToken = deployConfig.deployToken || deployConfig.digitaloceanToken;
     return Boolean(deployToken) && Boolean(deployProductionAppId);
   }
 

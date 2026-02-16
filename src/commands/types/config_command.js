@@ -23,20 +23,7 @@ const DEPLOY_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "deploy-provider",
   Object.values(DEPLOY_PROVIDERS),
 );
-const UNAVAILABLE_PROVIDERS = Object.freeze({
-  [COMMUNICATION_PROVIDERS.microsoftTeams]: {
-    category: "communication",
-    availableOptions: [COMMUNICATION_PROVIDERS.slack],
-  },
-  [CODE_HOST_PROVIDERS.bitbucket]: {
-    category: "code-host",
-    availableOptions: [CODE_HOST_PROVIDERS.github],
-  },
-  [DEPLOY_PROVIDERS.aws]: {
-    category: "deploy",
-    availableOptions: [DEPLOY_PROVIDERS.digitalocean],
-  },
-});
+const UNAVAILABLE_PROVIDERS = Object.freeze({});
 
 class ConfigCommand extends BaseCalypsoCommand {
   constructor() {

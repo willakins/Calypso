@@ -69,6 +69,10 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       DEPLOY_TIMEOUT_SECONDS: "900",
       DEPLOY_TOKEN: "  do-token  ",
       DEPLOY_PROD_APP_ID: "  app-id  ",
+      DEPLOY_REGION: " us-west-2 ",
+      DEPLOY_ACCESS_KEY_ID: " AKIA123 ",
+      DEPLOY_SECRET_ACCESS_KEY: " secret-123 ",
+      DEPLOY_SESSION_TOKEN: " session-123 ",
       CODE_HOST_TOKEN: undefined,
       BOT_NAME: "  Voyager  ",
       PORT: "4100",
@@ -82,6 +86,9 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.digitalocean);
       assert.equal(config.communicationBotToken, "xoxb-test");
       assert.equal(config.communicationAppToken, "xapp-test");
+      assert.equal(config.communicationWebhookUrl, "");
+      assert.equal(config.communicationCommandPath, "/communication/commands");
+      assert.deepEqual(config.communicationAdminUserIds, []);
       assert.equal(config.databaseUrl, REQUIRED_ENV.DATABASE_URL);
       assert.equal(config.codeHostWebhookSecret, "secret");
       assert.equal(config.codeHostRepository, "croft-eng/croft");
@@ -97,6 +104,10 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.deployTimeoutSeconds, 900);
       assert.equal(config.deployToken, "do-token");
       assert.equal(config.deployProductionAppId, "app-id");
+      assert.equal(config.deployRegion, "us-west-2");
+      assert.equal(config.deployAccessKeyId, "AKIA123");
+      assert.equal(config.deploySecretAccessKey, "secret-123");
+      assert.equal(config.deploySessionToken, "session-123");
       assert.equal(config.port, 4100);
     },
   );
@@ -109,9 +120,9 @@ test("loadConfig supports non-default provider selections without requiring unre
       COMMUNICATION_PROVIDER: "microsoft_teams",
       CODE_HOST_PROVIDER: "bitbucket",
       DEPLOY_PROVIDER: "aws",
-      CODE_HOST_MAIN_BRANCH: undefined,
-      CODE_HOST_REPOSITORY: undefined,
-      CODE_HOST_WEBHOOK_SECRET: undefined,
+      CODE_HOST_MAIN_BRANCH: "main",
+      CODE_HOST_REPOSITORY: "workspace/repo",
+      CODE_HOST_WEBHOOK_SECRET: "secret",
       COMMUNICATION_APP_TOKEN: undefined,
       COMMUNICATION_BOT_TOKEN: undefined,
     },
@@ -122,9 +133,12 @@ test("loadConfig supports non-default provider selections without requiring unre
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.aws);
       assert.equal(config.communicationBotToken, "");
       assert.equal(config.communicationAppToken, "");
-      assert.equal(config.codeHostWebhookSecret, "");
-      assert.equal(config.codeHostRepository, "");
-      assert.equal(config.codeHostMainBranch, "");
+      assert.equal(config.communicationWebhookUrl, "");
+      assert.equal(config.communicationCommandPath, "/communication/commands");
+      assert.deepEqual(config.communicationAdminUserIds, []);
+      assert.equal(config.codeHostWebhookSecret, "secret");
+      assert.equal(config.codeHostRepository, "workspace/repo");
+      assert.equal(config.codeHostMainBranch, "main");
     },
   );
 });
@@ -176,6 +190,10 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       DEPLOY_TIMEOUT_SECONDS: undefined,
       DEPLOY_TOKEN: undefined,
       DEPLOY_PROD_APP_ID: undefined,
+      DEPLOY_REGION: undefined,
+      DEPLOY_ACCESS_KEY_ID: undefined,
+      DEPLOY_SECRET_ACCESS_KEY: undefined,
+      DEPLOY_SESSION_TOKEN: undefined,
       CODE_HOST_TOKEN: undefined,
       PORT: undefined,
     },
@@ -186,7 +204,14 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.deployTimeoutSeconds, 1200);
       assert.equal(config.deployToken, "");
       assert.equal(config.deployProductionAppId, "");
+      assert.equal(config.deployRegion, "us-east-1");
+      assert.equal(config.deployAccessKeyId, "");
+      assert.equal(config.deploySecretAccessKey, "");
+      assert.equal(config.deploySessionToken, "");
       assert.equal(config.codeHostToken, "");
+      assert.equal(config.communicationWebhookUrl, "");
+      assert.equal(config.communicationCommandPath, "/communication/commands");
+      assert.deepEqual(config.communicationAdminUserIds, []);
       assert.equal(config.codeHostOpenPrSyncIntervalHours, 24);
       assert.equal(config.codeHostApiBaseUrl, "https://api.github.com");
       assert.equal(config.codeHostApiVersion, "2022-11-28");
@@ -255,6 +280,23 @@ test("loadConfig rejects invalid GitHub sync interval", { concurrency: false }, 
   );
 });
 
+test("loadConfig reads microsoft teams optional communication values", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      COMMUNICATION_WEBHOOK_URL: "  https://example.test/hook  ",
+      COMMUNICATION_COMMAND_PATH: " teams/calypso ",
+      COMMUNICATION_ADMIN_USER_IDS: " U1 ,U2, U3 ",
+    },
+    () => {
+      const config = loadConfig();
+      assert.equal(config.communicationWebhookUrl, "https://example.test/hook");
+      assert.equal(config.communicationCommandPath, "teams/calypso");
+      assert.deepEqual(config.communicationAdminUserIds, ["U1", "U2", "U3"]);
+    },
+  );
+});
+
 function withEnvironment(overrides, fn) {
   const originalEnvironment = process.env;
   process.env = { ...originalEnvironment };
@@ -265,6 +307,9 @@ function withEnvironment(overrides, fn) {
     "DEPLOY_PROVIDER",
     "COMMUNICATION_BOT_TOKEN",
     "COMMUNICATION_APP_TOKEN",
+    "COMMUNICATION_WEBHOOK_URL",
+    "COMMUNICATION_COMMAND_PATH",
+    "COMMUNICATION_ADMIN_USER_IDS",
     "CODE_HOST_WEBHOOK_SECRET",
     "CODE_HOST_REPOSITORY",
     "CODE_HOST_MAIN_BRANCH",
@@ -274,6 +319,10 @@ function withEnvironment(overrides, fn) {
     "DEPLOY_TIMEOUT_SECONDS",
     "DEPLOY_TOKEN",
     "DEPLOY_PROD_APP_ID",
+    "DEPLOY_REGION",
+    "DEPLOY_ACCESS_KEY_ID",
+    "DEPLOY_SECRET_ACCESS_KEY",
+    "DEPLOY_SESSION_TOKEN",
     "BOT_NAME",
     "PORT",
   ];

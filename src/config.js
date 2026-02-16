@@ -19,11 +19,14 @@ const DEFAULT_CODE_HOST_PROVIDER = CODE_HOST_PROVIDERS.github;
 const DEFAULT_DEPLOY_PROVIDER = DEPLOY_PROVIDERS.digitalocean;
 const DEFAULT_BOT_NAME = "Calypso";
 const DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS = 24;
-const DEFAULT_CODE_HOST_API_BASE_URL = "https://api.github.com";
+const DEFAULT_COMMUNICATION_COMMAND_PATH = "/communication/commands";
+const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
+const DEFAULT_BITBUCKET_API_BASE_URL = "https://api.bitbucket.org/2.0";
 const DEFAULT_CODE_HOST_API_VERSION = "2022-11-28";
 const DEFAULT_CODE_HOST_API_PAGE_SIZE = 100;
 const DEFAULT_CODE_HOST_API_MAX_PAGES = 100;
 const DEFAULT_CODE_HOST_API_USER_AGENT = "calypso-bot";
+const DEFAULT_DEPLOY_REGION = "us-east-1";
 
 function loadConfig() {
   const communicationProvider = readProviderSelection(
@@ -54,6 +57,11 @@ function loadConfig() {
     communicationProvider,
     name: "COMMUNICATION_APP_TOKEN",
   });
+  const communicationWebhookUrl = readOptionalEnvironmentValue("COMMUNICATION_WEBHOOK_URL");
+  const communicationCommandPath =
+    readOptionalEnvironmentValue("COMMUNICATION_COMMAND_PATH") ||
+    DEFAULT_COMMUNICATION_COMMAND_PATH;
+  const communicationAdminUserIds = readCommaSeparatedValues("COMMUNICATION_ADMIN_USER_IDS");
   const codeHostMainBranch = readCodeHostValue({
     codeHostProvider,
     name: "CODE_HOST_MAIN_BRANCH",
@@ -81,6 +89,10 @@ function loadConfig() {
   );
   const deployToken = readOptionalEnvironmentValue("DEPLOY_TOKEN");
   const deployProductionAppId = readOptionalEnvironmentValue("DEPLOY_PROD_APP_ID");
+  const deployRegion = readOptionalEnvironmentValue("DEPLOY_REGION") || DEFAULT_DEPLOY_REGION;
+  const deployAccessKeyId = readOptionalEnvironmentValue("DEPLOY_ACCESS_KEY_ID");
+  const deploySecretAccessKey = readOptionalEnvironmentValue("DEPLOY_SECRET_ACCESS_KEY");
+  const deploySessionToken = readOptionalEnvironmentValue("DEPLOY_SESSION_TOKEN");
   const botName = readOptionalEnvironmentValue("BOT_NAME") || DEFAULT_BOT_NAME;
 
   return {
@@ -93,8 +105,12 @@ function loadConfig() {
     deployTimeoutSeconds,
     deployToken,
     deployProductionAppId,
+    deployRegion,
+    deployAccessKeyId,
+    deploySecretAccessKey,
+    deploySessionToken,
     codeHostOpenPrSyncIntervalHours,
-    codeHostApiBaseUrl: DEFAULT_CODE_HOST_API_BASE_URL,
+    codeHostApiBaseUrl: resolveCodeHostApiBaseUrl(codeHostProvider),
     codeHostApiVersion: DEFAULT_CODE_HOST_API_VERSION,
     codeHostApiPageSize: DEFAULT_CODE_HOST_API_PAGE_SIZE,
     codeHostApiMaxPages: DEFAULT_CODE_HOST_API_MAX_PAGES,
@@ -106,6 +122,9 @@ function loadConfig() {
     port: readPortNumber("PORT", 3000),
     communicationBotToken,
     communicationAppToken,
+    communicationWebhookUrl,
+    communicationCommandPath,
+    communicationAdminUserIds,
   };
 }
 
@@ -119,7 +138,10 @@ function buildRequiredEnvironmentVariables({ communicationProvider, codeHostProv
     );
   }
 
-  if (codeHostProvider === CODE_HOST_PROVIDERS.github) {
+  if (
+    codeHostProvider === CODE_HOST_PROVIDERS.github ||
+    codeHostProvider === CODE_HOST_PROVIDERS.bitbucket
+  ) {
     requiredEnvironmentVariables.push(
       "CODE_HOST_WEBHOOK_SECRET",
       "CODE_HOST_REPOSITORY",
@@ -176,7 +198,10 @@ function readCommunicationValue({ communicationProvider, name }) {
 }
 
 function readCodeHostValue({ codeHostProvider, name }) {
-  if (codeHostProvider === CODE_HOST_PROVIDERS.github) {
+  if (
+    codeHostProvider === CODE_HOST_PROVIDERS.github ||
+    codeHostProvider === CODE_HOST_PROVIDERS.bitbucket
+  ) {
     return readRequiredEnvironmentVariable(name);
   }
 
@@ -212,6 +237,26 @@ function readPositiveInteger(name, fallbackValue) {
   return parsed;
 }
 
+function readCommaSeparatedValues(name) {
+  const value = readOptionalEnvironmentValue(name);
+  if (value === "") {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function resolveCodeHostApiBaseUrl(codeHostProvider) {
+  if (codeHostProvider === CODE_HOST_PROVIDERS.bitbucket) {
+    return DEFAULT_BITBUCKET_API_BASE_URL;
+  }
+
+  return DEFAULT_GITHUB_API_BASE_URL;
+}
+
 module.exports = {
   CODE_HOST_PROVIDERS,
   COMMUNICATION_PROVIDERS,
@@ -219,12 +264,15 @@ module.exports = {
   DEFAULT_COMMUNICATION_PROVIDER,
   DEFAULT_DEPLOY_PROVIDER,
   DEPLOY_PROVIDERS,
-  DEFAULT_CODE_HOST_API_BASE_URL,
+  DEFAULT_GITHUB_API_BASE_URL,
+  DEFAULT_BITBUCKET_API_BASE_URL,
   DEFAULT_CODE_HOST_API_MAX_PAGES,
   DEFAULT_CODE_HOST_API_PAGE_SIZE,
   DEFAULT_CODE_HOST_API_USER_AGENT,
   DEFAULT_CODE_HOST_API_VERSION,
   DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS,
+  DEFAULT_COMMUNICATION_COMMAND_PATH,
   DEFAULT_BOT_NAME,
+  DEFAULT_DEPLOY_REGION,
   loadConfig,
 };
