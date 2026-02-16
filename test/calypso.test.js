@@ -17,6 +17,8 @@ test("handleCalypsoCommand returns help for help input", () => {
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\/calypso help/);
   assert.match(result.responseText, /\/calypso config review-recap-channel/);
+  assert.match(result.responseText, /PR Review Recap Setup/);
+  assert.match(result.responseText, /Defaults: `1w`, `mon@09:00`, `America\/New_York`/);
 });
 
 test("handleCalypsoCommand routes status input", () => {
@@ -203,6 +205,7 @@ test("registerCalypsoCommand registers /calypso and responds ephemerally", async
   assert.equal(ackCalled, true);
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /\/calypso help/);
+  assert.match(payload.text, /PR Review Recap Setup/);
 });
 
 test("registerCalypsoCommand handles status with injected db functions", async () => {

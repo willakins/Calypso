@@ -197,10 +197,13 @@ function buildConfigUsageMessage() {
     "`/calypso config time-format:human`",
     "`/calypso config time-format:long`",
     "`/calypso config timezone:America/New_York`",
+    "",
+    "PR review recap setup:",
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
     "`/calypso config review-recap-schedule:<weekday>@HH:MM`",
     "`/calypso config review-recap-timezone:America/New_York`",
+    "Defaults: `1w`, `mon@09:00`, `America/New_York`.",
   ].join("\n");
 }
 
