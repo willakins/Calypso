@@ -484,8 +484,8 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Force deploy triggered/);
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Force deploy to prod is in progress/);
   assert.match(payload.text, /Bypassed 1 blocking PR\(s\)/);
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
 });
@@ -534,7 +534,9 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   });
 
   assert.equal(responses.length, 2);
-  assert.match(responses[0].text, /Deploy triggered \(id: dep-abc\)/);
+  assert.equal(responses[0].response_type, "in_channel");
+  assert.match(responses[0].text, /Deploy to prod is in progress \(id: dep-abc\)/);
+  assert.equal(responses[1].response_type, "in_channel");
   assert.match(
     responses[1].text,
     /DigitalOcean deployment dep-abc finished successfully with phase ACTIVE/,
@@ -609,8 +611,8 @@ test("registerCalypsoCommand triggers deploy and records deployment when clear a
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Deploy triggered/);
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Deploy to prod is in progress/);
   assert.match(payload.text, /Marked 2 PR\(s\) deployed/);
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
 });

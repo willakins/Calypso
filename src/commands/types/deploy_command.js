@@ -84,20 +84,20 @@ class DeployCommand extends BaseCalypsoCommand {
         Boolean(deploymentSummary.externalDeploymentId);
       if (forceDeployment && blockingPullRequestCount > 0) {
         return this.buildExecutionResult(
-          `Force deploy triggered (id: ${deploymentId}). Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
-          {
+          `Force deploy to prod is in progress (id: ${deploymentId}). Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+          this.buildDeploymentExecutionFields({
             externalDeploymentId: deploymentSummary.externalDeploymentId,
             shouldNotifyDeploymentCompletion,
-          },
+          }),
         );
       }
 
       return this.buildExecutionResult(
-        `Deploy triggered (id: ${deploymentId}). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
-        {
+        `Deploy to prod is in progress (id: ${deploymentId}). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+        this.buildDeploymentExecutionFields({
           externalDeploymentId: deploymentSummary.externalDeploymentId,
           shouldNotifyDeploymentCompletion,
-        },
+        }),
       );
     } catch (error) {
       if (this.didDeploymentTransactionRollback(error)) {
@@ -183,6 +183,29 @@ class DeployCommand extends BaseCalypsoCommand {
 
   didDeploymentTransactionRollback(error) {
     return Boolean(error) && error.code === "DEPLOY_STATE_ROLLED_BACK";
+  }
+
+  resolveResponseType({ executionResult }) {
+    return executionResult.deployTriggered ? "in_channel" : "ephemeral";
+  }
+
+  resolveFollowUpResponseType({ executionResult, responseType }) {
+    if (executionResult.deployTriggered) {
+      return "in_channel";
+    }
+
+    return responseType;
+  }
+
+  buildDeploymentExecutionFields({
+    externalDeploymentId,
+    shouldNotifyDeploymentCompletion,
+  }) {
+    return {
+      deployTriggered: true,
+      externalDeploymentId,
+      shouldNotifyDeploymentCompletion,
+    };
   }
 }
 

@@ -55,13 +55,40 @@ class CalypsoCommandRegistry {
     if (!accessDecision.allowed) {
       return {
         responseText: accessDecision.responseText || "Access denied for this command.",
+        responseType: commandDefinition.resolveAccessDeniedResponseType({
+          parsedCommand,
+          accessDecision,
+          runtime,
+        }),
       };
     }
 
-    return commandDefinition.execute({
+    const executionResult = await commandDefinition.execute({
       parsedCommand,
       runtime,
     });
+
+    const responseType =
+      executionResult.responseType ||
+      commandDefinition.resolveResponseType({
+        parsedCommand,
+        executionResult,
+        runtime,
+      });
+    const followUpResponseType =
+      executionResult.followUpResponseType ||
+      commandDefinition.resolveFollowUpResponseType({
+        parsedCommand,
+        executionResult,
+        responseType,
+        runtime,
+      });
+
+    return {
+      ...executionResult,
+      responseType,
+      followUpResponseType,
+    };
   }
 }
 

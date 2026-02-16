@@ -68,7 +68,8 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
 
   assert.match(deployBlocked.text, /Deploy blocked due to untested PRs/);
   assert.match(markTested.text, /Marked PR #700 as tested/);
-  assert.match(deploySuccess.text, /Deploy triggered \(id: dep-999\)/);
+  assert.equal(deploySuccess.response_type, "in_channel");
+  assert.match(deploySuccess.text, /Deploy to prod is in progress \(id: dep-999\)/);
   assert.match(deploySuccess.text, /Marked 1 PR\(s\) deployed/);
   assert.match(statusAfter.text, /No blockers since last prod deploy/);
 

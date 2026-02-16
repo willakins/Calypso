@@ -19,6 +19,18 @@ class BaseCalypsoCommand {
     return this.buildExecutionResult(parsedCommand.responseText || "Unsupported command.");
   }
 
+  resolveResponseType(_context) {
+    return "ephemeral";
+  }
+
+  resolveFollowUpResponseType({ responseType }) {
+    return responseType;
+  }
+
+  resolveAccessDeniedResponseType(_context) {
+    return "ephemeral";
+  }
+
   buildParsedCommand(fields) {
     return {
       commandName: this.getCommandName(),

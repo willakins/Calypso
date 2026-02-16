@@ -23,7 +23,7 @@ function registerCalypsoCommand(app, options = {}) {
       });
 
       await respond({
-        response_type: "ephemeral",
+        response_type: normalizeSlackResponseType(executionResult.responseType),
         text: executionResult.responseText,
       });
 
@@ -68,15 +68,23 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
     );
 
     await respond({
-      response_type: "ephemeral",
+      response_type: normalizeSlackResponseType(
+        executionResult.followUpResponseType || executionResult.responseType,
+      ),
       text: `DigitalOcean deployment ${externalDeploymentId} finished successfully with phase ${completionState.phase}.`,
     });
   } catch (error) {
     await respond({
-      response_type: "ephemeral",
+      response_type: normalizeSlackResponseType(
+        executionResult.followUpResponseType || executionResult.responseType,
+      ),
       text: `DigitalOcean deployment ${externalDeploymentId} failed after trigger: ${error.message}`,
     });
   }
+}
+
+function normalizeSlackResponseType(responseType) {
+  return responseType === "in_channel" ? "in_channel" : "ephemeral";
 }
 
 module.exports = {
