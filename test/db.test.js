@@ -11,6 +11,7 @@ const {
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
+  markStaleOpenPullRequestsClosed,
   markReviewRecapSent,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,
@@ -469,6 +470,34 @@ test("listOpenPullRequestsWaitingOnReviewSince returns rows in recency window", 
   assert.deepEqual(captured.params, [sinceTimestamp]);
   assert.equal(result.length, 1);
   assert.equal(result[0].pr_number, 71);
+});
+
+test("markStaleOpenPullRequestsClosed closes unmatched open rows for repo and branch", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return { rowCount: 3 };
+    },
+  };
+
+  const closedCount = await markStaleOpenPullRequestsClosed(pool, {
+    repo: "croft-eng/croft",
+    baseBranch: "main",
+    openPrNumbers: [71, 72],
+    closedAt: "2026-02-16T14:00:00.000Z",
+  });
+
+  assert.match(captured.sql, /UPDATE open_pr_review_state/);
+  assert.match(captured.sql, /NOT \(pr_number = ANY\(\$3::INT\[\]\)\)/);
+  assert.deepEqual(captured.params, [
+    "croft-eng/croft",
+    "main",
+    [71, 72],
+    "2026-02-16T14:00:00.000Z",
+  ]);
+  assert.equal(closedCount, 3);
 });
 
 test("getReviewRecapConfig returns defaults when singleton row is missing", async () => {

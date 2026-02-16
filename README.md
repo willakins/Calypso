@@ -9,6 +9,7 @@ It also tracks open pull-request review state and posts a scheduled Slack recap 
 
 - Ingests merged GitHub pull requests into `pull_requests` as `untested`.
 - Tracks open PR review lifecycle in `open_pr_review_state`.
+- Reconciles open PR review state from GitHub once per day (when `GITHUB_TOKEN` is configured).
 - Exposes a Slack slash command: `/calypso`.
 - Supports status and release workflow commands:
   - `/calypso help`
@@ -18,6 +19,7 @@ It also tracks open pull-request review state and posts a scheduled Slack recap 
   - `/calypso config review-recap-recency:<Nd|Nw>`
   - `/calypso config review-recap-schedule:<weekday>@HH:MM`
   - `/calypso config review-recap-timezone:America/New_York`
+  - `/calypso sync`
   - `/calypso status`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
   - `/calypso tested <PR_NUMBER>`
@@ -86,10 +88,13 @@ src/
     migrations/006_open_pr_reviews_and_recap_config.sql
   integrations/
     github/
+      client.js
       webhook.js
       verify_signature.js
     digitalocean/
       client.js
+  open_pr_sync/
+    scheduler.js
   util/
     format.js
   review_recap/
@@ -127,6 +132,8 @@ Optional:
 - `DO_APP_ID_PROD`
 - `DO_DEPLOY_POLL_INTERVAL_SECONDS` (default `10`)
 - `DO_DEPLOY_TIMEOUT_SECONDS` (default `1200`)
+- `GITHUB_TOKEN` (recommended for daily open-PR reconciliation)
+- `GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS` (default `24`)
 - `DEPLOY_CHANNEL_ID` (reserved for future use)
 
 ### How To Get Each Value
@@ -165,6 +172,17 @@ Optional:
 
 - Usually `main` (or your default protected branch, like `master`).
 - Must match the base branch of merged PRs you want Calypso to track.
+
+`GITHUB_TOKEN` (optional, enables daily PR reconciliation)
+
+- GitHub -> Settings -> Developer settings -> Personal access tokens (fine-grained or classic).
+- Minimum needed access for this repo: read pull requests.
+- Used only for scheduled read-only sync of open PR and review state.
+
+`GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS` (optional)
+
+- How often Calypso reconciles open PR review state from GitHub API.
+- Default: `24`.
 
 `PORT` (optional)
 
@@ -369,6 +387,14 @@ Rules:
 - Merged PR close events upsert to deploy-gating table as `untested`.
 - Open PR lifecycle and review submissions update `open_pr_review_state`.
 
+## Daily Open PR Sync
+
+- Runs as a background scheduler in the app runtime.
+- Performs a full open-PR reconciliation for `GITHUB_REPO` + `GITHUB_MAIN_BRANCH`.
+- Frequency is controlled by `GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS` (default every 24 hours).
+- Requires `GITHUB_TOKEN`; without it, webhook-based tracking still works but no periodic backfill runs.
+- Upserts all currently open PRs and marks stale local open rows as `closed`.
+
 ## Slash Command Behavior
 
 `/calypso help`
@@ -390,6 +416,12 @@ Rules:
 `/calypso config review-recap-timezone:America/New_York`
 
 - Sets recap schedule timezone (IANA timezone).
+
+`/calypso sync`
+
+- Triggers open PR reconciliation immediately using GitHub API.
+- Requires workspace admin or Calypso deploy-whitelist access.
+- Returns counts of upserted open PRs and stale PRs marked closed.
 
 `/calypso status`
 

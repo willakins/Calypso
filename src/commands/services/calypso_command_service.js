@@ -88,6 +88,7 @@ function createDefaultDependencies() {
     readTimeFormatPreferenceFn: readTimeFormatPreference,
     readTimeZonePreferenceFn: readTimeZonePreference,
     resolveDeployAccessFn: resolveDeployAccess,
+    runOpenPullRequestSyncNowFn: null,
     setConfiguredTimeFormatFn: setConfiguredTimeFormat,
     setConfiguredTimeZoneFn: setConfiguredTimeZone,
     setReviewRecapChannelFn: setReviewRecapChannel,
@@ -146,6 +147,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.readTimeZonePreferenceFn || defaultDependencies.readTimeZonePreferenceFn,
     resolveDeployAccessFn:
       mergedOptions.resolveDeployAccessFn || defaultDependencies.resolveDeployAccessFn,
+    runOpenPullRequestSyncNowFn:
+      mergedOptions.runOpenPullRequestSyncNowFn || defaultDependencies.runOpenPullRequestSyncNowFn,
     setConfiguredTimeFormatFn:
       mergedOptions.setConfiguredTimeFormatFn || defaultDependencies.setConfiguredTimeFormatFn,
     setConfiguredTimeZoneFn:

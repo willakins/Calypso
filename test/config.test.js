@@ -50,6 +50,13 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.githubWebhookSecret, "secret");
       assert.equal(config.githubRepo, "croft-eng/croft");
       assert.equal(config.githubMainBranch, "main");
+      assert.equal(config.githubToken, "");
+      assert.equal(config.githubOpenPrSyncIntervalHours, 24);
+      assert.equal(config.githubApiBaseUrl, "https://api.github.com");
+      assert.equal(config.githubApiVersion, "2022-11-28");
+      assert.equal(config.githubApiPageSize, 100);
+      assert.equal(config.githubApiMaxPages, 100);
+      assert.equal(config.githubApiUserAgent, "calypso-bot");
       assert.equal(config.doDeployPollIntervalSeconds, 15);
       assert.equal(config.doDeployTimeoutSeconds, 900);
       assert.equal(config.digitaloceanToken, "do-token");
@@ -76,6 +83,13 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.doDeployTimeoutSeconds, 1200);
       assert.equal(config.digitaloceanToken, "");
       assert.equal(config.doAppIdProd, "");
+      assert.equal(config.githubToken, "");
+      assert.equal(config.githubOpenPrSyncIntervalHours, 24);
+      assert.equal(config.githubApiBaseUrl, "https://api.github.com");
+      assert.equal(config.githubApiVersion, "2022-11-28");
+      assert.equal(config.githubApiPageSize, 100);
+      assert.equal(config.githubApiMaxPages, 100);
+      assert.equal(config.githubApiUserAgent, "calypso-bot");
       assert.equal(config.port, 3000);
     },
   );
@@ -103,6 +117,36 @@ test("loadConfig rejects invalid DO polling values", { concurrency: false }, () 
       assert.throws(
         () => loadConfig(),
         /DO_DEPLOY_POLL_INTERVAL_SECONDS must be a positive integer/,
+      );
+    },
+  );
+});
+
+test("loadConfig reads GitHub sync optional values", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      GITHUB_TOKEN: "  ghp-token  ",
+      GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS: "12",
+    },
+    () => {
+      const config = loadConfig();
+      assert.equal(config.githubToken, "ghp-token");
+      assert.equal(config.githubOpenPrSyncIntervalHours, 12);
+    },
+  );
+});
+
+test("loadConfig rejects invalid GitHub sync interval", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS: "0",
+    },
+    () => {
+      assert.throws(
+        () => loadConfig(),
+        /GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS must be a positive integer/,
       );
     },
   );

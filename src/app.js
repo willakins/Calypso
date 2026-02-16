@@ -4,7 +4,12 @@ const express = require("express");
 const { registerCalypsoCommand } = require("./commands/calypso");
 const { loadConfig } = require("./config");
 const { createPool, runMigrations, verifyConnection } = require("./db");
+const { createGithubClient } = require("./integrations/github/client");
 const { registerGithubWebhook } = require("./integrations/github/webhook");
+const {
+  runOpenPullRequestSyncTick,
+  startOpenPullRequestSyncScheduler,
+} = require("./open_pr_sync/scheduler");
 const { startReviewRecapScheduler } = require("./review_recap/scheduler");
 
 async function start() {
@@ -25,11 +30,13 @@ async function loadRuntime() {
   const pool = createPool(config.databaseUrl);
   const slackApp = createSlackApp(config);
   const httpApp = express();
+  const githubSyncClient = buildGithubSyncClient(config);
 
   await initializeDatabase(pool);
 
   return {
     config,
+    githubSyncClient,
     httpApp,
     pool,
     slackApp,
@@ -54,6 +61,7 @@ function wireSlackCommands(runtime) {
     enableDeploymentCompletionNotifications: true,
     pool: runtime.pool,
     deployConfig: buildDeployConfig(runtime.config),
+    runOpenPullRequestSyncNowFn: buildRunOpenPullRequestSyncNow(runtime),
   });
 }
 
@@ -97,6 +105,45 @@ function startBackgroundSchedulers(runtime) {
     pool: runtime.pool,
     slackClient: runtime.slackApp.client,
   });
+
+  runtime.openPullRequestSyncScheduler = startOpenPullRequestSyncScheduler({
+    githubClient: runtime.githubSyncClient,
+    mainBranch: runtime.config.githubMainBranch,
+    pool: runtime.pool,
+    repositoryFullName: runtime.config.githubRepo,
+    syncIntervalMs: runtime.config.githubOpenPrSyncIntervalHours * 60 * 60 * 1000,
+  });
+}
+
+function buildGithubSyncClient(config) {
+  if (!config.githubToken) {
+    return null;
+  }
+
+  return createGithubClient({
+    apiBaseUrl: config.githubApiBaseUrl,
+    apiMaxPages: config.githubApiMaxPages,
+    apiPageSize: config.githubApiPageSize,
+    apiUserAgent: config.githubApiUserAgent,
+    apiVersion: config.githubApiVersion,
+    token: config.githubToken,
+  });
+}
+
+function buildRunOpenPullRequestSyncNow(runtime) {
+  if (!runtime.githubSyncClient) {
+    return null;
+  }
+
+  return () =>
+    runOpenPullRequestSyncTick({
+      githubClient: runtime.githubSyncClient,
+      logger: console,
+      mainBranch: runtime.config.githubMainBranch,
+      pool: runtime.pool,
+      repositoryFullName: runtime.config.githubRepo,
+      swallowErrors: false,
+    });
 }
 
 function startHttpServer(httpApp, port) {

@@ -10,6 +10,12 @@ const REQUIRED_ENVIRONMENT_VARIABLES = [
   "GITHUB_REPO",
   "GITHUB_MAIN_BRANCH",
 ];
+const DEFAULT_GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS = 24;
+const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
+const DEFAULT_GITHUB_API_VERSION = "2022-11-28";
+const DEFAULT_GITHUB_API_PAGE_SIZE = 100;
+const DEFAULT_GITHUB_API_MAX_PAGES = 100;
+const DEFAULT_GITHUB_API_USER_AGENT = "calypso-bot";
 
 function loadConfig() {
   assertRequiredEnvironmentVariablesExist(REQUIRED_ENVIRONMENT_VARIABLES);
@@ -20,8 +26,18 @@ function loadConfig() {
     doDeployTimeoutSeconds: readPositiveInteger("DO_DEPLOY_TIMEOUT_SECONDS", 1200),
     digitaloceanToken: readOptionalEnvironmentVariable("DIGITALOCEAN_TOKEN"),
     doAppIdProd: readOptionalEnvironmentVariable("DO_APP_ID_PROD"),
+    githubOpenPrSyncIntervalHours: readPositiveInteger(
+      "GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS",
+      DEFAULT_GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS,
+    ),
+    githubApiBaseUrl: DEFAULT_GITHUB_API_BASE_URL,
+    githubApiVersion: DEFAULT_GITHUB_API_VERSION,
+    githubApiPageSize: DEFAULT_GITHUB_API_PAGE_SIZE,
+    githubApiMaxPages: DEFAULT_GITHUB_API_MAX_PAGES,
+    githubApiUserAgent: DEFAULT_GITHUB_API_USER_AGENT,
     githubMainBranch: readRequiredEnvironmentVariable("GITHUB_MAIN_BRANCH"),
     githubRepo: readRequiredEnvironmentVariable("GITHUB_REPO"),
+    githubToken: readOptionalEnvironmentVariable("GITHUB_TOKEN"),
     githubWebhookSecret: readRequiredEnvironmentVariable("GITHUB_WEBHOOK_SECRET"),
     port: readPortNumber("PORT", 3000),
     slackBotToken: readRequiredEnvironmentVariable("SLACK_BOT_TOKEN"),
@@ -84,5 +100,11 @@ function readPositiveInteger(name, fallbackValue) {
 }
 
 module.exports = {
+  DEFAULT_GITHUB_API_BASE_URL,
+  DEFAULT_GITHUB_API_MAX_PAGES,
+  DEFAULT_GITHUB_API_PAGE_SIZE,
+  DEFAULT_GITHUB_API_USER_AGENT,
+  DEFAULT_GITHUB_API_VERSION,
+  DEFAULT_GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS,
   loadConfig,
 };

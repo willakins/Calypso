@@ -17,6 +17,7 @@ test("handleCalypsoCommand returns help for help input", () => {
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\/calypso help/);
   assert.match(result.responseText, /\/calypso config review-recap-channel/);
+  assert.match(result.responseText, /\/calypso sync/);
   assert.match(result.responseText, /PR Review Recap Setup/);
   assert.match(result.responseText, /Defaults: `1w`, `mon@09:00`, `America\/New_York`/);
 });
@@ -25,6 +26,19 @@ test("handleCalypsoCommand routes status input", () => {
   const result = handleCalypsoCommand({ text: "status", user_id: "U123" });
 
   assert.equal(result.action, "status");
+});
+
+test("handleCalypsoCommand routes sync input", () => {
+  const result = handleCalypsoCommand({ text: "sync", user_id: "U123" });
+
+  assert.equal(result.action, "sync_open_pr_review_state");
+});
+
+test("handleCalypsoCommand rejects invalid sync input", () => {
+  const result = handleCalypsoCommand({ text: "sync now", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /Usage: `\/calypso sync`/);
 });
 
 test("handleCalypsoCommand routes reviews input", () => {
@@ -253,8 +267,103 @@ test("registerCalypsoCommand registers /calypso and responds ephemerally", async
   assert.equal(ackCalled, true);
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /\/calypso help/);
+  assert.match(payload.text, /\/calypso sync/);
   assert.match(payload.text, /PR Review Recap Setup/);
   assert.match(payload.text, /\/calypso reviews \[<GITHUB_USER>\] \[<day\|week\|month>\]/);
+});
+
+test("registerCalypsoCommand runs sync command and returns summary", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    runOpenPullRequestSyncNowFn: async () => ({
+      upsertedCount: 7,
+      closedCount: 2,
+    }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "sync", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Open PR sync completed successfully/);
+  assert.match(payload.text, /Upserted 7 open PR\(s\)/);
+  assert.match(payload.text, /marked 2 stale PR\(s\) closed/);
+});
+
+test("registerCalypsoCommand reports sync unavailable when token is not configured", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "sync", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Sync unavailable/);
+  assert.match(payload.text, /GITHUB_TOKEN/);
+});
+
+test("registerCalypsoCommand denies sync for non-admin, non-whitelisted user", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: false }),
+    runOpenPullRequestSyncNowFn: async () => ({
+      upsertedCount: 1,
+      closedCount: 0,
+    }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "sync", user_id: "U123" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Sync denied/);
+  assert.match(payload.text, /Only workspace admins or whitelisted users can run manual sync/);
 });
 
 test("registerCalypsoCommand handles status with injected db functions", async () => {

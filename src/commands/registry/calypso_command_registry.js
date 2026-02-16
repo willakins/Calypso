@@ -2,6 +2,7 @@ const { ConfigCommand } = require("../types/config_command");
 const { DeployCommand } = require("../types/deploy_command");
 const { HelpCommand } = require("../types/help_command");
 const { ReviewsCommand } = require("../types/reviews_command");
+const { SyncCommand } = require("../types/sync_command");
 const { StatusCommand } = require("../types/status_command");
 const { TestedCommand } = require("../types/tested_command");
 const { UnknownCommand } = require("../types/unknown_command");
@@ -12,6 +13,7 @@ function createCalypsoCommandRegistry() {
     commandDefinitions: [
       new HelpCommand(),
       new ConfigCommand(),
+      new SyncCommand(),
       new StatusCommand(),
       new ReviewsCommand(),
       new TestedCommand(),

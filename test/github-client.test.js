@@ -1,0 +1,122 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+
+const { createGithubClient } = require("../src/integrations/github/client");
+
+test("createGithubClient requires token", () => {
+  assert.throws(() => createGithubClient(buildClientOptions({ token: "" })), /GITHUB_TOKEN is required/);
+});
+
+test("listOpenPullRequests paginates and returns records", async () => {
+  const requestedUrls = [];
+  await withMockedFetch(
+    async (url) => {
+      requestedUrls.push(url);
+      if (/[?&]page=1(?:&|$)/.test(url)) {
+        return {
+          ok: true,
+          async json() {
+            return new Array(100).fill(0).map((_value, index) => ({ number: index + 1 }));
+          },
+        };
+      }
+
+      return {
+        ok: true,
+        async json() {
+          return [{ number: 101 }];
+        },
+      };
+    },
+    async () => {
+      const client = createGithubClient(buildClientOptions({ token: "ghp-token" }));
+      const result = await client.listOpenPullRequests({
+        repositoryFullName: "croft-eng/croft",
+        baseBranch: "main",
+      });
+
+      assert.equal(result.length, 101);
+      assert.match(requestedUrls[0], /\/repos\/croft-eng\/croft\/pulls\?/);
+      assert.match(requestedUrls[0], /state=open/);
+      assert.match(requestedUrls[0], /base=main/);
+      assert.match(requestedUrls[0], /per_page=100/);
+      assert.match(requestedUrls[0], /page=1/);
+      assert.match(requestedUrls[1], /page=2/);
+    },
+  );
+});
+
+test("listPullRequestReviews uses expected endpoint", async () => {
+  let requestedUrl = "";
+  await withMockedFetch(
+    async (url, requestInit) => {
+      requestedUrl = url;
+      assert.equal(requestInit.method, "GET");
+      assert.equal(requestInit.headers.Authorization, "Bearer ghp-token");
+      return {
+        ok: true,
+        async json() {
+          return [{ state: "APPROVED" }];
+        },
+      };
+    },
+    async () => {
+      const client = createGithubClient(buildClientOptions({ token: "ghp-token" }));
+      const result = await client.listPullRequestReviews({
+        repositoryFullName: "croft-eng/croft",
+        prNumber: 77,
+      });
+
+      assert.equal(result.length, 1);
+      assert.match(requestedUrl, /\/repos\/croft-eng\/croft\/pulls\/77\/reviews\?/);
+      assert.match(requestedUrl, /per_page=100/);
+      assert.match(requestedUrl, /page=1/);
+    },
+  );
+});
+
+test("github client throws details when API request fails", async () => {
+  await withMockedFetch(
+    async () => ({
+      ok: false,
+      status: 403,
+      async text() {
+        return "forbidden";
+      },
+    }),
+    async () => {
+      const client = createGithubClient(buildClientOptions({ token: "ghp-token" }));
+      await assert.rejects(
+        () =>
+          client.listOpenPullRequests({
+            repositoryFullName: "croft-eng/croft",
+            baseBranch: "main",
+          }),
+        /GitHub API request failed \(403\)/,
+      );
+    },
+  );
+});
+
+async function withMockedFetch(mockImplementation, fn) {
+  const originalFetch = global.fetch;
+  global.fetch = mockImplementation;
+
+  try {
+    await fn();
+  } finally {
+    global.fetch = originalFetch;
+  }
+}
+
+function buildClientOptions(overrides = {}) {
+  return {
+    apiBaseUrl: "https://api.github.com",
+    apiMaxPages: 100,
+    apiPageSize: 100,
+    apiUserAgent: "calypso-bot",
+    apiVersion: "2022-11-28",
+    token: "ghp-token",
+    ...overrides,
+  };
+}

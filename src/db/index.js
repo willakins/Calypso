@@ -363,6 +363,29 @@ async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
   return result.rows;
 }
 
+async function markStaleOpenPullRequestsClosed(pool, options) {
+  const result = await pool.query(
+    `
+      UPDATE open_pr_review_state
+      SET lifecycle_state = 'closed',
+          closed_at = $4,
+          updated_at = NOW()
+      WHERE repo = $1
+        AND base_branch = $2
+        AND lifecycle_state = 'open'
+        AND NOT (pr_number = ANY($3::INT[]))
+      RETURNING id
+    `,
+    [
+      options.repo,
+      options.baseBranch,
+      Array.isArray(options.openPrNumbers) ? options.openPrNumbers : [],
+      options.closedAt || null,
+    ],
+  );
+  return result.rowCount;
+}
+
 async function getReviewRecapConfig(pool) {
   const result = await pool.query(
     `
@@ -756,6 +779,7 @@ module.exports = {
   listRecentlyTestedPullRequests,
   listOpenPullRequestsWaitingOnReviewSince,
   listBlockingPullRequests,
+  markStaleOpenPullRequestsClosed,
   markAllUntestedPullRequestsTested,
   markReviewRecapSent,
   markPullRequestsDeployedSince,
