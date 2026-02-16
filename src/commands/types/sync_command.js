@@ -1,4 +1,5 @@
 const { BaseCalypsoCommand } = require("./base_calypso_command");
+const { DEFAULT_BOT_NAME } = require("../../config");
 
 class SyncCommand extends BaseCalypsoCommand {
   constructor() {
@@ -32,8 +33,9 @@ class SyncCommand extends BaseCalypsoCommand {
 
   async execute({ runtime }) {
     if (typeof runtime.runOpenPullRequestSyncNowFn !== "function") {
+      const botName = runtime.botName || DEFAULT_BOT_NAME;
       return this.buildExecutionResult(
-        "Sync unavailable: configure `CODE_HOST_TOKEN` and restart Calypso.",
+        `Sync unavailable: configure \`CODE_HOST_TOKEN\` and restart ${botName}.`,
       );
     }
 

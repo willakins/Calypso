@@ -1,7 +1,12 @@
 const express = require("express");
 
-const { loadConfig } = require("./config");
-const { createPool, runMigrations, verifyConnection } = require("./db");
+const { DEFAULT_BOT_NAME, loadConfig } = require("./config");
+const {
+  createPool,
+  getRuntimeProviderConfig,
+  runMigrations,
+  verifyConnection,
+} = require("./db");
 const {
   runOpenPullRequestSyncTick,
   startOpenPullRequestSyncScheduler,
@@ -21,13 +26,19 @@ async function start() {
   await startServices(runtime);
   startBackgroundSchedulers(runtime);
 
-  console.log("Calypso is running in Socket Mode with database migrations applied.");
+  console.log(`${runtime.config.botName} is running in Socket Mode with database migrations applied.`);
 }
 
 async function loadRuntime() {
-  const config = loadConfig();
-  const pool = createPool(config.databaseUrl);
+  const baseConfig = loadConfig();
+  const pool = createPool(baseConfig.databaseUrl);
   const httpApp = express();
+  await initializeDatabase(pool);
+  const config = await applyRuntimeProviderSelection({
+    baseConfig,
+    pool,
+  });
+
   const communicationPlatform = createCommunicationPlatform({
     provider: config.communicationProvider,
     config,
@@ -42,8 +53,6 @@ async function loadRuntime() {
   });
   const codeHostSyncClient = codeHostPlatform.createSyncClient();
 
-  await initializeDatabase(pool);
-
   return {
     config,
     communicationPlatform,
@@ -55,6 +64,17 @@ async function loadRuntime() {
   };
 }
 
+async function applyRuntimeProviderSelection({ baseConfig, pool }) {
+  const runtimeProviderConfig = await getRuntimeProviderConfig(pool);
+  return {
+    ...baseConfig,
+    communicationProvider:
+      runtimeProviderConfig.communicationProvider || baseConfig.communicationProvider,
+    codeHostProvider: runtimeProviderConfig.codeHostProvider || baseConfig.codeHostProvider,
+    deployProvider: runtimeProviderConfig.deployProvider || baseConfig.deployProvider,
+  };
+}
+
 async function initializeDatabase(pool) {
   await verifyConnection(pool);
   await runMigrations(pool);
@@ -62,6 +82,7 @@ async function initializeDatabase(pool) {
 
 function wireCommunicationCommands(runtime) {
   runtime.communicationPlatform.registerCalypsoCommand({
+    botName: runtime.config.botName,
     enableDeploymentCompletionNotifications: true,
     pool: runtime.pool,
     deployPlatform: runtime.deployPlatform,
@@ -158,7 +179,7 @@ function formatProviderLabel(providerName) {
 }
 
 start().catch((error) => {
-  console.error("Failed to start Calypso.");
+  console.error(`Failed to start ${DEFAULT_BOT_NAME}.`);
   console.error(error.message);
   process.exit(1);
 });

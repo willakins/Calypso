@@ -46,9 +46,11 @@ test("loadConfig defaults provider selections", { concurrency: false }, () => {
       COMMUNICATION_PROVIDER: undefined,
       CODE_HOST_PROVIDER: undefined,
       DEPLOY_PROVIDER: undefined,
+      BOT_NAME: undefined,
     },
     () => {
       const config = loadConfig();
+      assert.equal(config.botName, "Calypso");
       assert.equal(config.communicationProvider, DEFAULT_COMMUNICATION_PROVIDER);
       assert.equal(config.codeHostProvider, DEFAULT_CODE_HOST_PROVIDER);
       assert.equal(config.deployProvider, DEFAULT_DEPLOY_PROVIDER);
@@ -68,11 +70,13 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       DEPLOY_TOKEN: "  do-token  ",
       DEPLOY_PROD_APP_ID: "  app-id  ",
       CODE_HOST_TOKEN: undefined,
+      BOT_NAME: "  Voyager  ",
       PORT: "4100",
     },
     () => {
       const config = loadConfig();
 
+      assert.equal(config.botName, "Voyager");
       assert.equal(config.communicationProvider, COMMUNICATION_PROVIDERS.slack);
       assert.equal(config.codeHostProvider, CODE_HOST_PROVIDERS.github);
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.digitalocean);
@@ -270,6 +274,7 @@ function withEnvironment(overrides, fn) {
     "DEPLOY_TIMEOUT_SECONDS",
     "DEPLOY_TOKEN",
     "DEPLOY_PROD_APP_ID",
+    "BOT_NAME",
     "PORT",
   ];
   for (const key of managedEnvironmentKeys) {

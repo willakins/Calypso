@@ -8,10 +8,11 @@ const { TestedCommand } = require("../types/tested_command");
 const { UnknownCommand } = require("../types/unknown_command");
 const { WhitelistCommand } = require("../types/whitelist_command");
 
-function createCalypsoCommandRegistry() {
+function createCalypsoCommandRegistry(options = {}) {
+  const botName = options.botName;
   return new CalypsoCommandRegistry({
     commandDefinitions: [
-      new HelpCommand(),
+      new HelpCommand({ botName }),
       new ConfigCommand(),
       new SyncCommand(),
       new StatusCommand(),

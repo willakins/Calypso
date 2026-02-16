@@ -44,14 +44,41 @@ CREATE TABLE IF NOT EXISTS runtime_config (
   id SMALLINT PRIMARY KEY DEFAULT 1,
   time_format TEXT NOT NULL DEFAULT 'human',
   timezone TEXT NOT NULL DEFAULT 'America/New_York',
+  communication_provider TEXT NOT NULL DEFAULT 'slack',
+  code_host_provider TEXT NOT NULL DEFAULT 'github',
+  deploy_provider TEXT NOT NULL DEFAULT 'digitalocean',
   updated_by TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT runtime_config_singleton_check CHECK (id = 1),
-  CONSTRAINT runtime_config_time_format_check CHECK (time_format IN ('human', 'long'))
+  CONSTRAINT runtime_config_time_format_check CHECK (time_format IN ('human', 'long')),
+  CONSTRAINT runtime_config_communication_provider_check
+    CHECK (communication_provider IN ('slack', 'microsoft_teams')),
+  CONSTRAINT runtime_config_code_host_provider_check
+    CHECK (code_host_provider IN ('github', 'bitbucket')),
+  CONSTRAINT runtime_config_deploy_provider_check
+    CHECK (deploy_provider IN ('digitalocean', 'aws'))
 );
 
-INSERT INTO runtime_config (id, time_format, timezone, updated_by, updated_at)
-VALUES (1, 'human', 'America/New_York', 'system', NOW())
+INSERT INTO runtime_config (
+  id,
+  time_format,
+  timezone,
+  communication_provider,
+  code_host_provider,
+  deploy_provider,
+  updated_by,
+  updated_at
+)
+VALUES (
+  1,
+  'human',
+  'America/New_York',
+  'slack',
+  'github',
+  'digitalocean',
+  'system',
+  NOW()
+)
 ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS runtime_user_config (

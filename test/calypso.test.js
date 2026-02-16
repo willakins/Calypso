@@ -16,10 +16,54 @@ test("handleCalypsoCommand returns help for help input", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\/calypso help/);
-  assert.match(result.responseText, /\/calypso config review-recap-channel/);
   assert.match(result.responseText, /\/calypso sync/);
-  assert.match(result.responseText, /PR Review Recap Setup/);
+  assert.match(result.responseText, /Help Topics/);
+  assert.match(result.responseText, /\/calypso help testing/);
+  assert.match(result.responseText, /\/calypso help reviewing/);
+  assert.match(result.responseText, /\/calypso help config/);
+});
+
+test("handleCalypsoCommand uses configured bot name in help header", () => {
+  const result = handleCalypsoCommand({ text: "help", user_id: "U123", botName: "Voyager" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /^\*Voyager\*/);
+});
+
+test("handleCalypsoCommand returns testing topic help", () => {
+  const result = handleCalypsoCommand({ text: "help testing", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /\*Calypso Testing Help\*/);
+  assert.match(result.responseText, /\/calypso tested <PR_NUMBER>/);
+  assert.match(result.responseText, /\/calypso deploy prod force/);
+});
+
+test("handleCalypsoCommand returns reviewing topic help", () => {
+  const result = handleCalypsoCommand({ text: "help reviewing", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /\*Calypso Reviewing Help\*/);
+  assert.match(result.responseText, /\/calypso reviews <GITHUB_USER>/);
   assert.match(result.responseText, /Defaults: `1w`, `mon@09:00`, `America\/New_York`/);
+});
+
+test("handleCalypsoCommand returns config topic help", () => {
+  const result = handleCalypsoCommand({ text: "help config", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /\*Calypso Config Help\*/);
+  assert.match(result.responseText, /\/calypso config time-format:human\|long/);
+  assert.match(result.responseText, /\/calypso config communication-provider:slack\|microsoft_teams/);
+  assert.match(result.responseText, /\/calypso config review-recap-schedule:<weekday>@HH:MM/);
+});
+
+test("handleCalypsoCommand rejects unknown help topic", () => {
+  const result = handleCalypsoCommand({ text: "help foobar", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /Usage:/);
+  assert.match(result.responseText, /\/calypso help testing/);
 });
 
 test("handleCalypsoCommand routes status input", () => {
@@ -201,14 +245,34 @@ test("handleCalypsoCommand routes config review recap schedule input", () => {
   assert.equal(result.scheduleTime, "10:15");
 });
 
-test("handleCalypsoCommand routes config review recap timezone input", () => {
+test("handleCalypsoCommand routes config communication provider input", () => {
   const result = handleCalypsoCommand({
-    text: "config review-recap-timezone:America/Chicago",
+    text: "config communication-provider:slack",
     user_id: "UADMIN",
   });
 
-  assert.equal(result.action, "config_review_recap_timezone");
-  assert.equal(result.timeZone, "America/Chicago");
+  assert.equal(result.action, "config_communication_provider");
+  assert.equal(result.communicationProvider, "slack");
+});
+
+test("handleCalypsoCommand routes config code-host provider input", () => {
+  const result = handleCalypsoCommand({
+    text: "config code-host-provider:github",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_code_host_provider");
+  assert.equal(result.codeHostProvider, "github");
+});
+
+test("handleCalypsoCommand routes config deploy provider input", () => {
+  const result = handleCalypsoCommand({
+    text: "config deploy-provider:digitalocean",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_deploy_provider");
+  assert.equal(result.deployProvider, "digitalocean");
 });
 
 test("handleCalypsoCommand returns unknown message for unsupported input", () => {
@@ -268,8 +332,8 @@ test("registerCalypsoCommand registers /calypso and responds ephemerally", async
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /\/calypso help/);
   assert.match(payload.text, /\/calypso sync/);
-  assert.match(payload.text, /PR Review Recap Setup/);
-  assert.match(payload.text, /\/calypso reviews \[<GITHUB_USER>\] \[<day\|week\|month>\]/);
+  assert.match(payload.text, /Help Topics/);
+  assert.match(payload.text, /\/calypso help reviewing/);
 });
 
 test("registerCalypsoCommand runs sync command and returns summary", async () => {
@@ -1247,7 +1311,11 @@ test("registerCalypsoCommand config command updates timezone when valid", async 
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     isValidTimeZoneFn: () => true,
     setConfiguredTimeZoneFn: async (pool, timeZone, updatedBy) => {
-      capturedCalls.push({ pool, timeZone, updatedBy });
+      capturedCalls.push({ type: "user", pool, timeZone, updatedBy });
+      return { timezone: timeZone, updated_by: updatedBy };
+    },
+    setReviewRecapTimeZoneFn: async (pool, timeZone, updatedBy) => {
+      capturedCalls.push({ type: "recap", pool, timeZone, updatedBy });
       return { timezone: timeZone, updated_by: updatedBy };
     },
   });
@@ -1264,10 +1332,12 @@ test("registerCalypsoCommand config command updates timezone when valid", async 
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Timezone `America\/Los_Angeles` is valid/);
-  assert.match(payload.text, /Updated your timezone setting/);
-  assert.equal(capturedCalls.length, 1);
+  assert.match(payload.text, /Updated timezone for human timestamps and review recap schedule/);
+  assert.equal(capturedCalls.length, 2);
   assert.equal(capturedCalls[0].timeZone, "America/Los_Angeles");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+  assert.equal(capturedCalls[1].timeZone, "America/Los_Angeles");
+  assert.equal(capturedCalls[1].updatedBy, "UADMIN");
 });
 
 test("registerCalypsoCommand config command reports invalid timezone", async () => {
@@ -1285,6 +1355,10 @@ test("registerCalypsoCommand config command reports invalid timezone", async () 
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     isValidTimeZoneFn: () => false,
     setConfiguredTimeZoneFn: async () => {
+      setTimezoneCalled = true;
+      return {};
+    },
+    setReviewRecapTimeZoneFn: async () => {
       setTimezoneCalled = true;
       return {};
     },
@@ -1412,7 +1486,7 @@ test("registerCalypsoCommand config command updates review recap schedule", asyn
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 
-test("registerCalypsoCommand config command updates review recap timezone when valid", async () => {
+test("registerCalypsoCommand config command updates communication provider", async () => {
   let commandHandler;
   const capturedCalls = [];
   const app = {
@@ -1424,16 +1498,15 @@ test("registerCalypsoCommand config command updates review recap timezone when v
   registerCalypsoCommand(app, {
     pool: {},
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
-    isValidTimeZoneFn: () => true,
-    setReviewRecapTimeZoneFn: async (pool, timeZone, updatedBy) => {
-      capturedCalls.push({ pool, timeZone, updatedBy });
-      return { timezone: timeZone, updated_by: updatedBy };
+    setConfiguredCommunicationProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { communication_provider: provider, updated_by: updatedBy };
     },
   });
 
   let payload;
   await commandHandler({
-    command: { text: "config review-recap-timezone:America/Chicago", user_id: "UADMIN" },
+    command: { text: "config communication-provider:slack", user_id: "UADMIN" },
     client: {},
     ack: async () => {},
     respond: async (message) => {
@@ -1442,9 +1515,183 @@ test("registerCalypsoCommand config command updates review recap timezone when v
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Timezone `America\/Chicago` is valid/);
-  assert.match(payload.text, /Updated review recap timezone/);
+  assert.match(payload.text, /Updated communication provider to `slack`/);
+  assert.match(payload.text, /Restart Calypso for this change to take effect/);
   assert.equal(capturedCalls.length, 1);
-  assert.equal(capturedCalls[0].timeZone, "America/Chicago");
+  assert.equal(capturedCalls[0].provider, "slack");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates code-host provider", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredCodeHostProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { code_host_provider: provider, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config code-host-provider:github", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Updated code-host provider to `github`/);
+  assert.match(payload.text, /Restart Calypso for this change to take effect/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].provider, "github");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates deploy provider", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredDeployProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { deploy_provider: provider, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config deploy-provider:digitalocean", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Updated deploy provider to `digitalocean`/);
+  assert.match(payload.text, /Restart Calypso for this change to take effect/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].provider, "digitalocean");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command rejects unavailable communication provider", async () => {
+  let commandHandler;
+  let setterCalled = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredCommunicationProviderFn: async () => {
+      setterCalled = true;
+      return {};
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config communication-provider:microsoft_teams", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Provider `microsoft_teams` is not available yet/);
+  assert.match(payload.text, /Supported communication provider\(s\): `slack`/);
+  assert.equal(setterCalled, false);
+});
+
+test("registerCalypsoCommand config command rejects unavailable code-host provider", async () => {
+  let commandHandler;
+  let setterCalled = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredCodeHostProviderFn: async () => {
+      setterCalled = true;
+      return {};
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config code-host-provider:bitbucket", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Provider `bitbucket` is not available yet/);
+  assert.match(payload.text, /Supported code-host provider\(s\): `github`/);
+  assert.equal(setterCalled, false);
+});
+
+test("registerCalypsoCommand config command rejects unavailable deploy provider", async () => {
+  let commandHandler;
+  let setterCalled = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredDeployProviderFn: async () => {
+      setterCalled = true;
+      return {};
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config deploy-provider:aws", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Provider `aws` is not available yet/);
+  assert.match(payload.text, /Supported deploy provider\(s\): `digitalocean`/);
+  assert.equal(setterCalled, false);
 });

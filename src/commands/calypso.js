@@ -1,12 +1,14 @@
 const { parseCalypsoCommand } = require("./parsing/calypso_command_parser");
 const { createCalypsoCommandService } = require("./services/calypso_command_service");
+const { DEFAULT_BOT_NAME } = require("../config");
 
-function handleCalypsoCommand({ text, user_id }) {
+function handleCalypsoCommand({ text, user_id, botName }) {
   void user_id;
-  return parseCalypsoCommand({ text });
+  return parseCalypsoCommand({ text, botName });
 }
 
 function registerCalypsoCommand(app, options = {}) {
+  const botName = resolveBotName(options.botName);
   const calypsoCommandService = createCalypsoCommandService(options);
 
   app.command("/calypso", async ({ client, command, ack, respond }) => {
@@ -15,6 +17,7 @@ function registerCalypsoCommand(app, options = {}) {
     try {
       const parsedCommand = parseCalypsoCommand({
         text: command.text,
+        botName,
       });
       const userId = resolveCommandUserId(command);
 
@@ -40,7 +43,7 @@ function registerCalypsoCommand(app, options = {}) {
       console.error(error.message);
       await respond({
         response_type: "ephemeral",
-        text: "Calypso hit an error while processing that command.",
+        text: `${botName} hit an error while processing that command.`,
       });
     }
   });
@@ -94,6 +97,11 @@ function resolveCommandUserId(command) {
   }
 
   return command.userId || command.user_id || null;
+}
+
+function resolveBotName(botName) {
+  const normalizedBotName = String(botName || "").trim();
+  return normalizedBotName || DEFAULT_BOT_NAME;
 }
 
 module.exports = {

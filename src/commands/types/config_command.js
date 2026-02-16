@@ -1,4 +1,9 @@
 const { BaseCalypsoCommand } = require("./base_calypso_command");
+const {
+  CODE_HOST_PROVIDERS,
+  COMMUNICATION_PROVIDERS,
+  DEPLOY_PROVIDERS,
+} = require("../../config");
 
 const TIME_FORMAT_ARGUMENT_PATTERN = /^time-format:(human|long)$/i;
 const TIME_ZONE_ARGUMENT_PATTERN = /^timezone:(.+)$/i;
@@ -6,7 +11,32 @@ const REVIEW_RECAP_CHANNEL_ARGUMENT_PATTERN = /^review-recap-channel:(.+)$/i;
 const REVIEW_RECAP_RECENCY_ARGUMENT_PATTERN = /^review-recap-recency:(\d+)([dw])$/i;
 const REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN =
   /^review-recap-schedule:(mon|tue|wed|thu|fri|sat|sun)@([01]\d|2[0-3]):([0-5]\d)$/i;
-const REVIEW_RECAP_TIME_ZONE_ARGUMENT_PATTERN = /^review-recap-timezone:(.+)$/i;
+const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
+  "communication-provider",
+  Object.values(COMMUNICATION_PROVIDERS),
+);
+const CODE_HOST_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
+  "code-host-provider",
+  Object.values(CODE_HOST_PROVIDERS),
+);
+const DEPLOY_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
+  "deploy-provider",
+  Object.values(DEPLOY_PROVIDERS),
+);
+const UNAVAILABLE_PROVIDERS = Object.freeze({
+  [COMMUNICATION_PROVIDERS.microsoftTeams]: {
+    category: "communication",
+    availableOptions: [COMMUNICATION_PROVIDERS.slack],
+  },
+  [CODE_HOST_PROVIDERS.bitbucket]: {
+    category: "code-host",
+    availableOptions: [CODE_HOST_PROVIDERS.github],
+  },
+  [DEPLOY_PROVIDERS.aws]: {
+    category: "deploy",
+    availableOptions: [DEPLOY_PROVIDERS.digitalocean],
+  },
+});
 
 class ConfigCommand extends BaseCalypsoCommand {
   constructor() {
@@ -67,11 +97,27 @@ class ConfigCommand extends BaseCalypsoCommand {
       });
     }
 
-    const recapTimeZoneMatch = argument.match(REVIEW_RECAP_TIME_ZONE_ARGUMENT_PATTERN);
-    if (recapTimeZoneMatch) {
+    const communicationProviderMatch = argument.match(COMMUNICATION_PROVIDER_ARGUMENT_PATTERN);
+    if (communicationProviderMatch) {
       return this.buildParsedCommand({
-        action: "config_review_recap_timezone",
-        timeZone: recapTimeZoneMatch[1].trim(),
+        action: "config_communication_provider",
+        communicationProvider: communicationProviderMatch[1].toLowerCase(),
+      });
+    }
+
+    const codeHostProviderMatch = argument.match(CODE_HOST_PROVIDER_ARGUMENT_PATTERN);
+    if (codeHostProviderMatch) {
+      return this.buildParsedCommand({
+        action: "config_code_host_provider",
+        codeHostProvider: codeHostProviderMatch[1].toLowerCase(),
+      });
+    }
+
+    const deployProviderMatch = argument.match(DEPLOY_PROVIDER_ARGUMENT_PATTERN);
+    if (deployProviderMatch) {
+      return this.buildParsedCommand({
+        action: "config_deploy_provider",
+        deployProvider: deployProviderMatch[1].toLowerCase(),
       });
     }
 
@@ -148,6 +194,60 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
+    if (parsedCommand.action === "config_communication_provider") {
+      const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.communicationProvider);
+      if (unavailableMessage) {
+        return this.buildExecutionResult(unavailableMessage);
+      }
+      await runtime.setConfiguredCommunicationProviderFn(
+        runtime.pool,
+        parsedCommand.communicationProvider,
+        runtime.userId,
+      );
+      return this.buildExecutionResult(
+        buildProviderUpdateMessage({
+          baseText: `Updated communication provider to \`${parsedCommand.communicationProvider}\`.`,
+          provider: parsedCommand.communicationProvider,
+        }),
+      );
+    }
+
+    if (parsedCommand.action === "config_code_host_provider") {
+      const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.codeHostProvider);
+      if (unavailableMessage) {
+        return this.buildExecutionResult(unavailableMessage);
+      }
+      await runtime.setConfiguredCodeHostProviderFn(
+        runtime.pool,
+        parsedCommand.codeHostProvider,
+        runtime.userId,
+      );
+      return this.buildExecutionResult(
+        buildProviderUpdateMessage({
+          baseText: `Updated code-host provider to \`${parsedCommand.codeHostProvider}\`.`,
+          provider: parsedCommand.codeHostProvider,
+        }),
+      );
+    }
+
+    if (parsedCommand.action === "config_deploy_provider") {
+      const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.deployProvider);
+      if (unavailableMessage) {
+        return this.buildExecutionResult(unavailableMessage);
+      }
+      await runtime.setConfiguredDeployProviderFn(
+        runtime.pool,
+        parsedCommand.deployProvider,
+        runtime.userId,
+      );
+      return this.buildExecutionResult(
+        buildProviderUpdateMessage({
+          baseText: `Updated deploy provider to \`${parsedCommand.deployProvider}\`.`,
+          provider: parsedCommand.deployProvider,
+        }),
+      );
+    }
+
     if (!runtime.isValidTimeZoneFn(parsedCommand.timeZone)) {
       return this.buildExecutionResult(
         [
@@ -157,22 +257,14 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
-    if (parsedCommand.action === "config_review_recap_timezone") {
-      await runtime.setReviewRecapTimeZoneFn(
-        runtime.pool,
-        parsedCommand.timeZone,
-        runtime.userId,
-      );
-
-      return this.buildExecutionResult(
-        `Timezone \`${parsedCommand.timeZone}\` is valid. Updated review recap timezone.`,
-      );
-    }
-
     await runtime.setConfiguredTimeZoneFn(runtime.pool, parsedCommand.timeZone, runtime.userId);
+    await runtime.setReviewRecapTimeZoneFn(runtime.pool, parsedCommand.timeZone, runtime.userId);
 
     return this.buildExecutionResult(
-      `Timezone \`${parsedCommand.timeZone}\` is valid. Updated your timezone setting.`,
+      [
+        `Timezone \`${parsedCommand.timeZone}\` is valid.`,
+        "Updated timezone for human timestamps and review recap schedule.",
+      ].join(" "),
     );
   }
 }
@@ -202,9 +294,37 @@ function buildConfigUsageMessage() {
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
     "`/calypso config review-recap-schedule:<weekday>@HH:MM`",
-    "`/calypso config review-recap-timezone:America/New_York`",
-    "Defaults: `1w`, `mon@09:00`, `America/New_York`.",
+    "",
+    "Platform provider setup:",
+    "`/calypso config communication-provider:slack|microsoft_teams`",
+    "`/calypso config code-host-provider:github|bitbucket`",
+    "`/calypso config deploy-provider:digitalocean|aws`",
+    "Defaults: `1w`, `mon@09:00`, timezone from `/calypso config timezone`.",
   ].join("\n");
+}
+
+function buildProviderArgumentPattern(prefix, providers) {
+  return new RegExp(`^${prefix}:(${providers.join("|")})$`, "i");
+}
+
+function buildProviderUpdateMessage({ baseText }) {
+  const messageLines = [
+    baseText,
+    "Restart Calypso for this change to take effect.",
+  ];
+  return messageLines.join(" ");
+}
+
+function buildProviderUnavailableMessage(provider) {
+  const unavailableProvider = UNAVAILABLE_PROVIDERS[String(provider || "").toLowerCase()] || null;
+  if (!unavailableProvider) {
+    return null;
+  }
+
+  return [
+    `Provider \`${provider}\` is not available yet.`,
+    `Supported ${unavailableProvider.category} provider(s): \`${unavailableProvider.availableOptions.join(", ")}\`.`,
+  ].join(" ");
 }
 
 module.exports = {

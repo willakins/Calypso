@@ -6,11 +6,15 @@ const {
   createPool,
   getConfiguredTimeFormat,
   getConfiguredTimeZone,
+  getRuntimeProviderConfig,
   getReviewRecapConfig,
   isUserWhitelistedForDeploy,
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
+  setConfiguredCodeHostProvider,
+  setConfiguredCommunicationProvider,
+  setConfiguredDeployProvider,
   markStaleOpenPullRequestsClosed,
   markReviewRecapSent,
   setConfiguredTimeFormat,
@@ -582,6 +586,46 @@ test("getReviewRecapConfig returns configured values", async () => {
   assert.equal(result.lastSentSlotAt, "2026-02-16T17:00:00.000Z");
 });
 
+test("getRuntimeProviderConfig returns defaults when singleton row is missing", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  const result = await getRuntimeProviderConfig(pool);
+
+  assert.deepEqual(result, {
+    communicationProvider: "slack",
+    codeHostProvider: "github",
+    deployProvider: "digitalocean",
+  });
+});
+
+test("getRuntimeProviderConfig returns configured providers", async () => {
+  const pool = {
+    async query() {
+      return {
+        rows: [
+          {
+            communication_provider: "microsoft_teams",
+            code_host_provider: "bitbucket",
+            deploy_provider: "aws",
+          },
+        ],
+      };
+    },
+  };
+
+  const result = await getRuntimeProviderConfig(pool);
+
+  assert.deepEqual(result, {
+    communicationProvider: "microsoft_teams",
+    codeHostProvider: "bitbucket",
+    deployProvider: "aws",
+  });
+});
+
 test("setReviewRecapChannel upserts channel", async () => {
   const captured = {};
   const pool = {
@@ -696,6 +740,75 @@ test("setReviewRecapTimeZone upserts timezone", async () => {
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
   assert.equal(captured.params[5], "America/Chicago");
   assert.equal(result.timezone, "America/Chicago");
+});
+
+test("setConfiguredCommunicationProvider upserts provider", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ communication_provider: "slack", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setConfiguredCommunicationProvider(pool, "slack", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO runtime_config/);
+  assert.equal(captured.params[0], "slack");
+  assert.equal(result.communication_provider, "slack");
+});
+
+test("setConfiguredCodeHostProvider upserts provider", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ code_host_provider: "github", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setConfiguredCodeHostProvider(pool, "github", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO runtime_config/);
+  assert.equal(captured.params[1], "github");
+  assert.equal(result.code_host_provider, "github");
+});
+
+test("setConfiguredDeployProvider upserts provider", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ deploy_provider: "digitalocean", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setConfiguredDeployProvider(pool, "digitalocean", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO runtime_config/);
+  assert.equal(captured.params[2], "digitalocean");
+  assert.equal(result.deploy_provider, "digitalocean");
+});
+
+test("setConfiguredDeployProvider rejects unsupported provider", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setConfiguredDeployProvider(pool, "render", "UADMIN");
+  }, /Unsupported deploy provider/);
 });
 
 test("markReviewRecapSent updates last sent slot", async () => {

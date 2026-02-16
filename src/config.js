@@ -17,6 +17,7 @@ const DEPLOY_PROVIDERS = Object.freeze({
 const DEFAULT_COMMUNICATION_PROVIDER = COMMUNICATION_PROVIDERS.slack;
 const DEFAULT_CODE_HOST_PROVIDER = CODE_HOST_PROVIDERS.github;
 const DEFAULT_DEPLOY_PROVIDER = DEPLOY_PROVIDERS.digitalocean;
+const DEFAULT_BOT_NAME = "Calypso";
 const DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS = 24;
 const DEFAULT_CODE_HOST_API_BASE_URL = "https://api.github.com";
 const DEFAULT_CODE_HOST_API_VERSION = "2022-11-28";
@@ -80,8 +81,10 @@ function loadConfig() {
   );
   const deployToken = readOptionalEnvironmentValue("DEPLOY_TOKEN");
   const deployProductionAppId = readOptionalEnvironmentValue("DEPLOY_PROD_APP_ID");
+  const botName = readOptionalEnvironmentValue("BOT_NAME") || DEFAULT_BOT_NAME;
 
   return {
+    botName,
     communicationProvider,
     codeHostProvider,
     deployProvider,
@@ -222,5 +225,6 @@ module.exports = {
   DEFAULT_CODE_HOST_API_USER_AGENT,
   DEFAULT_CODE_HOST_API_VERSION,
   DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS,
+  DEFAULT_BOT_NAME,
   loadConfig,
 };

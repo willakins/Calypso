@@ -16,10 +16,12 @@ blocks production deploys when untested changes exist, and posts scheduled revie
   - `/calypso help`
   - `/calypso config time-format:human|long`
   - `/calypso config timezone:America/New_York`
+  - `/calypso config communication-provider:slack|microsoft_teams`
+  - `/calypso config code-host-provider:github|bitbucket`
+  - `/calypso config deploy-provider:digitalocean|aws`
   - `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
   - `/calypso config review-recap-recency:<Nd|Nw>`
   - `/calypso config review-recap-schedule:<weekday>@HH:MM`
-  - `/calypso config review-recap-timezone:America/New_York`
   - `/calypso sync`
   - `/calypso status`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
@@ -141,6 +143,7 @@ test/
 Always required:
 
 - `DATABASE_URL`
+- `BOT_NAME` (default: `Calypso`)
 - `COMMUNICATION_PROVIDER` (default: `slack`)
 - `CODE_HOST_PROVIDER` (default: `github`)
 - `DEPLOY_PROVIDER` (default: `digitalocean`)
@@ -197,6 +200,11 @@ Provider support matrix:
 - Provider selector for deploy integration.
 - Supported values: `digitalocean` (implemented), `aws` (startup fail-fast scaffold).
 - Default: `digitalocean`.
+
+`BOT_NAME`
+
+- Display name used in bot-generated help and error messages.
+- Default: `Calypso`.
 
 `COMMUNICATION_BOT_TOKEN`
 
@@ -483,9 +491,24 @@ Rules:
 
 - Sets weekly send slot using weekday + 24h clock (for example `mon@09:00`, `tue@10:15`).
 
-`/calypso config review-recap-timezone:America/New_York`
+`/calypso config timezone:America/New_York`
 
-- Sets recap schedule timezone (IANA timezone).
+- Sets timezone (IANA), used by human timestamps and recap schedule rendering.
+
+`/calypso config communication-provider:slack|microsoft_teams`
+
+- Sets communication platform provider in runtime config.
+- Takes effect after app restart.
+
+`/calypso config code-host-provider:github|bitbucket`
+
+- Sets code-host platform provider in runtime config.
+- Takes effect after app restart.
+
+`/calypso config deploy-provider:digitalocean|aws`
+
+- Sets deploy platform provider in runtime config.
+- Takes effect after app restart.
 
 `/calypso sync`
 

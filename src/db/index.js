@@ -31,6 +31,23 @@ const REVIEW_RECAP_DEFAULTS = Object.freeze({
   scheduleTime: "09:00",
   timeZone: DEFAULT_TIME_ZONE,
 });
+const RUNTIME_PROVIDER_DEFAULTS = Object.freeze({
+  communicationProvider: "slack",
+  codeHostProvider: "github",
+  deployProvider: "digitalocean",
+});
+const COMMUNICATION_PROVIDERS = Object.freeze({
+  slack: "slack",
+  microsoftTeams: "microsoft_teams",
+});
+const CODE_HOST_PROVIDERS = Object.freeze({
+  github: "github",
+  bitbucket: "bitbucket",
+});
+const DEPLOY_PROVIDERS = Object.freeze({
+  digitalocean: "digitalocean",
+  aws: "aws",
+});
 
 function createPool(databaseConnectionString) {
   if (!databaseConnectionString || databaseConnectionString.trim() === "") {
@@ -479,6 +496,33 @@ async function getReviewRecapConfig(pool) {
   };
 }
 
+async function getRuntimeProviderConfig(pool) {
+  const result = await pool.query(
+    `
+      SELECT
+        communication_provider,
+        code_host_provider,
+        deploy_provider
+      FROM runtime_config
+      WHERE id = 1
+      LIMIT 1
+    `,
+  );
+
+  const row = result.rows[0] || {};
+  return {
+    communicationProvider:
+      normalizeCommunicationProvider(row.communication_provider) ||
+      RUNTIME_PROVIDER_DEFAULTS.communicationProvider,
+    codeHostProvider:
+      normalizeCodeHostProvider(row.code_host_provider) ||
+      RUNTIME_PROVIDER_DEFAULTS.codeHostProvider,
+    deployProvider:
+      normalizeDeployProvider(row.deploy_provider) ||
+      RUNTIME_PROVIDER_DEFAULTS.deployProvider,
+  };
+}
+
 async function setReviewRecapChannel(pool, targetChannelId, updatedBy) {
   const normalizedChannelId = normalizeReviewRecapChannelId(targetChannelId);
   const normalizedUserId = normalizeUserId(updatedBy);
@@ -567,6 +611,54 @@ async function markReviewRecapSent(pool, scheduledSlotAt) {
   return result.rows[0] || null;
 }
 
+async function setConfiguredCommunicationProvider(pool, communicationProvider, updatedBy) {
+  const normalizedCommunicationProvider = normalizeCommunicationProvider(communicationProvider);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedCommunicationProvider) {
+    throw new Error(`Unsupported communication provider: ${communicationProvider}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertRuntimeProviderConfig(pool, {
+    communicationProvider: normalizedCommunicationProvider,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setConfiguredCodeHostProvider(pool, codeHostProvider, updatedBy) {
+  const normalizedCodeHostProvider = normalizeCodeHostProvider(codeHostProvider);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedCodeHostProvider) {
+    throw new Error(`Unsupported code-host provider: ${codeHostProvider}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertRuntimeProviderConfig(pool, {
+    codeHostProvider: normalizedCodeHostProvider,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setConfiguredDeployProvider(pool, deployProvider, updatedBy) {
+  const normalizedDeployProvider = normalizeDeployProvider(deployProvider);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedDeployProvider) {
+    throw new Error(`Unsupported deploy provider: ${deployProvider}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertRuntimeProviderConfig(pool, {
+    deployProvider: normalizedDeployProvider,
+    updatedBy: normalizedUserId,
+  });
+}
+
 async function upsertReviewRecapConfig(pool, updates) {
   const result = await pool.query(
     `
@@ -620,6 +712,50 @@ async function upsertReviewRecapConfig(pool, updates) {
       updates.scheduleWeekday || null,
       updates.scheduleTime || null,
       updates.timeZone || null,
+      updates.updatedBy || null,
+    ],
+  );
+
+  return result.rows[0];
+}
+
+async function upsertRuntimeProviderConfig(pool, updates) {
+  const result = await pool.query(
+    `
+      INSERT INTO runtime_config (
+        id,
+        communication_provider,
+        code_host_provider,
+        deploy_provider,
+        updated_by,
+        updated_at
+      )
+      VALUES (
+        1,
+        COALESCE($1, '${RUNTIME_PROVIDER_DEFAULTS.communicationProvider}'),
+        COALESCE($2, '${RUNTIME_PROVIDER_DEFAULTS.codeHostProvider}'),
+        COALESCE($3, '${RUNTIME_PROVIDER_DEFAULTS.deployProvider}'),
+        $4,
+        NOW()
+      )
+      ON CONFLICT (id)
+      DO UPDATE SET
+        communication_provider = COALESCE($1, runtime_config.communication_provider),
+        code_host_provider = COALESCE($2, runtime_config.code_host_provider),
+        deploy_provider = COALESCE($3, runtime_config.deploy_provider),
+        updated_by = EXCLUDED.updated_by,
+        updated_at = NOW()
+      RETURNING
+        communication_provider,
+        code_host_provider,
+        deploy_provider,
+        updated_by,
+        updated_at
+    `,
+    [
+      updates.communicationProvider || null,
+      updates.codeHostProvider || null,
+      updates.deployProvider || null,
       updates.updatedBy || null,
     ],
   );
@@ -798,6 +934,27 @@ function normalizePositiveInteger(value) {
   return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
 }
 
+function normalizeCommunicationProvider(provider) {
+  const normalizedProvider = String(provider || "").toLowerCase().trim();
+  return Object.values(COMMUNICATION_PROVIDERS).includes(normalizedProvider)
+    ? normalizedProvider
+    : null;
+}
+
+function normalizeCodeHostProvider(provider) {
+  const normalizedProvider = String(provider || "").toLowerCase().trim();
+  return Object.values(CODE_HOST_PROVIDERS).includes(normalizedProvider)
+    ? normalizedProvider
+    : null;
+}
+
+function normalizeDeployProvider(provider) {
+  const normalizedProvider = String(provider || "").toLowerCase().trim();
+  return Object.values(DEPLOY_PROVIDERS).includes(normalizedProvider)
+    ? normalizedProvider
+    : null;
+}
+
 function normalizePullRequestReviewState(reviewState) {
   const normalizedReviewState = String(reviewState || "").toLowerCase().trim();
   if (normalizedReviewState === "approved") {
@@ -817,9 +974,11 @@ module.exports = {
   createPool,
   DEFAULT_TIME_FORMAT,
   DEFAULT_TIME_ZONE,
+  RUNTIME_PROVIDER_DEFAULTS,
   REVIEW_RECAP_DEFAULTS,
   REVIEW_RECAP_RECENCY_UNITS,
   REVIEW_RECAP_WEEKDAYS,
+  getRuntimeProviderConfig,
   getConfiguredTimeZone,
   getReviewRecapConfig,
   getLastProdDeployAt,
@@ -841,6 +1000,9 @@ module.exports = {
   setReviewRecapTimeZone,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,
+  setConfiguredCommunicationProvider,
+  setConfiguredCodeHostProvider,
+  setConfiguredDeployProvider,
   TIME_FORMATS,
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,

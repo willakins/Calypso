@@ -17,16 +17,22 @@ const {
   markPullRequestsDeployedSince,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,
+  setConfiguredCommunicationProvider,
+  setConfiguredCodeHostProvider,
+  setConfiguredDeployProvider,
   setReviewRecapChannel,
   setReviewRecapRecency,
   setReviewRecapSchedule,
   setReviewRecapTimeZone,
 } = require("../../db");
+const { DEFAULT_BOT_NAME } = require("../../config");
 const { formatStatusResponse, isValidTimeZone } = require("../../util/format");
 const { createCalypsoCommandRegistry } = require("../registry/calypso_command_registry");
 
 function createCalypsoCommandService(serviceOptions = {}) {
-  const commandRegistry = createCalypsoCommandRegistry();
+  const commandRegistry = createCalypsoCommandRegistry({
+    botName: serviceOptions.botName,
+  });
   const defaultDependencies = createDefaultDependencies();
 
   return {
@@ -67,6 +73,7 @@ function createCalypsoCommandService(serviceOptions = {}) {
 
 function createDefaultDependencies() {
   return {
+    defaultBotName: DEFAULT_BOT_NAME,
     formatStatusResponseFn: formatStatusResponse,
     addUserToDeployWhitelistFn: addUserToDeployWhitelist,
     getLastProdDeployAtFn: getLastProdDeployAt,
@@ -91,6 +98,9 @@ function createDefaultDependencies() {
     runOpenPullRequestSyncNowFn: null,
     setConfiguredTimeFormatFn: setConfiguredTimeFormat,
     setConfiguredTimeZoneFn: setConfiguredTimeZone,
+    setConfiguredCommunicationProviderFn: setConfiguredCommunicationProvider,
+    setConfiguredCodeHostProviderFn: setConfiguredCodeHostProvider,
+    setConfiguredDeployProviderFn: setConfiguredDeployProvider,
     setReviewRecapChannelFn: setReviewRecapChannel,
     setReviewRecapRecencyFn: setReviewRecapRecency,
     setReviewRecapScheduleFn: setReviewRecapSchedule,
@@ -107,6 +117,7 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
   const deployPlatform = mergedOptions.deployPlatform || null;
 
   return {
+    botName: String(mergedOptions.botName || defaultDependencies.defaultBotName),
     addUserToDeployWhitelistFn:
       mergedOptions.addUserToDeployWhitelistFn || defaultDependencies.addUserToDeployWhitelistFn,
     deployConfig: mergedOptions.deployConfig || {},
@@ -158,6 +169,14 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.setConfiguredTimeFormatFn || defaultDependencies.setConfiguredTimeFormatFn,
     setConfiguredTimeZoneFn:
       mergedOptions.setConfiguredTimeZoneFn || defaultDependencies.setConfiguredTimeZoneFn,
+    setConfiguredCommunicationProviderFn:
+      mergedOptions.setConfiguredCommunicationProviderFn ||
+      defaultDependencies.setConfiguredCommunicationProviderFn,
+    setConfiguredCodeHostProviderFn:
+      mergedOptions.setConfiguredCodeHostProviderFn ||
+      defaultDependencies.setConfiguredCodeHostProviderFn,
+    setConfiguredDeployProviderFn:
+      mergedOptions.setConfiguredDeployProviderFn || defaultDependencies.setConfiguredDeployProviderFn,
     setReviewRecapChannelFn:
       mergedOptions.setReviewRecapChannelFn || defaultDependencies.setReviewRecapChannelFn,
     setReviewRecapRecencyFn:

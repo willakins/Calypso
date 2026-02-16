@@ -46,6 +46,9 @@ function buildReqRes({ payload, signature, event = "pull_request" }) {
 test("high-level review recap flow: webhook tracking + config + scheduled post", async () => {
   const state = {
     openPullRequests: [],
+    runtimeUserConfig: {
+      timeZone: "America/New_York",
+    },
     reviewRecapConfig: {
       targetChannelId: null,
       recencyValue: 1,
@@ -165,6 +168,10 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
       state.reviewRecapConfig.scheduleTime = scheduleTime;
       return { schedule_weekday: scheduleWeekday, schedule_time: scheduleTime };
     },
+    setConfiguredTimeZoneFn: async (_pool, timeZone) => {
+      state.runtimeUserConfig.timeZone = timeZone;
+      return { timezone: timeZone };
+    },
     setReviewRecapTimeZoneFn: async (_pool, timeZone) => {
       state.reviewRecapConfig.timeZone = timeZone;
       return { timezone: timeZone };
@@ -174,7 +181,7 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
   await runSlashCommand(commandHandler, "config review-recap-channel:<#CRECAP|deployments>");
   await runSlashCommand(commandHandler, "config review-recap-recency:2w");
   await runSlashCommand(commandHandler, "config review-recap-schedule:tue@10:15");
-  await runSlashCommand(commandHandler, "config review-recap-timezone:America/Los_Angeles");
+  await runSlashCommand(commandHandler, "config timezone:America/Los_Angeles");
 
   assert.equal(state.reviewRecapConfig.targetChannelId, "CRECAP");
   assert.equal(state.reviewRecapConfig.recencyValue, 2);
