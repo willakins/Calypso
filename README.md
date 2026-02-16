@@ -169,6 +169,8 @@ Required when `CODE_HOST_PROVIDER=github` or `CODE_HOST_PROVIDER=bitbucket`:
 Optional:
 
 - `PORT` (default `3000`)
+- `POSTGRES_PASSWORD` (required when using `docker-compose.droplet.yml`)
+- `CADDY_EMAIL` (used by `Caddyfile.droplet` for TLS contact email)
 - `DEPLOY_TOKEN`
 - `DEPLOY_PROD_APP_ID`
 - `DEPLOY_POLL_INTERVAL_SECONDS` (default `10`)
@@ -322,6 +324,25 @@ Provider support matrix:
 
 ## Hosting
 
+### Pricing Snapshot (DigitalOcean)
+
+Estimated monthly costs as of 2026-02-16:
+
+- App Platform web service (`apps-s-1vcpu-0.5gb`) starts at `$5/mo`.
+- Managed PostgreSQL single node (1 GiB) starts at `$15/mo`.
+- Basic Droplets currently show `$4/mo` (512 MiB) and `$6/mo` (1 GiB).
+
+Practical options:
+
+- App Platform + Managed PostgreSQL: about `$20/mo` minimum.
+- Single Droplet hosting app + Postgres yourself: about `$4-$6/mo` minimum.
+- Droplet + Managed PostgreSQL: about `$19-$21/mo` minimum.
+
+Notes:
+
+- App Platform static sites have a free tier, but Calypso needs a running web service.
+- App Platform additional outbound transfer is billed at `$0.02/GiB`.
+
 ### Host Locally (Fastest Development Setup)
 
 1. Install dependencies:
@@ -359,7 +380,7 @@ Optional local mode (you run your own Postgres + tunnel):
 npm run dev
 ```
 
-### Host on DigitalOcean App Platform (Recommended Production Path)
+### Host on DigitalOcean App Platform (Managed PaaS)
 
 Calypso is already set up for this:
 
@@ -368,7 +389,7 @@ Calypso is already set up for this:
 - Public webhook route (`/codehost/webhook`).
 - Startup migrations run automatically.
 
-Use these steps:
+Steps:
 
 1. Create a DigitalOcean Managed PostgreSQL cluster.
 2. Copy DB URL and keep `sslmode=require` in `DATABASE_URL`.
@@ -393,23 +414,60 @@ Use these steps:
      - `DEPLOY_PROD_APP_ID`
 6. Configure App health check path to `/healthz`.
 7. Deploy the app.
-8. Set your code-host webhook URL to:
-   - `https://<your-app-domain>/codehost/webhook`
+8. Set webhook URL to `https://<your-app-domain>/codehost/webhook`.
 9. Smoke test:
    - `/calypso help`
    - `/calypso status`
    - merge a PR and confirm webhook delivery `200`.
 
-Notes:
+### Host on a DigitalOcean Droplet (Cheapest Always-On)
 
-- Slack Socket Mode means slash commands do not require inbound Slack HTTP routes.
-- Keep one primary running instance for predictable webhook ingestion + schedulers.
-- For container-only local runs, you can still use:
+This repo includes `docker-compose.droplet.yml` and `Caddyfile.droplet` for this flow.
+
+1. Create an Ubuntu Droplet (1 GiB recommended).
+2. Point a domain `A` record to the Droplet IP (example: `calypso.example.com`).
+3. Open inbound ports `22`, `80`, `443` in DO firewall.
+4. SSH in and install Docker:
 
 ```bash
-docker build -t calypso:local .
-docker run --rm -p 3000:3000 --env-file .env calypso:local
+sudo apt update
+sudo apt install -y docker.io docker-compose-plugin git
+sudo systemctl enable --now docker
 ```
+
+5. Clone this repo and create `.env` in repo root.
+6. In `.env`, use a local Compose DB URL:
+   - `POSTGRES_PASSWORD=<strong-password>`
+   - `CADDY_EMAIL=you@yourdomain.com`
+   - `DATABASE_URL=postgresql://calypso_user:<POSTGRES_PASSWORD>@db:5432/calypso`
+7. Update `Caddyfile.droplet`:
+   - replace `calypso.example.com` with your domain
+8. Start the stack:
+
+```bash
+docker compose -f docker-compose.droplet.yml up -d --build
+```
+
+9. Verify health:
+
+```bash
+curl https://<your-domain>/healthz
+```
+
+10. Configure webhook:
+   - `https://<your-domain>/codehost/webhook`
+
+Operational notes:
+
+- Slack Socket Mode means slash commands do not require a public Slack request URL.
+- Keep one primary Calypso runtime for stable webhook ingestion and schedulers.
+- If you use the Droplet Compose DB service, do not expose `5432` publicly.
+
+Pricing references:
+
+- App Platform pricing: https://www.digitalocean.com/pricing/app-platform
+- Managed PostgreSQL pricing: https://www.digitalocean.com/pricing/managed-databases
+- Droplet pricing: https://www.digitalocean.com/pricing/droplets
 
 ## Code-Host Webhook
 

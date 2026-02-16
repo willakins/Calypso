@@ -1,0 +1,10 @@
+{
+  # Set CADDY_EMAIL in .env (used by docker-compose.droplet.yml).
+  email {$CADDY_EMAIL:admin@example.com}
+}
+
+# Replace with your real domain.
+calypso.example.com {
+  encode zstd gzip
+  reverse_proxy app:3000
+}
