@@ -1,20 +1,6 @@
 const { BaseCalypsoCommand } = require("./base_calypso_command");
+const { TIMEFRAME_DEFINITIONS, isValidTimeframe, timeframeSince } = require("../shared/timeframes");
 const { formatTimestampByTimeFormat } = require("../../util/format");
-
-const TIMEFRAME_DEFINITIONS = {
-  day: {
-    displayName: "day",
-    windowMs: 24 * 60 * 60 * 1000,
-  },
-  week: {
-    displayName: "week",
-    windowMs: 7 * 24 * 60 * 60 * 1000,
-  },
-  month: {
-    displayName: "month",
-    windowMs: 30 * 24 * 60 * 60 * 1000,
-  },
-};
 
 class TestedCommand extends BaseCalypsoCommand {
   constructor() {
@@ -32,7 +18,7 @@ class TestedCommand extends BaseCalypsoCommand {
     }
 
     if (commandWords.length === 3 && firstArgument === "recent") {
-      if (!TIMEFRAME_DEFINITIONS[secondArgument]) {
+      if (!isValidTimeframe(secondArgument)) {
         return this.buildRespondParsedCommand(
           "Usage: `/calypso tested recent <day|week|month>`",
         );
@@ -105,7 +91,7 @@ class TestedCommand extends BaseCalypsoCommand {
 
     if (parsedCommand.action === "tested_recent") {
       const timeframeDefinition = TIMEFRAME_DEFINITIONS[parsedCommand.timeframe];
-      const sinceTimestamp = new Date(Date.now() - timeframeDefinition.windowMs);
+      const sinceTimestamp = timeframeSince(parsedCommand.timeframe, Date.now());
       const recentlyTestedPullRequests = await runtime.listRecentlyTestedPullRequestsFn(
         runtime.pool,
         sinceTimestamp,

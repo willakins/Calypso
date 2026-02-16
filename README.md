@@ -19,6 +19,7 @@ It also tracks open pull-request review state and posts a scheduled Slack recap 
   - `/calypso config review-recap-schedule:<weekday>@HH:MM`
   - `/calypso config review-recap-timezone:America/New_York`
   - `/calypso status`
+  - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
   - `/calypso tested <PR_NUMBER>`
   - `/calypso deploy prod`
 - Enforces deploy blocking rules:
@@ -394,6 +395,13 @@ Rules:
 
 - Shows blockers since last production deployment.
 - If no deployments exist, baseline is epoch (`1970-01-01T00:00:00.000Z`).
+
+`/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
+
+- Lists open PRs waiting on review from review-tracking state.
+- Optional GitHub user filter (author login).
+- Optional recency filter (`day`, `week`, `month`).
+- Supports `recent` keyword variant: `/calypso reviews recent <day|week|month>`.
 
 `/calypso tested <PR_NUMBER>`
 

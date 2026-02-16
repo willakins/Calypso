@@ -9,6 +9,7 @@ const HELP_TEXT = [
   "`/calypso config time-format:human|long` Configure timestamp display format.",
   "`/calypso config timezone:America/New_York` Configure timezone for human timestamps.",
   "`/calypso status` Show deploy blockers since last prod deploy.",
+  "`/calypso reviews [<GITHUB_USER>] [<day|week|month>]` List open PRs waiting on review.",
   "`/calypso tested <PR_NUMBER>` Mark a PR as tested.",
   "`/calypso tested all` Mark all untested PRs as tested.",
   "`/calypso tested recent <day|week|month>` List recently tested PRs.",

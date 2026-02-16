@@ -27,6 +27,54 @@ test("handleCalypsoCommand routes status input", () => {
   assert.equal(result.action, "status");
 });
 
+test("handleCalypsoCommand routes reviews input", () => {
+  const result = handleCalypsoCommand({ text: "reviews", user_id: "U123" });
+
+  assert.equal(result.action, "reviews_list");
+  assert.equal(result.timeframe, null);
+  assert.equal(result.githubUser, null);
+});
+
+test("handleCalypsoCommand routes reviews input with github user", () => {
+  const result = handleCalypsoCommand({ text: "reviews octocat", user_id: "U123" });
+
+  assert.equal(result.action, "reviews_list");
+  assert.equal(result.githubUser, "octocat");
+  assert.equal(result.timeframe, null);
+});
+
+test("handleCalypsoCommand routes reviews input with timeframe", () => {
+  const result = handleCalypsoCommand({ text: "reviews week", user_id: "U123" });
+
+  assert.equal(result.action, "reviews_list");
+  assert.equal(result.githubUser, null);
+  assert.equal(result.timeframe, "week");
+});
+
+test("handleCalypsoCommand routes reviews input with recent timeframe", () => {
+  const result = handleCalypsoCommand({ text: "reviews recent day", user_id: "U123" });
+
+  assert.equal(result.action, "reviews_list");
+  assert.equal(result.githubUser, null);
+  assert.equal(result.timeframe, "day");
+});
+
+test("handleCalypsoCommand routes reviews input with github user and timeframe", () => {
+  const result = handleCalypsoCommand({ text: "reviews octocat month", user_id: "U123" });
+
+  assert.equal(result.action, "reviews_list");
+  assert.equal(result.githubUser, "octocat");
+  assert.equal(result.timeframe, "month");
+});
+
+test("handleCalypsoCommand rejects invalid reviews input", () => {
+  const result = handleCalypsoCommand({ text: "reviews recent", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /Usage:/);
+  assert.match(result.responseText, /`\/calypso reviews`/);
+});
+
 test("handleCalypsoCommand routes tested input with PR number", () => {
   const result = handleCalypsoCommand({ text: "tested 42", user_id: "U123" });
 
@@ -206,6 +254,7 @@ test("registerCalypsoCommand registers /calypso and responds ephemerally", async
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /\/calypso help/);
   assert.match(payload.text, /PR Review Recap Setup/);
+  assert.match(payload.text, /\/calypso reviews \[<GITHUB_USER>\] \[<day\|week\|month>\]/);
 });
 
 test("registerCalypsoCommand handles status with injected db functions", async () => {
@@ -237,6 +286,118 @@ test("registerCalypsoCommand handles status with injected db functions", async (
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /No blockers since last prod deploy/);
   assert.match(payload.text, /2026-02-13 22:00:17 UTC/);
+});
+
+test("registerCalypsoCommand shows open waiting reviews without filters", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    listOpenPullRequestsWaitingOnReviewSinceFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 55,
+        title: "Add observability",
+        author_login: "octocat",
+        opened_for_review_at: "2026-02-13T22:00:17.000Z",
+      },
+    ],
+    readTimeFormatPreferenceFn: async () => "human",
+    readTimeZonePreferenceFn: async () => "America/New_York",
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Open PRs waiting on review:/);
+  assert.match(payload.text, /croft-eng\/croft#55 - Add observability/);
+  assert.match(payload.text, /created by octocat/);
+  assert.match(payload.text, /opened for review on February 13th, 2026 at 5:00 PM EST/);
+});
+
+test("registerCalypsoCommand filters waiting reviews by github user", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    listOpenPullRequestsWaitingOnReviewSinceFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 11,
+        title: "One",
+        author_login: "octocat",
+        opened_for_review_at: "2026-02-13T22:00:17.000Z",
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 12,
+        title: "Two",
+        author_login: "hubot",
+        opened_for_review_at: "2026-02-13T22:00:17.000Z",
+      },
+    ],
+    readTimeFormatPreferenceFn: async () => "long",
+    readTimeZonePreferenceFn: async () => "America/New_York",
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews octocat", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /for github user octocat/);
+  assert.match(payload.text, /croft-eng\/croft#11 - One/);
+  assert.doesNotMatch(payload.text, /croft-eng\/croft#12 - Two/);
+});
+
+test("registerCalypsoCommand shows no-results message for reviews timeframe filter", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    listOpenPullRequestsWaitingOnReviewSinceFn: async () => [],
+    readTimeFormatPreferenceFn: async () => "human",
+    readTimeZonePreferenceFn: async () => "America/New_York",
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews week", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /No open PRs waiting on review in the last week/);
 });
 
 test("registerCalypsoCommand reports not found for tested command", async () => {
