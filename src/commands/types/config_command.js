@@ -2,6 +2,11 @@ const { BaseCalypsoCommand } = require("./base_calypso_command");
 
 const TIME_FORMAT_ARGUMENT_PATTERN = /^time-format:(human|long)$/i;
 const TIME_ZONE_ARGUMENT_PATTERN = /^timezone:(.+)$/i;
+const REVIEW_RECAP_CHANNEL_ARGUMENT_PATTERN = /^review-recap-channel:(.+)$/i;
+const REVIEW_RECAP_RECENCY_ARGUMENT_PATTERN = /^review-recap-recency:(\d+)([dw])$/i;
+const REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN =
+  /^review-recap-schedule:(mon|tue|wed|thu|fri|sat|sun)@([01]\d|2[0-3]):([0-5]\d)$/i;
+const REVIEW_RECAP_TIME_ZONE_ARGUMENT_PATTERN = /^review-recap-timezone:(.+)$/i;
 
 class ConfigCommand extends BaseCalypsoCommand {
   constructor() {
@@ -29,6 +34,44 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildParsedCommand({
         action: "config_timezone",
         timeZone: timezoneMatch[1].trim(),
+      });
+    }
+
+    const recapChannelMatch = argument.match(REVIEW_RECAP_CHANNEL_ARGUMENT_PATTERN);
+    if (recapChannelMatch) {
+      const targetChannelId = normalizeSlackChannelId(recapChannelMatch[1]);
+      if (!targetChannelId) {
+        return this.buildRespondParsedCommand(buildConfigUsageMessage());
+      }
+      return this.buildParsedCommand({
+        action: "config_review_recap_channel",
+        targetChannelId,
+      });
+    }
+
+    const recapRecencyMatch = argument.match(REVIEW_RECAP_RECENCY_ARGUMENT_PATTERN);
+    if (recapRecencyMatch) {
+      return this.buildParsedCommand({
+        action: "config_review_recap_recency",
+        recencyValue: Number(recapRecencyMatch[1]),
+        recencyUnit: recapRecencyMatch[2].toLowerCase(),
+      });
+    }
+
+    const recapScheduleMatch = argument.match(REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN);
+    if (recapScheduleMatch) {
+      return this.buildParsedCommand({
+        action: "config_review_recap_schedule",
+        scheduleWeekday: recapScheduleMatch[1].toLowerCase(),
+        scheduleTime: `${recapScheduleMatch[2]}:${recapScheduleMatch[3]}`,
+      });
+    }
+
+    const recapTimeZoneMatch = argument.match(REVIEW_RECAP_TIME_ZONE_ARGUMENT_PATTERN);
+    if (recapTimeZoneMatch) {
+      return this.buildParsedCommand({
+        action: "config_review_recap_timezone",
+        timeZone: recapTimeZoneMatch[1].trim(),
       });
     }
 
@@ -67,6 +110,44 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
+    if (parsedCommand.action === "config_review_recap_channel") {
+      await runtime.setReviewRecapChannelFn(
+        runtime.pool,
+        parsedCommand.targetChannelId,
+        runtime.slackUserId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated review recap channel to <#${parsedCommand.targetChannelId}>.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_review_recap_recency") {
+      await runtime.setReviewRecapRecencyFn(
+        runtime.pool,
+        parsedCommand.recencyValue,
+        parsedCommand.recencyUnit,
+        runtime.slackUserId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated review recap recency to \`${parsedCommand.recencyValue}${parsedCommand.recencyUnit}\`.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_review_recap_schedule") {
+      await runtime.setReviewRecapScheduleFn(
+        runtime.pool,
+        parsedCommand.scheduleWeekday,
+        parsedCommand.scheduleTime,
+        runtime.slackUserId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated review recap schedule to \`${parsedCommand.scheduleWeekday}@${parsedCommand.scheduleTime}\`.`,
+      );
+    }
+
     if (!runtime.isValidTimeZoneFn(parsedCommand.timeZone)) {
       return this.buildExecutionResult(
         [
@@ -76,16 +157,38 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
-    await runtime.setConfiguredTimeZoneFn(
-      runtime.pool,
-      parsedCommand.timeZone,
-      runtime.slackUserId,
-    );
+    if (parsedCommand.action === "config_review_recap_timezone") {
+      await runtime.setReviewRecapTimeZoneFn(
+        runtime.pool,
+        parsedCommand.timeZone,
+        runtime.slackUserId,
+      );
+
+      return this.buildExecutionResult(
+        `Timezone \`${parsedCommand.timeZone}\` is valid. Updated review recap timezone.`,
+      );
+    }
+
+    await runtime.setConfiguredTimeZoneFn(runtime.pool, parsedCommand.timeZone, runtime.slackUserId);
 
     return this.buildExecutionResult(
       `Timezone \`${parsedCommand.timeZone}\` is valid. Updated your timezone setting.`,
     );
   }
+}
+
+function normalizeSlackChannelId(rawChannelInput) {
+  const candidateChannelInput = String(rawChannelInput || "").trim();
+  if (candidateChannelInput === "") {
+    return null;
+  }
+
+  const mentionMatch = candidateChannelInput.match(/^<#([A-Z0-9]+)(?:\|[^>]+)?>$/i);
+  if (mentionMatch) {
+    return mentionMatch[1].toUpperCase();
+  }
+
+  return candidateChannelInput;
 }
 
 function buildConfigUsageMessage() {
@@ -94,6 +197,10 @@ function buildConfigUsageMessage() {
     "`/calypso config time-format:human`",
     "`/calypso config time-format:long`",
     "`/calypso config timezone:America/New_York`",
+    "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
+    "`/calypso config review-recap-recency:<Nd|Nw>`",
+    "`/calypso config review-recap-schedule:<weekday>@HH:MM`",
+    "`/calypso config review-recap-timezone:America/New_York`",
   ].join("\n");
 }
 

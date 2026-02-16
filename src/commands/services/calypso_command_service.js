@@ -5,15 +5,22 @@ const {
   getConfiguredTimeFormat,
   getConfiguredTimeZone,
   getLastProdDeployAt,
+  getReviewRecapConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
+  listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   listBlockingPullRequests,
+  markReviewRecapSent,
   markAllUntestedPullRequestsTested,
   markPullRequestTested,
   markPullRequestsDeployedSince,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,
+  setReviewRecapChannel,
+  setReviewRecapRecency,
+  setReviewRecapSchedule,
+  setReviewRecapTimeZone,
 } = require("../../db");
 const { createDigitalOceanClient } = require("../../integrations/digitalocean/client");
 const { formatStatusResponse, isValidTimeZone } = require("../../util/format");
@@ -70,6 +77,9 @@ function createDefaultDependencies() {
     isValidTimeZoneFn: isValidTimeZone,
     isWorkspaceAdminFn: isWorkspaceAdmin,
     insertDeploymentFn: insertDeployment,
+    getReviewRecapConfigFn: getReviewRecapConfig,
+    listOpenPullRequestsWaitingOnReviewSinceFn: listOpenPullRequestsWaitingOnReviewSince,
+    markReviewRecapSentFn: markReviewRecapSent,
     listRecentlyTestedPullRequestsFn: listRecentlyTestedPullRequests,
     listBlockingPullRequestsFn: listBlockingPullRequests,
     markAllUntestedPullRequestsTestedFn: markAllUntestedPullRequestsTested,
@@ -80,6 +90,10 @@ function createDefaultDependencies() {
     resolveDeployAccessFn: resolveDeployAccess,
     setConfiguredTimeFormatFn: setConfiguredTimeFormat,
     setConfiguredTimeZoneFn: setConfiguredTimeZone,
+    setReviewRecapChannelFn: setReviewRecapChannel,
+    setReviewRecapRecencyFn: setReviewRecapRecency,
+    setReviewRecapScheduleFn: setReviewRecapSchedule,
+    setReviewRecapTimeZoneFn: setReviewRecapTimeZone,
     triggerProdDeployFn: triggerProductionDeployment,
     waitForProdDeployCompletionFn: waitForProductionDeploymentCompletion,
   };
@@ -100,6 +114,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.getConfiguredTimeFormatFn || defaultDependencies.getConfiguredTimeFormatFn,
     getConfiguredTimeZoneFn:
       mergedOptions.getConfiguredTimeZoneFn || defaultDependencies.getConfiguredTimeZoneFn,
+    getReviewRecapConfigFn:
+      mergedOptions.getReviewRecapConfigFn || defaultDependencies.getReviewRecapConfigFn,
     isUserWhitelistedForDeployFn:
       mergedOptions.isUserWhitelistedForDeployFn || defaultDependencies.isUserWhitelistedForDeployFn,
     isValidTimeZoneFn: mergedOptions.isValidTimeZoneFn || defaultDependencies.isValidTimeZoneFn,
@@ -108,11 +124,16 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     listRecentlyTestedPullRequestsFn:
       mergedOptions.listRecentlyTestedPullRequestsFn ||
       defaultDependencies.listRecentlyTestedPullRequestsFn,
+    listOpenPullRequestsWaitingOnReviewSinceFn:
+      mergedOptions.listOpenPullRequestsWaitingOnReviewSinceFn ||
+      defaultDependencies.listOpenPullRequestsWaitingOnReviewSinceFn,
     listBlockingPullRequestsFn:
       mergedOptions.listBlockingPullRequestsFn || defaultDependencies.listBlockingPullRequestsFn,
     markAllUntestedPullRequestsTestedFn:
       mergedOptions.markAllUntestedPullRequestsTestedFn ||
       defaultDependencies.markAllUntestedPullRequestsTestedFn,
+    markReviewRecapSentFn:
+      mergedOptions.markReviewRecapSentFn || defaultDependencies.markReviewRecapSentFn,
     markPullRequestTestedFn:
       mergedOptions.markPullRequestTestedFn || defaultDependencies.markPullRequestTestedFn,
     markPullRequestsDeployedSinceFn:
@@ -129,6 +150,14 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.setConfiguredTimeFormatFn || defaultDependencies.setConfiguredTimeFormatFn,
     setConfiguredTimeZoneFn:
       mergedOptions.setConfiguredTimeZoneFn || defaultDependencies.setConfiguredTimeZoneFn,
+    setReviewRecapChannelFn:
+      mergedOptions.setReviewRecapChannelFn || defaultDependencies.setReviewRecapChannelFn,
+    setReviewRecapRecencyFn:
+      mergedOptions.setReviewRecapRecencyFn || defaultDependencies.setReviewRecapRecencyFn,
+    setReviewRecapScheduleFn:
+      mergedOptions.setReviewRecapScheduleFn || defaultDependencies.setReviewRecapScheduleFn,
+    setReviewRecapTimeZoneFn:
+      mergedOptions.setReviewRecapTimeZoneFn || defaultDependencies.setReviewRecapTimeZoneFn,
     slackClient: mergedOptions.slackClient || null,
     slackUserId: mergedOptions.slackUserId,
     enableDeploymentCompletionNotifications: Boolean(

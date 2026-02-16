@@ -16,6 +16,7 @@ test("handleCalypsoCommand returns help for help input", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\/calypso help/);
+  assert.match(result.responseText, /\/calypso config review-recap-channel/);
 });
 
 test("handleCalypsoCommand routes status input", () => {
@@ -102,6 +103,48 @@ test("handleCalypsoCommand routes config timezone input", () => {
 
   assert.equal(result.action, "config_timezone");
   assert.equal(result.timeZone, "America/Los_Angeles");
+});
+
+test("handleCalypsoCommand routes config review recap channel input", () => {
+  const result = handleCalypsoCommand({
+    text: "config review-recap-channel:<#C123ABC|deploys>",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_review_recap_channel");
+  assert.equal(result.targetChannelId, "C123ABC");
+});
+
+test("handleCalypsoCommand routes config review recap recency input", () => {
+  const result = handleCalypsoCommand({
+    text: "config review-recap-recency:2w",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_review_recap_recency");
+  assert.equal(result.recencyValue, 2);
+  assert.equal(result.recencyUnit, "w");
+});
+
+test("handleCalypsoCommand routes config review recap schedule input", () => {
+  const result = handleCalypsoCommand({
+    text: "config review-recap-schedule:tue@10:15",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_review_recap_schedule");
+  assert.equal(result.scheduleWeekday, "tue");
+  assert.equal(result.scheduleTime, "10:15");
+});
+
+test("handleCalypsoCommand routes config review recap timezone input", () => {
+  const result = handleCalypsoCommand({
+    text: "config review-recap-timezone:America/Chicago",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_review_recap_timezone");
+  assert.equal(result.timeZone, "America/Chicago");
 });
 
 test("handleCalypsoCommand returns unknown message for unsupported input", () => {
@@ -954,4 +997,148 @@ test("registerCalypsoCommand config command reports invalid timezone", async () 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Timezone `Mars\/Olympus` is invalid/);
   assert.equal(setTimezoneCalled, false);
+});
+
+test("registerCalypsoCommand config command updates review recap channel", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapChannelFn: async (pool, targetChannelId, updatedBy) => {
+      capturedCalls.push({ pool, targetChannelId, updatedBy });
+      return { target_channel_id: targetChannelId, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-channel:<#C999ABC|deploys>", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Updated review recap channel to <#C999ABC>/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].targetChannelId, "C999ABC");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates review recap recency", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapRecencyFn: async (pool, recencyValue, recencyUnit, updatedBy) => {
+      capturedCalls.push({ pool, recencyValue, recencyUnit, updatedBy });
+      return { recency_value: recencyValue, recency_unit: recencyUnit, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-recency:2w", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Updated review recap recency to `2w`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].recencyValue, 2);
+  assert.equal(capturedCalls[0].recencyUnit, "w");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates review recap schedule", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapScheduleFn: async (pool, scheduleWeekday, scheduleTime, updatedBy) => {
+      capturedCalls.push({ pool, scheduleWeekday, scheduleTime, updatedBy });
+      return { schedule_weekday: scheduleWeekday, schedule_time: scheduleTime, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-schedule:tue@10:15", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Updated review recap schedule to `tue@10:15`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].scheduleWeekday, "tue");
+  assert.equal(capturedCalls[0].scheduleTime, "10:15");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates review recap timezone when valid", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    isValidTimeZoneFn: () => true,
+    setReviewRecapTimeZoneFn: async (pool, timeZone, updatedBy) => {
+      capturedCalls.push({ pool, timeZone, updatedBy });
+      return { timezone: timeZone, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-timezone:America/Chicago", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Timezone `America\/Chicago` is valid/);
+  assert.match(payload.text, /Updated review recap timezone/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].timeZone, "America/Chicago");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });

@@ -39,6 +39,43 @@ function buildReqRes({ payload, signature, event = "pull_request" }) {
   return { req, res, body };
 }
 
+function buildPullRequestPayload(overrides = {}) {
+  return {
+    action: "opened",
+    repository: { full_name: "croft-eng/croft" },
+    pull_request: {
+      number: 77,
+      merged: false,
+      merged_at: null,
+      created_at: "2026-02-13T17:00:00Z",
+      updated_at: "2026-02-13T17:00:00Z",
+      closed_at: null,
+      draft: false,
+      title: "Ship it",
+      html_url: "https://github.com/croft-eng/croft/pull/77",
+      base: { ref: "main" },
+      user: { login: "octocat" },
+    },
+    ...overrides,
+  };
+}
+
+function buildPullRequestReviewPayload(overrides = {}) {
+  return {
+    action: "submitted",
+    repository: { full_name: "croft-eng/croft" },
+    pull_request: {
+      number: 77,
+      base: { ref: "main" },
+    },
+    review: {
+      state: "approved",
+      submitted_at: "2026-02-13T18:00:00Z",
+    },
+    ...overrides,
+  };
+}
+
 test("verifyGithubSignature validates a correct sha256 signature", () => {
   const secret = "test-secret";
   const payloadBuffer = Buffer.from('{"ok":true}', "utf8");
@@ -112,7 +149,7 @@ test("github webhook returns 400 on invalid json payload", async () => {
   assert.equal(res.body.error, "invalid json payload");
 });
 
-test("github webhook ignores non pull_request events", async () => {
+test("github webhook ignores unsupported event types", async () => {
   const secret = "secret";
   let upsertCalled = false;
   const handler = createGithubWebhookHandler({
@@ -142,7 +179,7 @@ test("github webhook ignores non pull_request events", async () => {
   assert.equal(upsertCalled, false);
 });
 
-test("github webhook ignores merged pull requests outside tracked branch/repo", async () => {
+test("github webhook ignores pull request events outside tracked branch/repo", async () => {
   const secret = "secret";
   let upsertCalled = false;
   const handler = createGithubWebhookHandler({
@@ -156,18 +193,9 @@ test("github webhook ignores merged pull requests outside tracked branch/repo", 
       upsertCalled = true;
     },
   });
-  const payload = {
-    action: "closed",
+  const payload = buildPullRequestPayload({
     repository: { full_name: "other/repo" },
-    pull_request: {
-      number: 77,
-      merged: true,
-      merged_at: "2026-02-13T17:00:00Z",
-      title: "Ship it",
-      html_url: "https://github.com/other/repo/pull/77",
-      base: { ref: "main" },
-    },
-  };
+  });
   const body = Buffer.from(JSON.stringify(payload), "utf8");
   const { req, res } = buildReqRes({
     payload,
@@ -182,8 +210,76 @@ test("github webhook ignores merged pull requests outside tracked branch/repo", 
   assert.equal(upsertCalled, false);
 });
 
-test("github webhook upserts merged main PR as untested", async () => {
+test("github webhook tracks opened pull request review lifecycle", async () => {
+  let savedReviewState;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "secret",
+    },
+    upsertOpenPullRequestReviewStateFn: async (_pool, state) => {
+      savedReviewState = state;
+      return { pr_number: state.prNumber, review_state: state.reviewState };
+    },
+  });
+  const payload = buildPullRequestPayload();
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
+    payload,
+    signature: signPayload("secret", body),
+  });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(savedReviewState.repo, "croft-eng/croft");
+  assert.equal(savedReviewState.prNumber, 77);
+  assert.equal(savedReviewState.reviewState, "waiting");
+  assert.equal(savedReviewState.lifecycleState, "open");
+  assert.equal(savedReviewState.openedForReviewAt, "2026-02-13T17:00:00Z");
+  assert.equal(res.body.review_tracking_updated, true);
+});
+
+test("github webhook tracks ready_for_review transitions", async () => {
+  let savedReviewState;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "secret",
+    },
+    upsertOpenPullRequestReviewStateFn: async (_pool, state) => {
+      savedReviewState = state;
+      return { pr_number: state.prNumber, review_state: state.reviewState };
+    },
+  });
+  const payload = buildPullRequestPayload({
+    action: "ready_for_review",
+    pull_request: {
+      ...buildPullRequestPayload().pull_request,
+      draft: false,
+      updated_at: "2026-02-14T11:00:00Z",
+    },
+  });
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({ payload, signature: signPayload("secret", body) });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(savedReviewState.isDraft, false);
+  assert.equal(savedReviewState.reviewState, "waiting");
+  assert.equal(savedReviewState.openedForReviewAt, "2026-02-14T11:00:00Z");
+});
+
+test("github webhook upserts merged main PR as untested while updating review state", async () => {
   let savedPullRequest;
+  let savedReviewState;
   const handler = createGithubWebhookHandler({
     pool: { marker: "pool" },
     config: {
@@ -191,26 +287,28 @@ test("github webhook upserts merged main PR as untested", async () => {
       githubRepo: "croft-eng/croft",
       githubWebhookSecret: "secret",
     },
+    upsertOpenPullRequestReviewStateFn: async (_pool, state) => {
+      savedReviewState = state;
+      return { pr_number: state.prNumber, review_state: state.reviewState };
+    },
     upsertPullRequestAsUntestedFn: async (_pool, pr) => {
       savedPullRequest = pr;
       return { pr_number: pr.prNumber, status: "untested" };
     },
   });
-  const payload = {
+  const payload = buildPullRequestPayload({
     action: "closed",
-    repository: { full_name: "croft-eng/croft" },
     pull_request: {
-      number: 77,
+      ...buildPullRequestPayload().pull_request,
       merged: true,
       merged_at: "2026-02-13T17:00:00Z",
-      title: "Ship it",
-      html_url: "https://github.com/croft-eng/croft/pull/77",
-      base: { ref: "main" },
+      closed_at: "2026-02-13T17:10:00Z",
     },
-  };
-  const { req, res, body } = buildReqRes({
+  });
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
     payload,
-    signature: signPayload("secret", Buffer.from(JSON.stringify(payload), "utf8")),
+    signature: signPayload("secret", body),
   });
 
   req.body = body;
@@ -221,9 +319,110 @@ test("github webhook upserts merged main PR as untested", async () => {
   assert.equal(savedPullRequest.repo, "croft-eng/croft");
   assert.equal(savedPullRequest.prNumber, 77);
   assert.equal(savedPullRequest.mergedAt, "2026-02-13T17:00:00Z");
+  assert.equal(savedReviewState.lifecycleState, "merged");
 });
 
-test("github webhook returns 500 if upsert fails", async () => {
+test("github webhook updates review state on submitted approval", async () => {
+  let updatedReview;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "secret",
+    },
+    updatePullRequestReviewSubmissionFn: async (_pool, reviewUpdate) => {
+      updatedReview = reviewUpdate;
+      return { pr_number: reviewUpdate.prNumber, review_state: reviewUpdate.reviewState };
+    },
+  });
+  const payload = buildPullRequestReviewPayload();
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
+    payload,
+    event: "pull_request_review",
+    signature: signPayload("secret", body),
+  });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(updatedReview.repo, "croft-eng/croft");
+  assert.equal(updatedReview.prNumber, 77);
+  assert.equal(updatedReview.reviewState, "approved");
+  assert.equal(res.body.review_tracking_updated, true);
+});
+
+test("github webhook tracks commented review submission without forcing approval", async () => {
+  let updatedReview;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "secret",
+    },
+    updatePullRequestReviewSubmissionFn: async (_pool, reviewUpdate) => {
+      updatedReview = reviewUpdate;
+      return { pr_number: reviewUpdate.prNumber, review_state: "waiting" };
+    },
+  });
+  const payload = buildPullRequestReviewPayload({
+    review: {
+      state: "commented",
+      submitted_at: "2026-02-13T18:30:00Z",
+    },
+  });
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
+    payload,
+    event: "pull_request_review",
+    signature: signPayload("secret", body),
+  });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(updatedReview.reviewState, null);
+  assert.equal(updatedReview.lastReviewedAt, "2026-02-13T18:30:00Z");
+  assert.equal(res.body.review_tracking_updated, true);
+});
+
+test("github webhook ignores review events outside tracked branch/repo", async () => {
+  const secret = "secret";
+  let updateCalled = false;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: secret,
+    },
+    updatePullRequestReviewSubmissionFn: async () => {
+      updateCalled = true;
+    },
+  });
+  const payload = buildPullRequestReviewPayload({
+    repository: { full_name: "other/repo" },
+  });
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
+    payload,
+    event: "pull_request_review",
+    signature: signPayload(secret, body),
+  });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ignored, true);
+  assert.equal(updateCalled, false);
+});
+
+test("github webhook returns 500 if persistence fails", async () => {
   const secret = "secret";
   const handler = createGithubWebhookHandler({
     pool: {},
@@ -232,22 +431,11 @@ test("github webhook returns 500 if upsert fails", async () => {
       githubRepo: "croft-eng/croft",
       githubWebhookSecret: secret,
     },
-    upsertPullRequestAsUntestedFn: async () => {
+    upsertOpenPullRequestReviewStateFn: async () => {
       throw new Error("db failed");
     },
   });
-  const payload = {
-    action: "closed",
-    repository: { full_name: "croft-eng/croft" },
-    pull_request: {
-      number: 88,
-      merged: true,
-      merged_at: "2026-02-13T17:00:00Z",
-      title: "Ship it",
-      html_url: "https://github.com/croft-eng/croft/pull/88",
-      base: { ref: "main" },
-    },
-  };
+  const payload = buildPullRequestPayload();
   const body = Buffer.from(JSON.stringify(payload), "utf8");
   const { req, res } = buildReqRes({
     payload,

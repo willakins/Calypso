@@ -9,6 +9,60 @@ function formatStatusResponse({ lastDeployAt, blockers, timeFormat, timeZone }) 
   return buildBlockersMessage(lastDeploymentTimestamp, blockers);
 }
 
+function formatReviewRecapResponse({
+  waitingPullRequests,
+  recencyValue,
+  recencyUnit,
+  timeZone,
+}) {
+  const recencyLabel = formatReviewRecencyLabel(recencyValue, recencyUnit);
+  const header = `*Pull Requests waiting on review in the last ${recencyLabel}*`;
+  const hasWaitingPullRequests =
+    Array.isArray(waitingPullRequests) && waitingPullRequests.length > 0;
+
+  if (!hasWaitingPullRequests) {
+    return [header, "• None"].join("\n");
+  }
+
+  return [
+    header,
+    ...waitingPullRequests.map((pullRequest) =>
+      formatWaitingPullRequestLine({ pullRequest, timeZone }),
+    ),
+  ].join("\n");
+}
+
+function formatReviewRecencyLabel(recencyValue, recencyUnit) {
+  const normalizedRecencyValue = Number(recencyValue);
+  if (!Number.isInteger(normalizedRecencyValue) || normalizedRecencyValue <= 0) {
+    return "week";
+  }
+
+  const normalizedRecencyUnit = String(recencyUnit || "").toLowerCase().trim();
+  const unitLabelMap = {
+    d: normalizedRecencyValue === 1 ? "day" : "days",
+    w: normalizedRecencyValue === 1 ? "week" : "weeks",
+  };
+  const unitLabel = unitLabelMap[normalizedRecencyUnit] || (normalizedRecencyValue === 1 ? "week" : "weeks");
+  return normalizedRecencyValue === 1 ? unitLabel : `${normalizedRecencyValue} ${unitLabel}`;
+}
+
+function formatWaitingPullRequestLine({ pullRequest, timeZone }) {
+  const pullRequestTitle = pullRequest.title || "(no title)";
+  const pullRequestReference = `${pullRequest.repo}#${pullRequest.pr_number}`;
+  const pullRequestLink = pullRequest.url ? `<${pullRequest.url}|${pullRequestReference}>` : pullRequestReference;
+  const formattedTimestamp = formatTimestampWithTimezone(pullRequest.opened_for_review_at, {
+    style: TIMESTAMP_STYLES.human,
+    timeZone: timeZone || "America/New_York",
+  });
+
+  return [
+    `• ${pullRequestLink} - ${pullRequestTitle}`,
+    `created by ${pullRequest.author_login}`,
+    `opened for review ${formattedTimestamp}`,
+  ].join(" | ");
+}
+
 function buildNoBlockersMessage(lastDeploymentTimestamp) {
   return `No blockers since last prod deploy (${lastDeploymentTimestamp}).`;
 }
@@ -191,6 +245,8 @@ const UTC_MONTH_NAMES = [
 
 module.exports = {
   TIMESTAMP_STYLES,
+  formatReviewRecapResponse,
+  formatReviewRecencyLabel,
   formatTimestampAsUtcLegacy,
   formatTimestampByTimeFormat,
   formatTimestampWithTimezone,

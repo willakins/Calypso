@@ -11,6 +11,26 @@ const TIME_FORMATS = Object.freeze({
 });
 const DEFAULT_TIME_FORMAT = TIME_FORMATS.human;
 const DEFAULT_TIME_ZONE = "America/New_York";
+const REVIEW_RECAP_RECENCY_UNITS = Object.freeze({
+  day: "d",
+  week: "w",
+});
+const REVIEW_RECAP_WEEKDAYS = Object.freeze({
+  mon: "mon",
+  tue: "tue",
+  wed: "wed",
+  thu: "thu",
+  fri: "fri",
+  sat: "sat",
+  sun: "sun",
+});
+const REVIEW_RECAP_DEFAULTS = Object.freeze({
+  recencyValue: 1,
+  recencyUnit: REVIEW_RECAP_RECENCY_UNITS.week,
+  scheduleWeekday: REVIEW_RECAP_WEEKDAYS.mon,
+  scheduleTime: "09:00",
+  timeZone: DEFAULT_TIME_ZONE,
+});
 
 function createPool(databaseConnectionString) {
   if (!databaseConnectionString || databaseConnectionString.trim() === "") {
@@ -228,6 +248,312 @@ async function listRecentlyTestedPullRequests(pool, sinceTimestamp) {
   return result.rows;
 }
 
+async function upsertOpenPullRequestReviewState(pool, pullRequestState) {
+  const query = `
+    INSERT INTO open_pr_review_state (
+      repo,
+      pr_number,
+      title,
+      url,
+      author_login,
+      base_branch,
+      is_draft,
+      lifecycle_state,
+      review_state,
+      opened_at,
+      opened_for_review_at,
+      closed_at,
+      merged_at,
+      last_reviewed_at,
+      updated_at
+    )
+    VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
+    )
+    ON CONFLICT (repo, pr_number)
+    DO UPDATE SET
+      title = EXCLUDED.title,
+      url = EXCLUDED.url,
+      author_login = EXCLUDED.author_login,
+      base_branch = EXCLUDED.base_branch,
+      is_draft = EXCLUDED.is_draft,
+      lifecycle_state = EXCLUDED.lifecycle_state,
+      review_state = EXCLUDED.review_state,
+      opened_at = EXCLUDED.opened_at,
+      opened_for_review_at = EXCLUDED.opened_for_review_at,
+      closed_at = EXCLUDED.closed_at,
+      merged_at = EXCLUDED.merged_at,
+      last_reviewed_at = COALESCE(EXCLUDED.last_reviewed_at, open_pr_review_state.last_reviewed_at),
+      updated_at = NOW()
+    RETURNING
+      repo,
+      pr_number,
+      title,
+      author_login,
+      lifecycle_state,
+      review_state,
+      opened_for_review_at
+  `;
+  const queryValues = [
+    pullRequestState.repo,
+    pullRequestState.prNumber,
+    pullRequestState.title || null,
+    pullRequestState.url || null,
+    pullRequestState.authorLogin,
+    pullRequestState.baseBranch,
+    Boolean(pullRequestState.isDraft),
+    pullRequestState.lifecycleState,
+    pullRequestState.reviewState,
+    pullRequestState.openedAt,
+    pullRequestState.openedForReviewAt || null,
+    pullRequestState.closedAt || null,
+    pullRequestState.mergedAt || null,
+    pullRequestState.lastReviewedAt || null,
+  ];
+  const result = await pool.query(query, queryValues);
+  return result.rows[0];
+}
+
+async function updatePullRequestReviewSubmission(pool, reviewStateUpdate) {
+  const hasReviewState = reviewStateUpdate.reviewState !== undefined && reviewStateUpdate.reviewState !== null;
+  const normalizedReviewState = hasReviewState
+    ? normalizePullRequestReviewState(reviewStateUpdate.reviewState)
+    : null;
+  if (hasReviewState && !normalizedReviewState) {
+    throw new Error(`Unsupported review state: ${reviewStateUpdate.reviewState}`);
+  }
+
+  const query = `
+    UPDATE open_pr_review_state
+    SET review_state = COALESCE($3, review_state),
+        last_reviewed_at = $4,
+        updated_at = NOW()
+    WHERE repo = $1
+      AND pr_number = $2
+    RETURNING repo, pr_number, review_state, last_reviewed_at
+  `;
+  const queryValues = [
+    reviewStateUpdate.repo,
+    reviewStateUpdate.prNumber,
+    normalizedReviewState,
+    reviewStateUpdate.lastReviewedAt || null,
+  ];
+  const result = await pool.query(query, queryValues);
+  return result.rows[0] || null;
+}
+
+async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
+  const query = `
+    SELECT
+      repo,
+      pr_number,
+      title,
+      url,
+      author_login,
+      opened_for_review_at
+    FROM open_pr_review_state
+    WHERE lifecycle_state = 'open'
+      AND is_draft = false
+      AND review_state IN ('waiting', 'changes_requested')
+      AND opened_for_review_at IS NOT NULL
+      AND opened_for_review_at >= $1
+    ORDER BY opened_for_review_at ASC, pr_number ASC
+  `;
+  const result = await pool.query(query, [sinceTimestamp]);
+  return result.rows;
+}
+
+async function getReviewRecapConfig(pool) {
+  const result = await pool.query(
+    `
+      SELECT
+        target_channel_id,
+        recency_value,
+        recency_unit,
+        schedule_weekday,
+        schedule_time,
+        timezone,
+        last_sent_slot_at
+      FROM review_recap_config
+      WHERE id = 1
+      LIMIT 1
+    `,
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return {
+      targetChannelId: null,
+      recencyValue: REVIEW_RECAP_DEFAULTS.recencyValue,
+      recencyUnit: REVIEW_RECAP_DEFAULTS.recencyUnit,
+      scheduleWeekday: REVIEW_RECAP_DEFAULTS.scheduleWeekday,
+      scheduleTime: REVIEW_RECAP_DEFAULTS.scheduleTime,
+      timeZone: REVIEW_RECAP_DEFAULTS.timeZone,
+      lastSentSlotAt: null,
+    };
+  }
+
+  return {
+    targetChannelId: row.target_channel_id || null,
+    recencyValue: row.recency_value || REVIEW_RECAP_DEFAULTS.recencyValue,
+    recencyUnit: normalizeReviewRecencyUnit(row.recency_unit) || REVIEW_RECAP_DEFAULTS.recencyUnit,
+    scheduleWeekday:
+      normalizeReviewScheduleWeekday(row.schedule_weekday) || REVIEW_RECAP_DEFAULTS.scheduleWeekday,
+    scheduleTime:
+      normalizeReviewScheduleTime(row.schedule_time) || REVIEW_RECAP_DEFAULTS.scheduleTime,
+    timeZone: normalizeTimeZone(row.timezone) || REVIEW_RECAP_DEFAULTS.timeZone,
+    lastSentSlotAt: row.last_sent_slot_at || null,
+  };
+}
+
+async function setReviewRecapChannel(pool, targetChannelId, updatedBy) {
+  const normalizedChannelId = normalizeReviewRecapChannelId(targetChannelId);
+  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  if (!normalizedChannelId) {
+    throw new Error(`Unsupported review recap channel id: ${targetChannelId}`);
+  }
+  if (!normalizedSlackUserId) {
+    throw new Error("slack user id is required");
+  }
+
+  return upsertReviewRecapConfig(pool, {
+    targetChannelId: normalizedChannelId,
+    updatedBy: normalizedSlackUserId,
+  });
+}
+
+async function setReviewRecapRecency(pool, recencyValue, recencyUnit, updatedBy) {
+  const normalizedRecencyValue = normalizePositiveInteger(recencyValue);
+  const normalizedRecencyUnit = normalizeReviewRecencyUnit(recencyUnit);
+  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  if (!normalizedRecencyValue) {
+    throw new Error(`Unsupported review recap recency value: ${recencyValue}`);
+  }
+  if (!normalizedRecencyUnit) {
+    throw new Error(`Unsupported review recap recency unit: ${recencyUnit}`);
+  }
+  if (!normalizedSlackUserId) {
+    throw new Error("slack user id is required");
+  }
+
+  return upsertReviewRecapConfig(pool, {
+    recencyValue: normalizedRecencyValue,
+    recencyUnit: normalizedRecencyUnit,
+    updatedBy: normalizedSlackUserId,
+  });
+}
+
+async function setReviewRecapSchedule(pool, scheduleWeekday, scheduleTime, updatedBy) {
+  const normalizedScheduleWeekday = normalizeReviewScheduleWeekday(scheduleWeekday);
+  const normalizedScheduleTime = normalizeReviewScheduleTime(scheduleTime);
+  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  if (!normalizedScheduleWeekday) {
+    throw new Error(`Unsupported review recap schedule weekday: ${scheduleWeekday}`);
+  }
+  if (!normalizedScheduleTime) {
+    throw new Error(`Unsupported review recap schedule time: ${scheduleTime}`);
+  }
+  if (!normalizedSlackUserId) {
+    throw new Error("slack user id is required");
+  }
+
+  return upsertReviewRecapConfig(pool, {
+    scheduleWeekday: normalizedScheduleWeekday,
+    scheduleTime: normalizedScheduleTime,
+    updatedBy: normalizedSlackUserId,
+  });
+}
+
+async function setReviewRecapTimeZone(pool, timeZone, updatedBy) {
+  const normalizedTimeZone = normalizeTimeZone(timeZone);
+  const normalizedSlackUserId = normalizeSlackUserId(updatedBy);
+  if (!normalizedTimeZone) {
+    throw new Error(`Unsupported review recap timezone: ${timeZone}`);
+  }
+  if (!normalizedSlackUserId) {
+    throw new Error("slack user id is required");
+  }
+
+  return upsertReviewRecapConfig(pool, {
+    timeZone: normalizedTimeZone,
+    updatedBy: normalizedSlackUserId,
+  });
+}
+
+async function markReviewRecapSent(pool, scheduledSlotAt) {
+  const result = await pool.query(
+    `
+      UPDATE review_recap_config
+      SET last_sent_slot_at = $1,
+          updated_at = NOW()
+      WHERE id = 1
+      RETURNING id, last_sent_slot_at
+    `,
+    [scheduledSlotAt],
+  );
+  return result.rows[0] || null;
+}
+
+async function upsertReviewRecapConfig(pool, updates) {
+  const result = await pool.query(
+    `
+      INSERT INTO review_recap_config (
+        id,
+        target_channel_id,
+        recency_value,
+        recency_unit,
+        schedule_weekday,
+        schedule_time,
+        timezone,
+        updated_by,
+        updated_at
+      )
+      VALUES (
+        1,
+        COALESCE($1, NULL),
+        COALESCE($2, ${REVIEW_RECAP_DEFAULTS.recencyValue}),
+        COALESCE($3, '${REVIEW_RECAP_DEFAULTS.recencyUnit}'),
+        COALESCE($4, '${REVIEW_RECAP_DEFAULTS.scheduleWeekday}'),
+        COALESCE($5, '${REVIEW_RECAP_DEFAULTS.scheduleTime}'),
+        COALESCE($6, '${REVIEW_RECAP_DEFAULTS.timeZone}'),
+        $7,
+        NOW()
+      )
+      ON CONFLICT (id)
+      DO UPDATE SET
+        target_channel_id = COALESCE($1, review_recap_config.target_channel_id),
+        recency_value = COALESCE($2, review_recap_config.recency_value),
+        recency_unit = COALESCE($3, review_recap_config.recency_unit),
+        schedule_weekday = COALESCE($4, review_recap_config.schedule_weekday),
+        schedule_time = COALESCE($5, review_recap_config.schedule_time),
+        timezone = COALESCE($6, review_recap_config.timezone),
+        updated_by = EXCLUDED.updated_by,
+        updated_at = NOW()
+      RETURNING
+        target_channel_id,
+        recency_value,
+        recency_unit,
+        schedule_weekday,
+        schedule_time,
+        timezone,
+        last_sent_slot_at,
+        updated_by,
+        updated_at
+    `,
+    [
+      updates.targetChannelId || null,
+      updates.recencyValue || null,
+      updates.recencyUnit || null,
+      updates.scheduleWeekday || null,
+      updates.scheduleTime || null,
+      updates.timeZone || null,
+      updates.updatedBy || null,
+    ],
+  );
+
+  return result.rows[0];
+}
+
 async function isUserWhitelistedForDeploy(pool, slackUserId) {
   const query = `
     SELECT 1
@@ -370,25 +696,80 @@ function normalizeSlackUserId(slackUserId) {
   return normalizedSlackUserId === "" ? null : normalizedSlackUserId;
 }
 
+function normalizeReviewRecencyUnit(recencyUnit) {
+  const normalizedRecencyUnit = String(recencyUnit || "").toLowerCase().trim();
+  return Object.values(REVIEW_RECAP_RECENCY_UNITS).includes(normalizedRecencyUnit)
+    ? normalizedRecencyUnit
+    : null;
+}
+
+function normalizeReviewScheduleWeekday(scheduleWeekday) {
+  const normalizedScheduleWeekday = String(scheduleWeekday || "").toLowerCase().trim();
+  return REVIEW_RECAP_WEEKDAYS[normalizedScheduleWeekday] || null;
+}
+
+function normalizeReviewScheduleTime(scheduleTime) {
+  const normalizedScheduleTime = String(scheduleTime || "").trim();
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(normalizedScheduleTime)
+    ? normalizedScheduleTime
+    : null;
+}
+
+function normalizeReviewRecapChannelId(targetChannelId) {
+  const normalizedChannelId = String(targetChannelId || "").trim();
+  return normalizedChannelId === "" ? null : normalizedChannelId;
+}
+
+function normalizePositiveInteger(value) {
+  const parsedValue = Number(value);
+  return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
+}
+
+function normalizePullRequestReviewState(reviewState) {
+  const normalizedReviewState = String(reviewState || "").toLowerCase().trim();
+  if (normalizedReviewState === "approved") {
+    return "approved";
+  }
+  if (normalizedReviewState === "changes_requested") {
+    return "changes_requested";
+  }
+  if (normalizedReviewState === "waiting") {
+    return "waiting";
+  }
+  return null;
+}
+
 module.exports = {
   addUserToDeployWhitelist,
   createPool,
   DEFAULT_TIME_FORMAT,
   DEFAULT_TIME_ZONE,
+  REVIEW_RECAP_DEFAULTS,
+  REVIEW_RECAP_RECENCY_UNITS,
+  REVIEW_RECAP_WEEKDAYS,
   getConfiguredTimeZone,
+  getReviewRecapConfig,
   getLastProdDeployAt,
   getConfiguredTimeFormat,
   isUserWhitelistedForDeploy,
   insertDeployment,
   listRecentlyTestedPullRequests,
+  listOpenPullRequestsWaitingOnReviewSince,
   listBlockingPullRequests,
   markAllUntestedPullRequestsTested,
+  markReviewRecapSent,
   markPullRequestsDeployedSince,
   markPullRequestTested,
   runMigrations,
+  setReviewRecapChannel,
+  setReviewRecapRecency,
+  setReviewRecapSchedule,
+  setReviewRecapTimeZone,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,
   TIME_FORMATS,
+  updatePullRequestReviewSubmission,
+  upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntested,
   verifyConnection,
 };

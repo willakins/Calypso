@@ -6,11 +6,20 @@ const {
   createPool,
   getConfiguredTimeFormat,
   getConfiguredTimeZone,
+  getReviewRecapConfig,
   isUserWhitelistedForDeploy,
+  listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
+  markReviewRecapSent,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,
+  setReviewRecapChannel,
+  setReviewRecapRecency,
+  setReviewRecapSchedule,
+  setReviewRecapTimeZone,
+  updatePullRequestReviewSubmission,
+  upsertOpenPullRequestReviewState,
 } = require("../src/db");
 
 test("createPool requires DATABASE_URL", () => {
@@ -326,4 +335,321 @@ test("setConfiguredTimeZone requires slack user id", async () => {
   await assert.rejects(async () => {
     await setConfiguredTimeZone(pool, "America/New_York", "");
   }, /slack user id is required/);
+});
+
+test("upsertOpenPullRequestReviewState upserts expected fields", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ repo: "croft-eng/croft", pr_number: 77, review_state: "waiting" }],
+      };
+    },
+  };
+
+  const result = await upsertOpenPullRequestReviewState(pool, {
+    repo: "croft-eng/croft",
+    prNumber: 77,
+    title: "Add observability",
+    url: "https://github.com/croft-eng/croft/pull/77",
+    authorLogin: "octocat",
+    baseBranch: "main",
+    isDraft: false,
+    lifecycleState: "open",
+    reviewState: "waiting",
+    openedAt: "2026-02-16T13:00:00.000Z",
+    openedForReviewAt: "2026-02-16T13:00:00.000Z",
+    closedAt: null,
+    mergedAt: null,
+    lastReviewedAt: null,
+  });
+
+  assert.match(captured.sql, /INSERT INTO open_pr_review_state/);
+  assert.equal(captured.params[0], "croft-eng/croft");
+  assert.equal(captured.params[1], 77);
+  assert.equal(captured.params[8], "waiting");
+  assert.deepEqual(result, { repo: "croft-eng/croft", pr_number: 77, review_state: "waiting" });
+});
+
+test("updatePullRequestReviewSubmission updates approved review state", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ repo: "croft-eng/croft", pr_number: 77, review_state: "approved" }],
+      };
+    },
+  };
+
+  const result = await updatePullRequestReviewSubmission(pool, {
+    repo: "croft-eng/croft",
+    prNumber: 77,
+    reviewState: "approved",
+    lastReviewedAt: "2026-02-16T14:00:00.000Z",
+  });
+
+  assert.match(captured.sql, /UPDATE open_pr_review_state/);
+  assert.deepEqual(captured.params, [
+    "croft-eng/croft",
+    77,
+    "approved",
+    "2026-02-16T14:00:00.000Z",
+  ]);
+  assert.equal(result.review_state, "approved");
+});
+
+test("updatePullRequestReviewSubmission supports timestamp-only updates", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ repo: "croft-eng/croft", pr_number: 77, review_state: "waiting" }],
+      };
+    },
+  };
+
+  const result = await updatePullRequestReviewSubmission(pool, {
+    repo: "croft-eng/croft",
+    prNumber: 77,
+    reviewState: null,
+    lastReviewedAt: "2026-02-16T14:00:00.000Z",
+  });
+
+  assert.match(captured.sql, /COALESCE\(\$3, review_state\)/);
+  assert.deepEqual(captured.params, [
+    "croft-eng/croft",
+    77,
+    null,
+    "2026-02-16T14:00:00.000Z",
+  ]);
+  assert.equal(result.review_state, "waiting");
+});
+
+test("updatePullRequestReviewSubmission rejects unsupported review state", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await updatePullRequestReviewSubmission(pool, {
+      repo: "croft-eng/croft",
+      prNumber: 77,
+      reviewState: "dismissed",
+      lastReviewedAt: "2026-02-16T14:00:00.000Z",
+    });
+  }, /Unsupported review state/);
+});
+
+test("listOpenPullRequestsWaitingOnReviewSince returns rows in recency window", async () => {
+  const captured = {};
+  const sinceTimestamp = new Date("2026-02-09T14:00:00.000Z");
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ repo: "croft-eng/croft", pr_number: 71, author_login: "octocat" }],
+      };
+    },
+  };
+
+  const result = await listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp);
+
+  assert.match(captured.sql, /FROM open_pr_review_state/);
+  assert.match(captured.sql, /lifecycle_state = 'open'/);
+  assert.match(captured.sql, /review_state IN \('waiting', 'changes_requested'\)/);
+  assert.deepEqual(captured.params, [sinceTimestamp]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].pr_number, 71);
+});
+
+test("getReviewRecapConfig returns defaults when singleton row is missing", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  const result = await getReviewRecapConfig(pool);
+
+  assert.equal(result.targetChannelId, null);
+  assert.equal(result.recencyValue, 1);
+  assert.equal(result.recencyUnit, "w");
+  assert.equal(result.scheduleWeekday, "mon");
+  assert.equal(result.scheduleTime, "09:00");
+  assert.equal(result.timeZone, "America/New_York");
+  assert.equal(result.lastSentSlotAt, null);
+});
+
+test("getReviewRecapConfig returns configured values", async () => {
+  const pool = {
+    async query() {
+      return {
+        rows: [
+          {
+            target_channel_id: "C123",
+            recency_value: 2,
+            recency_unit: "d",
+            schedule_weekday: "tue",
+            schedule_time: "10:15",
+            timezone: "America/Los_Angeles",
+            last_sent_slot_at: "2026-02-16T17:00:00.000Z",
+          },
+        ],
+      };
+    },
+  };
+
+  const result = await getReviewRecapConfig(pool);
+
+  assert.equal(result.targetChannelId, "C123");
+  assert.equal(result.recencyValue, 2);
+  assert.equal(result.recencyUnit, "d");
+  assert.equal(result.scheduleWeekday, "tue");
+  assert.equal(result.scheduleTime, "10:15");
+  assert.equal(result.timeZone, "America/Los_Angeles");
+  assert.equal(result.lastSentSlotAt, "2026-02-16T17:00:00.000Z");
+});
+
+test("setReviewRecapChannel upserts channel", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ target_channel_id: "C123", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapChannel(pool, "C123", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.deepEqual(captured.params.slice(0, 2), ["C123", null]);
+  assert.equal(result.target_channel_id, "C123");
+});
+
+test("setReviewRecapChannel rejects missing channel", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setReviewRecapChannel(pool, "", "UADMIN");
+  }, /Unsupported review recap channel id/);
+});
+
+test("setReviewRecapRecency upserts recency", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ recency_value: 2, recency_unit: "w", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapRecency(pool, 2, "w", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.equal(captured.params[1], 2);
+  assert.equal(captured.params[2], "w");
+  assert.equal(result.recency_value, 2);
+  assert.equal(result.recency_unit, "w");
+});
+
+test("setReviewRecapRecency rejects unsupported unit", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setReviewRecapRecency(pool, 2, "month", "UADMIN");
+  }, /Unsupported review recap recency unit/);
+});
+
+test("setReviewRecapSchedule upserts schedule", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ schedule_weekday: "tue", schedule_time: "10:15", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapSchedule(pool, "tue", "10:15", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.equal(captured.params[3], "tue");
+  assert.equal(captured.params[4], "10:15");
+  assert.equal(result.schedule_weekday, "tue");
+  assert.equal(result.schedule_time, "10:15");
+});
+
+test("setReviewRecapSchedule rejects invalid time", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setReviewRecapSchedule(pool, "mon", "25:10", "UADMIN");
+  }, /Unsupported review recap schedule time/);
+});
+
+test("setReviewRecapTimeZone upserts timezone", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ timezone: "America/Chicago", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapTimeZone(pool, "America/Chicago", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.equal(captured.params[5], "America/Chicago");
+  assert.equal(result.timezone, "America/Chicago");
+});
+
+test("markReviewRecapSent updates last sent slot", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ id: 1, last_sent_slot_at: "2026-02-16T14:00:00.000Z" }],
+      };
+    },
+  };
+
+  const result = await markReviewRecapSent(pool, "2026-02-16T14:00:00.000Z");
+
+  assert.match(captured.sql, /UPDATE review_recap_config/);
+  assert.deepEqual(captured.params, ["2026-02-16T14:00:00.000Z"]);
+  assert.equal(result.id, 1);
 });

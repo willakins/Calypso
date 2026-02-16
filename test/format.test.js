@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  formatReviewRecapResponse,
+  formatReviewRecencyLabel,
   formatStatusResponse,
   formatTimestampAsUtcLegacy,
   formatTimestampWithTimezone,
@@ -89,4 +91,58 @@ test("isValidTimeZone returns true for valid IANA timezone", () => {
 
 test("isValidTimeZone returns false for invalid timezone", () => {
   assert.equal(isValidTimeZone("Mars/Olympus"), false);
+});
+
+test("formatReviewRecencyLabel formats compact recency values", () => {
+  assert.equal(formatReviewRecencyLabel(1, "w"), "week");
+  assert.equal(formatReviewRecencyLabel(2, "w"), "2 weeks");
+  assert.equal(formatReviewRecencyLabel(1, "d"), "day");
+  assert.equal(formatReviewRecencyLabel(3, "d"), "3 days");
+});
+
+test("formatReviewRecapResponse renders waiting pull request lines", () => {
+  const message = formatReviewRecapResponse({
+    waitingPullRequests: [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 71,
+        title: "Improve metrics",
+        url: "https://github.com/croft-eng/croft/pull/71",
+        author_login: "octocat",
+        opened_for_review_at: "2026-02-13T22:00:17.000Z",
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 72,
+        title: null,
+        url: null,
+        author_login: "hubot",
+        opened_for_review_at: "2026-02-14T12:00:00.000Z",
+      },
+    ],
+    recencyValue: 1,
+    recencyUnit: "w",
+    timeZone: "America/New_York",
+  });
+
+  assert.match(message, /^\*Pull Requests waiting on review in the last week\*/);
+  assert.match(
+    message,
+    /• <https:\/\/github.com\/croft-eng\/croft\/pull\/71\|croft-eng\/croft#71> - Improve metrics \| created by octocat \| opened for review on February 13th, 2026 at 5:00 PM EST/,
+  );
+  assert.match(
+    message,
+    /• croft-eng\/croft#72 - \(no title\) \| created by hubot \| opened for review on February 14th, 2026 at 7:00 AM EST/,
+  );
+});
+
+test("formatReviewRecapResponse renders explicit none row when empty", () => {
+  const message = formatReviewRecapResponse({
+    waitingPullRequests: [],
+    recencyValue: 2,
+    recencyUnit: "d",
+    timeZone: "America/New_York",
+  });
+
+  assert.equal(message, "*Pull Requests waiting on review in the last 2 days*\n• None");
 });

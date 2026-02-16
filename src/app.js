@@ -5,6 +5,7 @@ const { registerCalypsoCommand } = require("./commands/calypso");
 const { loadConfig } = require("./config");
 const { createPool, runMigrations, verifyConnection } = require("./db");
 const { registerGithubWebhook } = require("./integrations/github/webhook");
+const { startReviewRecapScheduler } = require("./review_recap/scheduler");
 
 async function start() {
   const runtime = await loadRuntime();
@@ -14,6 +15,7 @@ async function start() {
   wireGithubWebhook(runtime);
 
   await startServices(runtime);
+  startBackgroundSchedulers(runtime);
 
   console.log("Calypso is running in Socket Mode with database migrations applied.");
 }
@@ -88,6 +90,13 @@ function buildGithubConfig(config) {
 async function startServices(runtime) {
   await startHttpServer(runtime.httpApp, runtime.config.port);
   await runtime.slackApp.start();
+}
+
+function startBackgroundSchedulers(runtime) {
+  runtime.reviewRecapScheduler = startReviewRecapScheduler({
+    pool: runtime.pool,
+    slackClient: runtime.slackApp.client,
+  });
 }
 
 function startHttpServer(httpApp, port) {

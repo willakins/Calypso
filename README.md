@@ -3,15 +3,21 @@
 Calypso is a Slack-based deployment gatekeeper for a single GitHub repository.
 It tracks merged pull requests in Postgres, requires explicit testing confirmation,
 and blocks production deploys when untested changes exist.
+It also tracks open pull-request review state and posts a scheduled Slack recap for PRs waiting on review.
 
 ## What It Does
 
 - Ingests merged GitHub pull requests into `pull_requests` as `untested`.
+- Tracks open PR review lifecycle in `open_pr_review_state`.
 - Exposes a Slack slash command: `/calypso`.
 - Supports status and release workflow commands:
   - `/calypso help`
   - `/calypso config time-format:human|long`
   - `/calypso config timezone:America/New_York`
+  - `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
+  - `/calypso config review-recap-recency:<Nd|Nw>`
+  - `/calypso config review-recap-schedule:<weekday>@HH:MM`
+  - `/calypso config review-recap-timezone:America/New_York`
   - `/calypso status`
   - `/calypso tested <PR_NUMBER>`
   - `/calypso deploy prod`
@@ -19,6 +25,7 @@ and blocks production deploys when untested changes exist.
   - A blocker is any PR with `merged_at > last_prod_deploy_at` and `status` not in `tested`, `deployed`.
 - Optionally triggers DigitalOcean App Platform deploy when gate is clear.
 - Runtime display config is per Slack user (defaults: time format `human`, timezone `America/New_York`).
+- Review recap schedule config is workspace-wide (defaults: Monday 9:00 AM `America/New_York`, recency `1w`).
 
 ## Architecture
 
@@ -75,6 +82,7 @@ src/
     migrations/003_runtime_config.sql
     migrations/004_runtime_config_timezone.sql
     migrations/005_runtime_user_config.sql
+    migrations/006_open_pr_reviews_and_recap_config.sql
   integrations/
     github/
       webhook.js
@@ -83,6 +91,8 @@ src/
       client.js
   util/
     format.js
+  review_recap/
+    scheduler.js
 test/
   *.test.js
 ```
@@ -353,15 +363,32 @@ Endpoint:
 Rules:
 
 - Requires valid `X-Hub-Signature-256` HMAC signature.
-- Only processes `pull_request` events.
-- Only stores merged PRs to configured `GITHUB_MAIN_BRANCH` for configured `GITHUB_REPO`.
-- On success upserts PR as `untested`.
+- Processes `pull_request` and `pull_request_review` events.
+- Only processes events for configured `GITHUB_MAIN_BRANCH` and configured `GITHUB_REPO`.
+- Merged PR close events upsert to deploy-gating table as `untested`.
+- Open PR lifecycle and review submissions update `open_pr_review_state`.
 
 ## Slash Command Behavior
 
 `/calypso help`
 
 - Returns usage.
+
+`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
+
+- Sets workspace recap target channel for scheduled in-channel posts.
+
+`/calypso config review-recap-recency:<Nd|Nw>`
+
+- Sets recap lookback window (for example `1w`, `2w`, `2d`).
+
+`/calypso config review-recap-schedule:<weekday>@HH:MM`
+
+- Sets weekly send slot using weekday + 24h clock (for example `mon@09:00`, `tue@10:15`).
+
+`/calypso config review-recap-timezone:America/New_York`
+
+- Sets recap schedule timezone (IANA timezone).
 
 `/calypso status`
 
@@ -406,6 +433,20 @@ Rules:
 
 - Bypasses blocker checks and triggers deploy anyway.
 - Still requires deploy configuration (`DIGITALOCEAN_TOKEN`, `DO_APP_ID_PROD`).
+
+## Weekly Review Recap
+
+- Runs as a background scheduler in the app runtime.
+- Checks once per minute for configured recap slot.
+- Posts in-channel message in configured `review-recap-channel` containing:
+  - Header: `Pull Requests waiting on review in the last {recency}`
+  - PR rows with title, author login, and `opened for review` timestamp.
+- Includes empty state (`• None`) when no PRs match.
+- PR matching rule:
+  - `lifecycle_state = open`
+  - `is_draft = false`
+  - `review_state in (waiting, changes_requested)`
+  - `opened_for_review_at` within configured recency.
 
 ## Testing
 
