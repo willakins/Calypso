@@ -287,6 +287,7 @@ test("registerCalypsoCommand runs sync command and returns summary", async () =>
     runOpenPullRequestSyncNowFn: async () => ({
       upsertedCount: 7,
       closedCount: 2,
+      mergedUntestedCount: 3,
     }),
   });
 
@@ -301,8 +302,9 @@ test("registerCalypsoCommand runs sync command and returns summary", async () =>
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Open PR sync completed successfully/);
-  assert.match(payload.text, /Upserted 7 open PR\(s\)/);
+  assert.match(payload.text, /Review sync: upserted 7 open PR\(s\)/);
   assert.match(payload.text, /marked 2 stale PR\(s\) closed/);
+  assert.match(payload.text, /Untested merge sync: upserted 3 merged untested PR\(s\)/);
 });
 
 test("registerCalypsoCommand reports sync unavailable when token is not configured", async () => {
@@ -331,6 +333,37 @@ test("registerCalypsoCommand reports sync unavailable when token is not configur
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Sync unavailable/);
   assert.match(payload.text, /GITHUB_TOKEN/);
+});
+
+test("registerCalypsoCommand returns sync failure details when manual sync throws", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    runOpenPullRequestSyncNowFn: async () => {
+      throw new Error("github rate limited");
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "sync", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Open PR sync failed/);
+  assert.match(payload.text, /github rate limited/);
 });
 
 test("registerCalypsoCommand denies sync for non-admin, non-whitelisted user", async () => {

@@ -21,6 +21,7 @@ const {
   setReviewRecapTimeZone,
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,
+  upsertPullRequestAsUntestedFromSync,
 } = require("../src/db");
 
 test("createPool requires DATABASE_URL", () => {
@@ -372,6 +373,39 @@ test("upsertOpenPullRequestReviewState upserts expected fields", async () => {
   assert.equal(captured.params[1], 77);
   assert.equal(captured.params[8], "waiting");
   assert.deepEqual(result, { repo: "croft-eng/croft", pr_number: 77, review_state: "waiting" });
+});
+
+test("upsertPullRequestAsUntestedFromSync preserves tested/deployed states on conflict", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ repo: "croft-eng/croft", pr_number: 88, status: "tested" }],
+      };
+    },
+  };
+
+  const result = await upsertPullRequestAsUntestedFromSync(pool, {
+    repo: "croft-eng/croft",
+    prNumber: 88,
+    title: "Backfilled merged PR",
+    url: "https://github.com/croft-eng/croft/pull/88",
+    mergedAt: "2026-02-16T14:00:00.000Z",
+  });
+
+  assert.match(captured.sql, /INSERT INTO pull_requests/);
+  assert.match(captured.sql, /ON CONFLICT \(repo, pr_number\)/);
+  assert.match(captured.sql, /WHEN pull_requests.status = 'untested' THEN 'untested'/);
+  assert.deepEqual(captured.params, [
+    "croft-eng/croft",
+    88,
+    "Backfilled merged PR",
+    "https://github.com/croft-eng/croft/pull/88",
+    "2026-02-16T14:00:00.000Z",
+  ]);
+  assert.equal(result.status, "tested");
 });
 
 test("updatePullRequestReviewSubmission updates approved review state", async () => {

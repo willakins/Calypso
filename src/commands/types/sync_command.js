@@ -37,13 +37,24 @@ class SyncCommand extends BaseCalypsoCommand {
       );
     }
 
-    const syncSummary = await runtime.runOpenPullRequestSyncNowFn();
-    const upsertedCount = Number(syncSummary?.upsertedCount) || 0;
-    const closedCount = Number(syncSummary?.closedCount) || 0;
+    try {
+      const syncSummary = await runtime.runOpenPullRequestSyncNowFn();
+      const upsertedCount = Number(syncSummary?.upsertedCount) || 0;
+      const closedCount = Number(syncSummary?.closedCount) || 0;
+      const mergedUntestedCount = Number(syncSummary?.mergedUntestedCount) || 0;
 
-    return this.buildExecutionResult(
-      `Open PR sync completed successfully. Upserted ${upsertedCount} open PR(s) and marked ${closedCount} stale PR(s) closed.`,
-    );
+      return this.buildExecutionResult(
+        [
+          "Open PR sync completed successfully.",
+          `Review sync: upserted ${upsertedCount} open PR(s), marked ${closedCount} stale PR(s) closed.`,
+          `Untested merge sync: upserted ${mergedUntestedCount} merged untested PR(s).`,
+        ].join(" "),
+      );
+    } catch (error) {
+      return this.buildExecutionResult(
+        `Open PR sync failed: ${error.message}`,
+      );
+    }
   }
 }
 

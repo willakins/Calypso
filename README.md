@@ -393,7 +393,8 @@ Rules:
 - Performs a full open-PR reconciliation for `GITHUB_REPO` + `GITHUB_MAIN_BRANCH`.
 - Frequency is controlled by `GITHUB_OPEN_PR_SYNC_INTERVAL_HOURS` (default every 24 hours).
 - Requires `GITHUB_TOKEN`; without it, webhook-based tracking still works but no periodic backfill runs.
-- Upserts all currently open PRs and marks stale local open rows as `closed`.
+- Upserts all currently open PR review-state rows and marks stale local open rows as `closed`.
+- Backfills merged PRs newer than last prod deploy into deploy-gating state as `untested` (without downgrading already `tested`/`deployed` rows).
 
 ## Slash Command Behavior
 
@@ -421,7 +422,9 @@ Rules:
 
 - Triggers open PR reconciliation immediately using GitHub API.
 - Requires workspace admin or Calypso deploy-whitelist access.
-- Returns counts of upserted open PRs and stale PRs marked closed.
+- Returns counts for both sync paths:
+  - review-state sync (open PRs upserted + stale open rows closed)
+  - merged-untested sync (merged PRs backfilled as untested)
 
 `/calypso status`
 

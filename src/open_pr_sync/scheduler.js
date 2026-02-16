@@ -1,11 +1,24 @@
 const {
+  getLastProdDeployAt,
   markStaleOpenPullRequestsClosed,
   upsertOpenPullRequestReviewState,
+  upsertPullRequestAsUntestedFromSync,
 } = require("../db");
+const {
+  createDefaultOpenPullRequestSyncer,
+  REVIEW_SYNC_TASK_NAME,
+  UNTESTED_SYNC_TASK_NAME,
+} = require("./syncer");
+const {
+  buildEmptyReviewSyncResult,
+  deriveReviewStateFromReviews,
+} = require("./tasks/review_sync_task");
+const { buildEmptyUntestedSyncResult } = require("./tasks/untested_merged_sync_task");
 
 function startOpenPullRequestSyncScheduler(options) {
   const {
     githubClient,
+    getLastProdDeployAtFn = getLastProdDeployAt,
     logger = console,
     mainBranch,
     markStaleOpenPullRequestsClosedFn = markStaleOpenPullRequestsClosed,
@@ -14,6 +27,7 @@ function startOpenPullRequestSyncScheduler(options) {
     repositoryFullName,
     syncIntervalMs,
     upsertOpenPullRequestReviewStateFn = upsertOpenPullRequestReviewState,
+    upsertPullRequestAsUntestedFromSyncFn = upsertPullRequestAsUntestedFromSync,
   } = options;
 
   if (!pool || !githubClient || !repositoryFullName || !mainBranch || !isValidIntervalMs(syncIntervalMs)) {
@@ -28,6 +42,7 @@ function startOpenPullRequestSyncScheduler(options) {
   async function tick() {
     await runOpenPullRequestSyncTick({
       githubClient,
+      getLastProdDeployAtFn,
       logger,
       mainBranch,
       markStaleOpenPullRequestsClosedFn,
@@ -35,6 +50,7 @@ function startOpenPullRequestSyncScheduler(options) {
       pool,
       repositoryFullName,
       upsertOpenPullRequestReviewStateFn,
+      upsertPullRequestAsUntestedFromSyncFn,
     });
   }
 
@@ -52,55 +68,51 @@ function startOpenPullRequestSyncScheduler(options) {
 
 async function runOpenPullRequestSyncTick({
   githubClient,
+  getLastProdDeployAtFn = getLastProdDeployAt,
   logger,
   mainBranch,
   markStaleOpenPullRequestsClosedFn = markStaleOpenPullRequestsClosed,
-  nowFn,
+  nowFn = () => new Date(),
   pool,
   repositoryFullName,
   swallowErrors = true,
   upsertOpenPullRequestReviewStateFn = upsertOpenPullRequestReviewState,
+  upsertPullRequestAsUntestedFromSyncFn = upsertPullRequestAsUntestedFromSync,
 }) {
   try {
-    const openPullRequests = await githubClient.listOpenPullRequests({
+    const syncer = createDefaultOpenPullRequestSyncer({
+      getLastProdDeployAtFn,
+      markStaleOpenPullRequestsClosedFn,
+      upsertOpenPullRequestReviewStateFn,
+      upsertPullRequestAsUntestedFromSyncFn,
+    });
+
+    const syncSummary = await syncer.sync({
+      githubClient,
+      mainBranch,
+      nowFn,
+      pool,
       repositoryFullName,
-      baseBranch: mainBranch,
     });
-
-    const syncedAt = nowFn().toISOString();
-    const openPrNumbers = [];
-    let upsertedCount = 0;
-    for (const pullRequest of openPullRequests) {
-      const mappedState = await mapOpenPullRequestToReviewState({
-        githubClient,
-        mainBranch,
-        pullRequest,
-        repositoryFullName,
-      });
-      if (!mappedState) {
-        continue;
-      }
-
-      await upsertOpenPullRequestReviewStateFn(pool, mappedState);
-      openPrNumbers.push(mappedState.prNumber);
-      upsertedCount += 1;
-    }
-
-    const closedCount = await markStaleOpenPullRequestsClosedFn(pool, {
-      repo: repositoryFullName,
-      baseBranch: mainBranch,
-      openPrNumbers,
-      closedAt: syncedAt,
-    });
+    const reviewSync = syncSummary[REVIEW_SYNC_TASK_NAME] || buildEmptyReviewSyncResult();
+    const untestedSync = syncSummary[UNTESTED_SYNC_TASK_NAME] || buildEmptyUntestedSyncResult();
+    const normalizedSummary = {
+      reviewSync,
+      untestedSync,
+      upsertedCount: reviewSync.upsertedCount,
+      closedCount: reviewSync.closedCount,
+      mergedUntestedCount: untestedSync.upsertedCount,
+    };
 
     logger.info(
-      `Open PR sync completed: ${upsertedCount} open PR(s) upserted, ${closedCount} stale PR(s) marked closed.`,
+      [
+        "Open PR sync completed:",
+        `${normalizedSummary.upsertedCount} open review PR(s) upserted,`,
+        `${normalizedSummary.closedCount} stale open review PR(s) marked closed,`,
+        `${normalizedSummary.mergedUntestedCount} merged untested PR(s) upserted.`,
+      ].join(" "),
     );
-    return {
-      closedCount,
-      openPullRequestCount: openPullRequests.length,
-      upsertedCount,
-    };
+    return normalizedSummary;
   } catch (error) {
     logger.error("Open PR sync scheduler tick failed.");
     logger.error(error.message);
@@ -109,105 +121,6 @@ async function runOpenPullRequestSyncTick({
     }
     return null;
   }
-}
-
-async function mapOpenPullRequestToReviewState({
-  githubClient,
-  mainBranch,
-  pullRequest,
-  repositoryFullName,
-}) {
-  const prNumber = Number(pullRequest?.number);
-  if (!Number.isInteger(prNumber) || prNumber <= 0) {
-    return null;
-  }
-
-  const baseBranch = String(pullRequest?.base?.ref || "");
-  if (baseBranch !== mainBranch) {
-    return null;
-  }
-
-  const isDraft = Boolean(pullRequest?.draft);
-  const openedAt = pullRequest?.created_at || pullRequest?.updated_at || new Date().toISOString();
-  const reviews = await githubClient.listPullRequestReviews({
-    repositoryFullName,
-    prNumber,
-  });
-
-  return {
-    repo: repositoryFullName,
-    prNumber,
-    title: pullRequest?.title || null,
-    url: pullRequest?.html_url || null,
-    authorLogin: pullRequest?.user?.login || "unknown",
-    baseBranch,
-    isDraft,
-    lifecycleState: "open",
-    reviewState: isDraft ? "waiting" : deriveReviewStateFromReviews(reviews),
-    openedAt,
-    openedForReviewAt: isDraft ? null : openedAt,
-    closedAt: null,
-    mergedAt: null,
-    lastReviewedAt: extractLatestReviewTimestamp(reviews),
-  };
-}
-
-function deriveReviewStateFromReviews(reviews) {
-  const sortedReviews = [...(Array.isArray(reviews) ? reviews : [])].sort(
-    (left, right) => readReviewTimestamp(left) - readReviewTimestamp(right),
-  );
-
-  let reviewState = "waiting";
-  for (const review of sortedReviews) {
-    const mappedState = mapGithubReviewState(review?.state);
-    if (mappedState !== undefined) {
-      reviewState = mappedState;
-    }
-  }
-
-  return reviewState;
-}
-
-function mapGithubReviewState(rawState) {
-  const normalizedState = String(rawState || "").toLowerCase().trim();
-  if (normalizedState === "approved") {
-    return "approved";
-  }
-  if (normalizedState === "changes_requested") {
-    return "changes_requested";
-  }
-  if (normalizedState === "dismissed") {
-    return "waiting";
-  }
-  if (normalizedState === "commented") {
-    return undefined;
-  }
-  return undefined;
-}
-
-function extractLatestReviewTimestamp(reviews) {
-  const validReviews = Array.isArray(reviews) ? reviews : [];
-  let latestTimestamp = null;
-  let latestValue = Number.NEGATIVE_INFINITY;
-  for (const review of validReviews) {
-    const timestamp = readReviewTimestamp(review);
-    if (Number.isFinite(timestamp) && timestamp > latestValue) {
-      latestValue = timestamp;
-      latestTimestamp = readReviewTimestampIso(review);
-    }
-  }
-
-  return latestTimestamp;
-}
-
-function readReviewTimestamp(review) {
-  const isoTimestamp = readReviewTimestampIso(review);
-  const parsedTimestamp = Date.parse(isoTimestamp || "");
-  return Number.isNaN(parsedTimestamp) ? Number.NEGATIVE_INFINITY : parsedTimestamp;
-}
-
-function readReviewTimestampIso(review) {
-  return review?.submitted_at || review?.updated_at || review?.created_at || null;
 }
 
 function isValidIntervalMs(syncIntervalMs) {

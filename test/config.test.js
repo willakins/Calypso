@@ -39,6 +39,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       DO_DEPLOY_TIMEOUT_SECONDS: "900",
       DIGITALOCEAN_TOKEN: "  do-token  ",
       DO_APP_ID_PROD: "  app-id  ",
+      GITHUB_TOKEN: undefined,
       PORT: "4100",
     },
     () => {
@@ -74,6 +75,7 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       DO_DEPLOY_TIMEOUT_SECONDS: undefined,
       DIGITALOCEAN_TOKEN: undefined,
       DO_APP_ID_PROD: undefined,
+      GITHUB_TOKEN: undefined,
       PORT: undefined,
     },
     () => {

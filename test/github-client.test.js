@@ -75,6 +75,35 @@ test("listPullRequestReviews uses expected endpoint", async () => {
   );
 });
 
+test("listClosedPullRequests uses expected endpoint and query", async () => {
+  let requestedUrl = "";
+  await withMockedFetch(
+    async (url) => {
+      requestedUrl = url;
+      return {
+        ok: true,
+        async json() {
+          return [];
+        },
+      };
+    },
+    async () => {
+      const client = createGithubClient(buildClientOptions({ token: "ghp-token" }));
+      const result = await client.listClosedPullRequests({
+        repositoryFullName: "croft-eng/croft",
+        baseBranch: "main",
+      });
+
+      assert.equal(result.length, 0);
+      assert.match(requestedUrl, /\/repos\/croft-eng\/croft\/pulls\?/);
+      assert.match(requestedUrl, /state=closed/);
+      assert.match(requestedUrl, /base=main/);
+      assert.match(requestedUrl, /sort=updated/);
+      assert.match(requestedUrl, /direction=desc/);
+    },
+  );
+});
+
 test("github client throws details when API request fails", async () => {
   await withMockedFetch(
     async () => ({

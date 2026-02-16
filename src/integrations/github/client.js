@@ -25,6 +25,22 @@ function createGithubClient(options) {
         endpointPath: `/repos/${repository.owner}/${repository.name}/pulls/${prNumber}/reviews`,
       });
     },
+
+    async listClosedPullRequests({ repositoryFullName, baseBranch }) {
+      const repository = splitRepositoryFullName(repositoryFullName);
+      assertNonEmptyString(baseBranch, "github main branch");
+
+      return fetchAllPagesFromGithub({
+        clientSettings,
+        endpointPath: `/repos/${repository.owner}/${repository.name}/pulls`,
+        queryParameters: {
+          state: "closed",
+          base: baseBranch,
+          sort: "updated",
+          direction: "desc",
+        },
+      });
+    },
   };
 }
 

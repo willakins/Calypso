@@ -149,6 +149,56 @@ async function upsertPullRequestAsUntested(pool, pullRequest) {
   return result.rows[0];
 }
 
+async function upsertPullRequestAsUntestedFromSync(pool, pullRequest) {
+  const query = `
+    INSERT INTO pull_requests (
+      repo,
+      pr_number,
+      title,
+      url,
+      status,
+      merged_at,
+      tested_at,
+      tested_by,
+      deployed_at,
+      updated_at
+    )
+    VALUES ($1, $2, $3, $4, 'untested', $5, NULL, NULL, NULL, NOW())
+    ON CONFLICT (repo, pr_number)
+    DO UPDATE SET
+      title = EXCLUDED.title,
+      url = EXCLUDED.url,
+      merged_at = EXCLUDED.merged_at,
+      status = CASE
+        WHEN pull_requests.status = 'untested' THEN 'untested'
+        ELSE pull_requests.status
+      END,
+      tested_at = CASE
+        WHEN pull_requests.status = 'untested' THEN NULL
+        ELSE pull_requests.tested_at
+      END,
+      tested_by = CASE
+        WHEN pull_requests.status = 'untested' THEN NULL
+        ELSE pull_requests.tested_by
+      END,
+      deployed_at = CASE
+        WHEN pull_requests.status = 'untested' THEN NULL
+        ELSE pull_requests.deployed_at
+      END,
+      updated_at = NOW()
+    RETURNING id, repo, pr_number, status, merged_at
+  `;
+  const queryValues = [
+    pullRequest.repo,
+    pullRequest.prNumber,
+    pullRequest.title,
+    pullRequest.url,
+    pullRequest.mergedAt,
+  ];
+  const result = await pool.query(query, queryValues);
+  return result.rows[0];
+}
+
 async function markPullRequestTested(pool, prNumber, testedBy) {
   const existingPullRequest = await findMostRecentPullRequestByNumber(pool, prNumber);
   if (!existingPullRequest) {
@@ -795,5 +845,6 @@ module.exports = {
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntested,
+  upsertPullRequestAsUntestedFromSync,
   verifyConnection,
 };

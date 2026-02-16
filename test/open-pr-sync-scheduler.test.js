@@ -20,11 +20,12 @@ test("deriveReviewStateFromReviews resolves final state across review timeline",
 test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async () => {
   const calls = {
     closed: [],
+    mergedUpserted: [],
     open: [],
     upserted: [],
   };
 
-  await runOpenPullRequestSyncTick({
+  const result = await runOpenPullRequestSyncTick({
     githubClient: {
       async listOpenPullRequests() {
         return [
@@ -54,7 +55,11 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
         }
         return [];
       },
+      async listClosedPullRequests() {
+        return [];
+      },
     },
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     logger: {
       info() {},
       error() {},
@@ -67,6 +72,10 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
     nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
     pool: {},
     repositoryFullName: "croft-eng/croft",
+    upsertPullRequestAsUntestedFromSyncFn: async (_pool, record) => {
+      calls.mergedUpserted.push(record);
+      return record;
+    },
     upsertOpenPullRequestReviewStateFn: async (_pool, record) => {
       calls.upserted.push(record);
       calls.open.push(record.prNumber);
@@ -86,6 +95,8 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
     openPrNumbers: [71, 72],
     closedAt: "2026-02-16T14:05:00.000Z",
   });
+  assert.equal(calls.mergedUpserted.length, 0);
+  assert.equal(result.mergedUntestedCount, 0);
 });
 
 test("runOpenPullRequestSyncTick ignores open PRs not on tracked branch", async () => {
@@ -112,7 +123,11 @@ test("runOpenPullRequestSyncTick ignores open PRs not on tracked branch", async 
       async listPullRequestReviews() {
         return [];
       },
+      async listClosedPullRequests() {
+        return [];
+      },
     },
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     logger: {
       info() {},
       error() {},
@@ -125,6 +140,7 @@ test("runOpenPullRequestSyncTick ignores open PRs not on tracked branch", async 
     nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
     pool: {},
     repositoryFullName: "croft-eng/croft",
+    upsertPullRequestAsUntestedFromSyncFn: async () => null,
     upsertOpenPullRequestReviewStateFn: async (_pool, record) => {
       calls.upserted.push(record);
       return record;
@@ -134,4 +150,104 @@ test("runOpenPullRequestSyncTick ignores open PRs not on tracked branch", async 
   assert.equal(calls.upserted.length, 0);
   assert.equal(calls.closed.length, 1);
   assert.deepEqual(calls.closed[0].openPrNumbers, []);
+});
+
+test("runOpenPullRequestSyncTick uses default now when nowFn is not provided", async () => {
+  const calls = {
+    closedPayload: null,
+  };
+
+  const result = await runOpenPullRequestSyncTick({
+    githubClient: {
+      async listOpenPullRequests() {
+        return [];
+      },
+      async listPullRequestReviews() {
+        return [];
+      },
+      async listClosedPullRequests() {
+        return [];
+      },
+    },
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    logger: {
+      info() {},
+      error() {},
+    },
+    mainBranch: "main",
+    markStaleOpenPullRequestsClosedFn: async (_pool, payload) => {
+      calls.closedPayload = payload;
+      return 0;
+    },
+    pool: {},
+    repositoryFullName: "croft-eng/croft",
+    upsertPullRequestAsUntestedFromSyncFn: async () => null,
+    upsertOpenPullRequestReviewStateFn: async () => null,
+  });
+
+  assert.equal(result.upsertedCount, 0);
+  assert.equal(result.closedCount, 0);
+  assert.equal(Array.isArray(calls.closedPayload.openPrNumbers), true);
+  assert.equal(Number.isNaN(Date.parse(calls.closedPayload.closedAt)), false);
+});
+
+test("runOpenPullRequestSyncTick upserts merged pull requests newer than last prod deploy", async () => {
+  const calls = {
+    mergedUpserted: [],
+  };
+
+  const result = await runOpenPullRequestSyncTick({
+    githubClient: {
+      async listOpenPullRequests() {
+        return [];
+      },
+      async listPullRequestReviews() {
+        return [];
+      },
+      async listClosedPullRequests() {
+        return [
+          {
+            number: 10,
+            title: "Old merge",
+            html_url: "https://github.com/croft-eng/croft/pull/10",
+            base: { ref: "main" },
+            merged_at: "2026-02-10T14:00:00.000Z",
+          },
+          {
+            number: 11,
+            title: "New merge",
+            html_url: "https://github.com/croft-eng/croft/pull/11",
+            base: { ref: "main" },
+            merged_at: "2026-02-16T14:00:00.000Z",
+          },
+          {
+            number: 12,
+            title: "Closed unmerged",
+            html_url: "https://github.com/croft-eng/croft/pull/12",
+            base: { ref: "main" },
+            merged_at: null,
+          },
+        ];
+      },
+    },
+    getLastProdDeployAtFn: async () => "2026-02-13T00:00:00.000Z",
+    logger: {
+      info() {},
+      error() {},
+    },
+    mainBranch: "main",
+    markStaleOpenPullRequestsClosedFn: async () => 0,
+    nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
+    pool: {},
+    repositoryFullName: "croft-eng/croft",
+    upsertPullRequestAsUntestedFromSyncFn: async (_pool, record) => {
+      calls.mergedUpserted.push(record);
+      return record;
+    },
+    upsertOpenPullRequestReviewStateFn: async () => null,
+  });
+
+  assert.equal(calls.mergedUpserted.length, 1);
+  assert.equal(calls.mergedUpserted[0].prNumber, 11);
+  assert.equal(result.mergedUntestedCount, 1);
 });
