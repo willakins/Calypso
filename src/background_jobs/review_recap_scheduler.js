@@ -7,6 +7,7 @@ const { formatReviewRecapResponse } = require("../util/format");
 
 const DEFAULT_TICK_INTERVAL_MS = 60_000;
 const SCHEDULE_LOOKBACK_MINUTES = 8 * 24 * 60;
+const MAX_POST_ATTEMPTS_PER_SLOT = 3;
 
 function startReviewRecapScheduler(options) {
   const {
@@ -30,9 +31,7 @@ function startReviewRecapScheduler(options) {
     };
   }
 
-  const schedulerState = {
-    lastNoChannelLogMinuteKey: null,
-  };
+  const schedulerState = buildSchedulerState();
 
   async function tick() {
     await runReviewRecapSchedulerTick({
@@ -72,6 +71,8 @@ async function runReviewRecapSchedulerTick({
   pool,
   schedulerState,
 }) {
+  const effectiveSchedulerState = ensureSchedulerState(schedulerState);
+
   try {
     const effectiveMessageClient = messageClient || createSlackMessageClientAdapter(slackClient);
     if (!effectiveMessageClient || typeof effectiveMessageClient.postChannelMessage !== "function") {
@@ -82,7 +83,7 @@ async function runReviewRecapSchedulerTick({
     const now = nowFn();
     const config = await getReviewRecapConfigFn(pool);
     if (!config.targetChannelId) {
-      logNoChannelConfigured({ logger, now, schedulerState });
+      logNoChannelConfigured({ logger, now, schedulerState: effectiveSchedulerState });
       return;
     }
 
@@ -100,6 +101,15 @@ async function runReviewRecapSchedulerTick({
     if (hasSlotAlreadyBeenSent({ scheduledSlot, lastSentSlotAt: config.lastSentSlotAt })) {
       return;
     }
+    const slotKey = scheduledSlot.toISOString();
+    if (hasReachedPostAttemptLimit({ schedulerState: effectiveSchedulerState, slotKey })) {
+      logPostAttemptLimitReached({
+        logger,
+        schedulerState: effectiveSchedulerState,
+        slotKey,
+      });
+      return;
+    }
 
     const sinceTimestamp = computeSinceTimestamp({
       now,
@@ -114,13 +124,32 @@ async function runReviewRecapSchedulerTick({
       timeZone: config.timeZone,
     });
 
-    await effectiveMessageClient.postChannelMessage({
-      channelId: config.targetChannelId,
-      text: message,
-      mrkdwn: true,
-    });
+    try {
+      await effectiveMessageClient.postChannelMessage({
+        channelId: config.targetChannelId,
+        text: message,
+        mrkdwn: true,
+      });
+    } catch (error) {
+      const attemptCount = recordFailedPostAttempt({
+        schedulerState: effectiveSchedulerState,
+        slotKey,
+      });
+      logPostError({
+        schedulerState: effectiveSchedulerState,
+        logger,
+        error,
+        attemptCount,
+        slotKey,
+      });
+      return;
+    }
 
     await markReviewRecapSentFn(pool, scheduledSlot.toISOString());
+    clearPostAttemptState({
+      schedulerState: effectiveSchedulerState,
+      slotKey,
+    });
   } catch (error) {
     logger.error("Review recap scheduler tick failed.");
     logger.error(error.message);
@@ -151,6 +180,98 @@ function logNoChannelConfigured({ logger, now, schedulerState }) {
 
   schedulerState.lastNoChannelLogMinuteKey = minuteKey;
   logger.info("Review recap scheduler skipped: no target channel configured.");
+}
+
+function buildSchedulerState() {
+  return {
+    lastNoChannelLogMinuteKey: null,
+    postAttemptCountBySlotKey: new Map(),
+    loggedPostAttemptLimitBySlotKey: new Set(),
+  };
+}
+
+function ensureSchedulerState(schedulerState) {
+  if (!schedulerState) {
+    return buildSchedulerState();
+  }
+
+  if (!(schedulerState.postAttemptCountBySlotKey instanceof Map)) {
+    schedulerState.postAttemptCountBySlotKey = new Map();
+  }
+  if (!(schedulerState.loggedPostAttemptLimitBySlotKey instanceof Set)) {
+    schedulerState.loggedPostAttemptLimitBySlotKey = new Set();
+  }
+
+  return schedulerState;
+}
+
+function hasReachedPostAttemptLimit({ schedulerState, slotKey }) {
+  const attemptCount = schedulerState.postAttemptCountBySlotKey.get(slotKey) || 0;
+  return attemptCount >= MAX_POST_ATTEMPTS_PER_SLOT;
+}
+
+function recordFailedPostAttempt({ schedulerState, slotKey }) {
+  const previousAttemptCount = schedulerState.postAttemptCountBySlotKey.get(slotKey) || 0;
+  const nextAttemptCount = previousAttemptCount + 1;
+  schedulerState.postAttemptCountBySlotKey.set(slotKey, nextAttemptCount);
+  return nextAttemptCount;
+}
+
+function clearPostAttemptState({ schedulerState, slotKey }) {
+  schedulerState.postAttemptCountBySlotKey.delete(slotKey);
+  schedulerState.loggedPostAttemptLimitBySlotKey.delete(slotKey);
+}
+
+function logPostAttemptLimitReached({ logger, schedulerState, slotKey }) {
+  if (schedulerState.loggedPostAttemptLimitBySlotKey.has(slotKey)) {
+    return;
+  }
+
+  schedulerState.loggedPostAttemptLimitBySlotKey.add(slotKey);
+  logger.error(
+    `Review recap scheduler reached max retry attempts (${MAX_POST_ATTEMPTS_PER_SLOT}) for slot ${slotKey}. Skipping further retries until next scheduled slot.`,
+  );
+}
+
+function logPostError({ schedulerState, logger, error, attemptCount, slotKey }) {
+  logger.error("Review recap scheduler tick failed.");
+
+  const errorCode = readErrorCode(error);
+  if (errorCode === "not_in_channel") {
+    logger.error(
+      [
+        "Review recap post failed: bot is not in the configured channel (`not_in_channel`).",
+        "Invite the bot to that channel and rerun `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`.",
+      ].join(" "),
+    );
+  } else {
+    logger.error(error?.message || String(error));
+  }
+
+  logger.error(
+    `Review recap post attempt ${attemptCount}/${MAX_POST_ATTEMPTS_PER_SLOT} failed for slot ${slotKey}.`,
+  );
+
+  if (attemptCount >= MAX_POST_ATTEMPTS_PER_SLOT) {
+    schedulerState.loggedPostAttemptLimitBySlotKey.add(slotKey);
+    logger.error(
+      `Review recap scheduler reached max retry attempts (${MAX_POST_ATTEMPTS_PER_SLOT}) for slot ${slotKey}. Skipping further retries until next scheduled slot.`,
+    );
+  }
+}
+
+function readErrorCode(error) {
+  const codeFromPayload = String(error?.data?.error || "").trim().toLowerCase();
+  if (codeFromPayload) {
+    return codeFromPayload;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  if (message.includes("not_in_channel")) {
+    return "not_in_channel";
+  }
+
+  return "";
 }
 
 function hasSlotAlreadyBeenSent({ scheduledSlot, lastSentSlotAt }) {

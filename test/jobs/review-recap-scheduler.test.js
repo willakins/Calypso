@@ -167,3 +167,67 @@ test("runReviewRecapSchedulerTick logs when no channel configured", async () => 
   assert.equal(infoLogs.length, 1);
   assert.match(infoLogs[0], /no target channel configured/i);
 });
+
+test("runReviewRecapSchedulerTick stops retrying after 3 not_in_channel failures for the same slot", async () => {
+  const errorLogs = [];
+  let listCallCount = 0;
+  let postCallCount = 0;
+  const schedulerState = {
+    lastNoChannelLogMinuteKey: null,
+  };
+
+  const runTick = async () =>
+    runReviewRecapSchedulerTick({
+      getReviewRecapConfigFn: async () => ({
+        targetChannelId: "CDEPLOY",
+        recencyValue: 1,
+        recencyUnit: "w",
+        scheduleWeekday: "mon",
+        scheduleTime: "09:00",
+        timeZone: "America/New_York",
+        lastSentSlotAt: null,
+      }),
+      listOpenPullRequestsWaitingOnReviewSinceFn: async () => {
+        listCallCount += 1;
+        return [];
+      },
+      markReviewRecapSentFn: async () => {
+        throw new Error("should not mark sent on failure");
+      },
+      formatReviewRecapResponseFn: () => "recap message",
+      nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
+      logger: {
+        info() {},
+        warn() {},
+        error(message) {
+          errorLogs.push(String(message));
+        },
+      },
+      messageClient: {
+        async postChannelMessage() {
+          postCallCount += 1;
+          const error = new Error("An API error occurred: not_in_channel");
+          error.data = { error: "not_in_channel" };
+          throw error;
+        },
+      },
+      pool: {},
+      schedulerState,
+    });
+
+  await runTick();
+  await runTick();
+  await runTick();
+  await runTick();
+
+  assert.equal(postCallCount, 3);
+  assert.equal(listCallCount, 3);
+  assert.equal(
+    errorLogs.filter((message) => /bot is not in the configured channel/i.test(message)).length,
+    3,
+  );
+  assert.equal(
+    errorLogs.filter((message) => /max retry attempts \(3\)/i.test(message)).length,
+    1,
+  );
+});

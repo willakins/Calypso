@@ -220,7 +220,7 @@ test("handleCalypsoCommand routes config review recap channel input", () => {
   });
 
   assert.equal(result.action, "config_review_recap_channel");
-  assert.equal(result.targetChannelId, "C123ABC");
+  assert.equal(result.targetChannelReference, "<#C123ABC|deploys>");
 });
 
 test("handleCalypsoCommand routes config review recap recency input", () => {
@@ -1454,6 +1454,259 @@ test("registerCalypsoCommand config command updates review recap channel", async
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].targetChannelId, "C999ABC");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command resolves review recap channel name to channel id", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapChannelFn: async (pool, targetChannelId, updatedBy) => {
+      capturedCalls.push({ pool, targetChannelId, updatedBy });
+      return { target_channel_id: targetChannelId, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-channel:social", user_id: "UADMIN" },
+    client: {
+      conversations: {
+        list: async () => ({
+          channels: [{ id: "C999ABC", name: "social" }],
+          response_metadata: { next_cursor: "" },
+        }),
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated review recap channel to <#C999ABC>/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].targetChannelId, "C999ABC");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command resolves invoking channel name without conversations.list", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapChannelFn: async (pool, targetChannelId, updatedBy) => {
+      capturedCalls.push({ pool, targetChannelId, updatedBy });
+      return { target_channel_id: targetChannelId, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: {
+      text: "config review-recap-channel:new-channel",
+      user_id: "UADMIN",
+      channel_id: "C24680",
+      channel_name: "new-channel",
+    },
+    client: {
+      conversations: {
+        info: async () => ({ channel: { id: "C24680", is_member: true } }),
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated review recap channel to <#C24680>/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].targetChannelId, "C24680");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command reports channel access error when bot is not in channel", async () => {
+  let commandHandler;
+  let setChannelCalled = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    botName: "Calypso",
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapChannelFn: async () => {
+      setChannelCalled = true;
+      return {};
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-channel:<#C999ABC|social>", user_id: "UADMIN" },
+    client: {
+      conversations: {
+        list: async () => ({
+          channels: [{ id: "C999ABC", name: "social", is_member: false }],
+          response_metadata: { next_cursor: "" },
+        }),
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Calypso is not in that channel/);
+  assert.match(payload.text, /Invite Calypso to the channel/);
+  assert.equal(setChannelCalled, false);
+});
+
+test("registerCalypsoCommand config command reports channel name resolution when list API is unavailable", async () => {
+  let commandHandler;
+  let setChannelCalled = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapChannelFn: async () => {
+      setChannelCalled = true;
+      return {};
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-channel:social", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Cannot resolve channel name `social`/);
+  assert.match(payload.text, /Use a channel mention/i);
+  assert.equal(setChannelCalled, false);
+});
+
+test("registerCalypsoCommand config command reports channel access verification failures", async () => {
+  let commandHandler;
+  let setChannelCalled = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    botName: "Calypso",
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapChannelFn: async () => {
+      setChannelCalled = true;
+      return {};
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-channel:<#C999ABC|social>", user_id: "UADMIN" },
+    client: {
+      conversations: {
+        list: async () => {
+          const error = new Error("An API error occurred: internal_error");
+          error.data = { error: "internal_error" };
+          throw error;
+        },
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /could not verify access/i);
+  assert.match(payload.text, /internal_error/i);
+  assert.equal(setChannelCalled, false);
+});
+
+test("registerCalypsoCommand config command reports missing scopes for channel access verification", async () => {
+  let commandHandler;
+  let setChannelCalled = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    botName: "Calypso",
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapChannelFn: async () => {
+      setChannelCalled = true;
+      return {};
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-channel:<#C999ABC|social>", user_id: "UADMIN" },
+    client: {
+      conversations: {
+        list: async () => {
+          const error = new Error("An API error occurred: missing_scope");
+          error.data = {
+            error: "missing_scope",
+            needed: "channels:read,groups:read",
+            provided: "chat:write,commands",
+          };
+          throw error;
+        },
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /missing_scope/i);
+  assert.match(payload.text, /channels:read, groups:read/i);
+  assert.match(payload.text, /chat:write, commands/i);
+  assert.equal(setChannelCalled, false);
 });
 
 test("registerCalypsoCommand config command updates review recap recency", async () => {

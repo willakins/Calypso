@@ -56,13 +56,13 @@ class ConfigCommand extends BaseCalypsoCommand {
 
     const recapChannelMatch = argument.match(REVIEW_RECAP_CHANNEL_ARGUMENT_PATTERN);
     if (recapChannelMatch) {
-      const targetChannelId = normalizeSlackChannelId(recapChannelMatch[1]);
-      if (!targetChannelId) {
+      const targetChannelReference = String(recapChannelMatch[1] || "").trim();
+      if (targetChannelReference === "") {
         return this.buildRespondParsedCommand(buildConfigUsageMessage());
       }
       return this.buildParsedCommand({
         action: "config_review_recap_channel",
-        targetChannelId,
+        targetChannelReference,
       });
     }
 
@@ -148,14 +148,47 @@ class ConfigCommand extends BaseCalypsoCommand {
     }
 
     if (parsedCommand.action === "config_review_recap_channel") {
+      const channelResolution = await resolveReviewRecapChannelId(
+        runtime,
+        parsedCommand.targetChannelReference,
+      );
+      if (!channelResolution.isResolvable) {
+        return this.buildExecutionResult(
+          buildReviewRecapChannelResolutionError({
+            targetChannelReference: parsedCommand.targetChannelReference,
+            reason: channelResolution.reason,
+            botName: runtime.botName,
+          }),
+          { responseType: "ephemeral" },
+        );
+      }
+
+      const channelAccess = await verifyReviewRecapChannelAccess(
+        runtime,
+        channelResolution.targetChannelId,
+      );
+      if (!channelAccess.isAccessible) {
+        return this.buildExecutionResult(
+          buildReviewRecapChannelAccessError({
+            targetChannelId: channelResolution.targetChannelId,
+            reason: channelAccess.reason,
+            platformErrorCode: channelAccess.platformErrorCode,
+            neededScopes: channelAccess.neededScopes,
+            providedScopes: channelAccess.providedScopes,
+            botName: runtime.botName,
+          }),
+          { responseType: "ephemeral" },
+        );
+      }
+
       await runtime.setReviewRecapChannelFn(
         runtime.pool,
-        parsedCommand.targetChannelId,
+        channelResolution.targetChannelId,
         runtime.userId,
       );
 
       return this.buildExecutionResult(
-        `Updated review recap channel to <#${parsedCommand.targetChannelId}>.`,
+        `Updated review recap channel to <#${channelResolution.targetChannelId}>.`,
       );
     }
 
@@ -283,20 +316,6 @@ function isWorkspaceScopedConfigAction(action) {
   );
 }
 
-function normalizeSlackChannelId(rawChannelInput) {
-  const candidateChannelInput = String(rawChannelInput || "").trim();
-  if (candidateChannelInput === "") {
-    return null;
-  }
-
-  const mentionMatch = candidateChannelInput.match(/^<#([A-Z0-9]+)(?:\|[^>]+)?>$/i);
-  if (mentionMatch) {
-    return mentionMatch[1].toUpperCase();
-  }
-
-  return candidateChannelInput;
-}
-
 function buildConfigUsageMessage() {
   return [
     "Usage:",
@@ -305,7 +324,7 @@ function buildConfigUsageMessage() {
     "`/calypso config timezone:America/New_York`",
     "",
     "PR review recap setup:",
-    "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
+    "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
     "`/calypso config review-recap-schedule:<weekday>@HH:MM`",
     "",
@@ -334,6 +353,280 @@ function buildProviderUnavailableMessage(provider) {
   return [
     `Provider \`${provider}\` is not available yet.`,
     `Supported ${unavailableProvider.category} provider(s): \`${unavailableProvider.availableOptions.join(", ")}\`.`,
+  ].join(" ");
+}
+
+async function verifyReviewRecapChannelAccess(runtime, targetChannelId) {
+  if (typeof runtime.verifyReviewRecapChannelAccessFn === "function") {
+    return runtime.verifyReviewRecapChannelAccessFn(runtime, targetChannelId);
+  }
+
+  const conversationsApi = runtime.communicationClient?.conversations;
+  if (!conversationsApi || typeof conversationsApi.list !== "function") {
+    return { isAccessible: true };
+  }
+
+  try {
+    const matchedChannel = await findPublicOrPrivateChannel(conversationsApi, (channel) => {
+      return normalizeChannelId(channel?.id) === normalizeChannelId(targetChannelId);
+    });
+    if (!matchedChannel) {
+      return {
+        isAccessible: false,
+        reason: "not_in_channel",
+      };
+    }
+
+    const isMember = matchedChannel?.is_member;
+    if (isMember === false) {
+      return {
+        isAccessible: false,
+        reason: "not_in_channel",
+      };
+    }
+
+    return { isAccessible: true };
+  } catch (error) {
+    const errorCode = readPlatformErrorCode(error);
+    if (errorCode === "not_in_channel" || errorCode === "channel_not_found") {
+      return {
+        isAccessible: false,
+        reason: errorCode,
+        platformErrorCode: errorCode,
+      };
+    }
+
+    return {
+      isAccessible: false,
+      reason: "verification_failed",
+      platformErrorCode: errorCode || "unknown_error",
+      neededScopes: readPlatformNeededScopes(error),
+      providedScopes: readPlatformProvidedScopes(error),
+    };
+  }
+}
+
+async function resolveReviewRecapChannelId(runtime, targetChannelReference) {
+  const reference = String(targetChannelReference || "").trim();
+  if (reference === "") {
+    return {
+      isResolvable: false,
+      reason: "invalid_reference",
+    };
+  }
+
+  const mentionMatch = reference.match(/^<#([A-Z0-9]+)(?:\|[^>]+)?>$/i);
+  if (mentionMatch) {
+    return {
+      isResolvable: true,
+      targetChannelId: mentionMatch[1].toUpperCase(),
+    };
+  }
+
+  const channelIdMatch = reference.match(/^[CG][A-Z0-9]+$/i);
+  if (channelIdMatch) {
+    return {
+      isResolvable: true,
+      targetChannelId: reference.toUpperCase(),
+    };
+  }
+
+  const channelNameMatch = reference.match(/^#?([a-z0-9][a-z0-9._-]*)$/i);
+  if (!channelNameMatch) {
+    return {
+      isResolvable: false,
+      reason: "invalid_reference",
+    };
+  }
+
+  const channelName = channelNameMatch[1].toLowerCase();
+  const currentChannelId = String(runtime.currentChannelId || "").trim();
+  const currentChannelName = String(runtime.currentChannelName || "").trim().toLowerCase();
+  if (currentChannelId !== "" && currentChannelName !== "" && currentChannelName === channelName) {
+    return {
+      isResolvable: true,
+      targetChannelId: currentChannelId.toUpperCase(),
+    };
+  }
+
+  const conversationsApi = runtime.communicationClient?.conversations;
+  if (!conversationsApi || typeof conversationsApi.list !== "function") {
+    return {
+      isResolvable: false,
+      reason: "channel_name_resolution_unavailable",
+    };
+  }
+
+  try {
+    const matchedChannel = await findPublicOrPrivateChannel(conversationsApi, (channel) => {
+      const normalizedName = String(channel?.name_normalized || "").toLowerCase();
+      const name = String(channel?.name || "").toLowerCase();
+      return normalizedName === channelName || name === channelName;
+    });
+    if (matchedChannel?.id) {
+      return {
+        isResolvable: true,
+        targetChannelId: String(matchedChannel.id).toUpperCase(),
+      };
+    }
+  } catch (_error) {
+    return {
+      isResolvable: false,
+      reason: "channel_name_resolution_failed",
+    };
+  }
+
+  return {
+    isResolvable: false,
+    reason: "channel_not_found",
+  };
+}
+
+async function findPublicOrPrivateChannel(conversationsApi, matcher) {
+  let cursor = null;
+  while (true) {
+    const response = await conversationsApi.list({
+      exclude_archived: true,
+      limit: 200,
+      types: "public_channel,private_channel",
+      ...(cursor ? { cursor } : {}),
+    });
+
+    const channels = Array.isArray(response?.channels) ? response.channels : [];
+    const matchedChannel = channels.find(matcher);
+    if (matchedChannel) {
+      return matchedChannel;
+    }
+
+    cursor = String(response?.response_metadata?.next_cursor || "").trim();
+    if (cursor === "") {
+      return null;
+    }
+  }
+}
+
+function normalizeChannelId(channelId) {
+  return String(channelId || "").trim().toUpperCase();
+}
+
+function readPlatformErrorCode(error) {
+  const payloadErrorCode = String(error?.data?.error || "").trim().toLowerCase();
+  if (payloadErrorCode !== "") {
+    return payloadErrorCode;
+  }
+
+  const errorMessage = String(error?.message || "").trim().toLowerCase();
+  if (errorMessage.includes("not_in_channel")) {
+    return "not_in_channel";
+  }
+  if (errorMessage.includes("channel_not_found")) {
+    return "channel_not_found";
+  }
+
+  return "";
+}
+
+function readPlatformNeededScopes(error) {
+  return normalizeScopeList(error?.data?.needed);
+}
+
+function readPlatformProvidedScopes(error) {
+  return normalizeScopeList(error?.data?.provided);
+}
+
+function normalizeScopeList(rawScopes) {
+  const rawValue = String(rawScopes || "").trim();
+  if (rawValue === "") {
+    return null;
+  }
+
+  return rawValue
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function buildReviewRecapChannelAccessError({
+  targetChannelId,
+  reason,
+  platformErrorCode,
+  neededScopes,
+  providedScopes,
+  botName,
+}) {
+  const resolvedBotName = String(botName || "Calypso").trim() || "Calypso";
+  if (reason === "not_in_channel") {
+    return [
+      `Cannot set review recap channel to <#${targetChannelId}> because ${resolvedBotName} is not in that channel.`,
+      `Invite ${resolvedBotName} to the channel, then run \`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>\` again.`,
+    ].join(" ");
+  }
+
+  if (reason === "channel_not_found") {
+    return [
+      `Cannot set review recap channel to <#${targetChannelId}> because that channel is not accessible.`,
+      `Make sure the channel exists and ${resolvedBotName} has access.`,
+    ].join(" ");
+  }
+
+  if (platformErrorCode === "missing_scope") {
+    const neededText = neededScopes ? ` Needed scopes: \`${neededScopes}\`.` : "";
+    const providedText = providedScopes ? ` Current scopes: \`${providedScopes}\`.` : "";
+    return [
+      `Cannot set review recap channel to <#${targetChannelId}> because Slack denied channel verification (\`missing_scope\`).`,
+      `${resolvedBotName} needs channel read scopes to verify membership.${neededText}${providedText}`,
+      "Reinstall/update the app scopes, then retry.",
+    ].join(" ");
+  }
+
+  if (platformErrorCode === "not_allowed_token_type") {
+    return [
+      `Cannot set review recap channel to <#${targetChannelId}> because Slack rejected the token type (\`not_allowed_token_type\`).`,
+      `Verify ${resolvedBotName} is using a bot token for Slack Web API calls, then retry.`,
+    ].join(" ");
+  }
+
+  if (platformErrorCode === "invalid_auth" || platformErrorCode === "account_inactive") {
+    return [
+      `Cannot set review recap channel to <#${targetChannelId}> because Slack authentication failed (\`${platformErrorCode}\`).`,
+      `Rotate/update ${resolvedBotName} communication credentials and retry.`,
+    ].join(" ");
+  }
+
+  return [
+    `Cannot set review recap channel to <#${targetChannelId}> right now.`,
+    `Slack could not verify access for ${resolvedBotName} (error: \`${platformErrorCode || "unknown_error"}\`).`,
+    "Check channel ID, bot membership, and Slack app scopes, then try again.",
+  ].join(" ");
+}
+
+function buildReviewRecapChannelResolutionError({ targetChannelReference, reason, botName }) {
+  const resolvedBotName = String(botName || "Calypso").trim() || "Calypso";
+  if (reason === "channel_not_found") {
+    return [
+      `Cannot set review recap channel because \`${targetChannelReference}\` was not found.`,
+      `Use a valid channel name, channel mention, or channel ID.`,
+    ].join(" ");
+  }
+
+  if (reason === "channel_name_resolution_unavailable") {
+    return [
+      `Cannot resolve channel name \`${targetChannelReference}\` with current ${resolvedBotName} permissions.`,
+      "Use a channel mention like `<#C123ABC|channel-name>` or a channel ID.",
+    ].join(" ");
+  }
+
+  if (reason === "channel_name_resolution_failed") {
+    return [
+      `Cannot resolve channel name \`${targetChannelReference}\` right now.`,
+      "Try again, or use a channel mention/channel ID instead.",
+    ].join(" ");
+  }
+
+  return [
+    `Invalid review recap channel value \`${targetChannelReference}\`.`,
+    "Use a channel mention like `<#C123ABC|channel-name>`, a channel ID, or a channel name such as `#deploys`.",
   ].join(" ");
 }
 

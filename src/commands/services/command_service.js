@@ -114,6 +114,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
   const mergedOptions = { ...serviceOptions, ...commandContext };
   const userId = mergedOptions.userId || mergedOptions.slackUserId;
   const communicationClient = mergedOptions.communicationClient || mergedOptions.slackClient || null;
+  const currentChannelId = mergedOptions.currentChannelId || mergedOptions.channelId || null;
+  const currentChannelName = mergedOptions.currentChannelName || mergedOptions.channelName || null;
   const deployPlatform = mergedOptions.deployPlatform || null;
   const deployConfig = {
     ...(serviceOptions.deployConfig || {}),
@@ -193,6 +195,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     setReviewRecapTimeZoneFn:
       mergedOptions.setReviewRecapTimeZoneFn || defaultDependencies.setReviewRecapTimeZoneFn,
     communicationClient,
+    currentChannelId,
+    currentChannelName,
     userId,
     // Backward-compatible aliases while commands migrate to neutral naming.
     slackClient: communicationClient,
