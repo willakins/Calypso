@@ -136,8 +136,9 @@ test/
 ## Prerequisites
 
 - Node.js 18+ (Node 20 recommended).
-- `ngrok` installed and authenticated.
-- PostgreSQL CLI tools installed (`initdb`, `pg_ctl`, `psql`) for automated local stack start.
+- For local hosting only:
+  - `ngrok` installed and authenticated.
+  - PostgreSQL CLI tools installed (`initdb`, `pg_ctl`, `psql`) for automated local stack start.
 - A Slack app with:
   - Socket Mode enabled.
   - Slash command `/calypso`.
@@ -319,7 +320,9 @@ Provider support matrix:
 - Max time Calypso waits for deployment completion follow-up message.
 - Default: `1200` seconds (20 minutes).
 
-## Setup
+## Hosting
+
+### Host Locally (Fastest Development Setup)
 
 1. Install dependencies:
 
@@ -328,165 +331,87 @@ npm install
 ```
 
 2. Create `.env` with required values.
-3. Start the full local stack (temporary Postgres + ngrok + app):
+3. Start the managed local stack:
 
 ```bash
 npm run start
 ```
 
-This command will:
+This local command starts:
 
-- Initialize a temporary Postgres cluster at `.tmp/calypso-pg` (first run only).
-- Start Postgres on port `5433`.
-- Start ngrok on `PORT` (default `3000`).
-- Start the Calypso app.
-- Print the ngrok URL to use for code-host webhook configuration.
+- Temporary Postgres at `.tmp/calypso-pg` (first run initializes it).
+- ngrok tunnel on `PORT` (default `3000`).
+- Calypso app process.
 
-To stop everything and remove temporary DB/runtime files:
+4. Configure your code-host webhook to the printed ngrok URL:
+
+- `https://<ngrok-domain>/codehost/webhook`
+- `https://<ngrok-domain>/github/webhook` (legacy-compatible)
+
+5. Stop local runtime:
 
 ```bash
 npm run stop
 ```
 
-If you already run your own Postgres and tunnel manually, start only the app:
+Optional local mode (you run your own Postgres + tunnel):
 
 ```bash
 npm run dev
 ```
 
-On app startup Calypso will:
+### Host on DigitalOcean App Platform (Recommended Production Path)
 
-- Verify DB connectivity (`SELECT 1`).
-- Run migrations (`src/db/migrations/*.sql`) idempotently.
-- Construct selected communication/code-host/deploy providers.
-- Start webhook server on `PORT`.
-- Start communication platform runtime (Socket Mode for Slack).
+Calypso is already set up for this:
 
-## Docker
+- Dockerized runtime (`Dockerfile`).
+- HTTP health endpoint (`GET /healthz`).
+- Public webhook routes (`/codehost/webhook`, `/github/webhook`).
+- Startup migrations run automatically.
 
-Build image:
+Use these steps:
 
-```bash
-docker build -t calypso:local .
-```
-
-Run container:
-
-```bash
-docker run --rm -p 3000:3000 --env-file .env calypso:local
-```
+1. Create a DigitalOcean Managed PostgreSQL cluster.
+2. Copy DB URL and keep `sslmode=require` in `DATABASE_URL`.
+3. Create App Platform app from this repo using the root `Dockerfile`.
+4. Configure as a Web Service, one instance.
+5. Set environment variables in App Platform:
+   - Required:
+     - `DATABASE_URL`
+     - `COMMUNICATION_PROVIDER=slack`
+     - `COMMUNICATION_BOT_TOKEN`
+     - `COMMUNICATION_APP_TOKEN`
+     - `CODE_HOST_PROVIDER=github`
+     - `CODE_HOST_WEBHOOK_SECRET`
+     - `CODE_HOST_REPOSITORY`
+     - `CODE_HOST_MAIN_BRANCH`
+   - Optional:
+     - `BOT_NAME`
+     - `PORT` (defaults to `3000`)
+     - `CODE_HOST_TOKEN` (enables `/calypso sync` and scheduled backfill)
+     - `DEPLOY_PROVIDER=digitalocean`
+     - `DEPLOY_TOKEN`
+     - `DEPLOY_PROD_APP_ID`
+6. Configure App health check path to `/healthz`.
+7. Deploy the app.
+8. Set your code-host webhook URL to:
+   - `https://<your-app-domain>/codehost/webhook`
+   - or `https://<your-app-domain>/github/webhook`
+9. Smoke test:
+   - `/calypso help`
+   - `/calypso status`
+   - merge a PR and confirm webhook delivery `200`.
 
 Notes:
 
-- Container startup command is `node src/app.js` (not the local runtime script).
-- For container hosting, set `DATABASE_URL` to a real reachable database (not `127.0.0.1` unless DB is inside same network namespace).
-- Migrations still run automatically at startup.
+- Slack Socket Mode means slash commands do not require inbound Slack HTTP routes.
+- Keep one primary running instance for predictable webhook ingestion + schedulers.
+- For container-only local runs, you can still use:
 
-## DigitalOcean Hosting
-
-Recommended setup:
-
-1. Create a Managed PostgreSQL cluster in DigitalOcean.
-2. Copy the cluster connection string and set `DATABASE_URL` with `sslmode=require`.
-3. Create an App Platform app from this repo using the `Dockerfile`.
-4. Set all required env vars in App Platform:
-   - `COMMUNICATION_PROVIDER=slack`
-   - `CODE_HOST_PROVIDER=github`
-   - `DEPLOY_PROVIDER=digitalocean`
-   - `COMMUNICATION_BOT_TOKEN`
-   - `COMMUNICATION_APP_TOKEN`
-   - `DATABASE_URL`
-   - `CODE_HOST_WEBHOOK_SECRET`
-   - `CODE_HOST_REPOSITORY`
-   - `CODE_HOST_MAIN_BRANCH`
-5. Optional deploy vars:
-   - `DEPLOY_TOKEN`
-   - `DEPLOY_PROD_APP_ID`
-
-Operational notes:
-
-- Use a stable public app URL for webhook target:
-  - `https://<your-app-domain>/github/webhook` (legacy-compatible path)
-  - `https://<your-app-domain>/codehost/webhook` (provider-neutral alias)
-- Slack Socket Mode does not require a public ingress for slash commands.
-- Keep one running Calypso instance for consistent webhook ingestion.
-
-## DigitalOcean Deployment Runbook
-
-Use this when deploying Calypso as an always-on service in DigitalOcean App Platform.
-
-### 1. Create/prepare managed Postgres
-
-1. Create a DigitalOcean Managed PostgreSQL cluster in the same region as your app.
-2. Create a dedicated database user for Calypso (recommended).
-3. Copy the connection string and keep `sslmode=require` in the URL.
-4. Set this value as `DATABASE_URL` in App Platform.
-
-### 2. Create the App Platform app from this repo
-
-1. In DigitalOcean, create a new App Platform app from your GitHub repo.
-2. Choose Dockerfile-based deploy using the repo root `Dockerfile`.
-3. Configure service type as Web Service.
-4. Set HTTP port to `3000` (or rely on `PORT` env if configured by the platform).
-5. Set instance count to `1` for v1 to keep webhook/command processing single-instance.
-
-### 3. Configure App Platform environment variables
-
-Set these as encrypted environment variables in App Platform:
-
-- `COMMUNICATION_PROVIDER=slack`
-- `CODE_HOST_PROVIDER=github`
-- `DEPLOY_PROVIDER=digitalocean`
-- `COMMUNICATION_BOT_TOKEN`
-- `COMMUNICATION_APP_TOKEN`
-- `DATABASE_URL` (with `sslmode=require`)
-- `CODE_HOST_WEBHOOK_SECRET`
-- `CODE_HOST_REPOSITORY`
-- `CODE_HOST_MAIN_BRANCH`
-
-Optional:
-
-- `DEPLOY_TOKEN`
-- `DEPLOY_PROD_APP_ID`
-
-### 4. Configure health checks
-
-Calypso exposes `GET /healthz` for platform health checks. In App Platform:
-
-1. Use HTTP health check path: `/healthz`
-2. Keep expected status in the `2xx` range
-
-### 5. Wire code-host webhook to the hosted app
-
-1. After first successful deploy, copy the app URL (for example `https://calypso-xxxx.ondigitalocean.app`).
-2. In your GitHub repo webhook settings:
-   - Payload URL: `https://<your-app-domain>/codehost/webhook` (or `/github/webhook`)
-   - Content type: `application/json`
-   - Secret: same value as `CODE_HOST_WEBHOOK_SECRET`
-   - Events: `Pull requests`
-3. Trigger a test merge to `CODE_HOST_MAIN_BRANCH`.
-4. Confirm webhook delivery is `200` in GitHub and row is created/updated in `pull_requests`.
-
-### 6. Smoke test in Slack
-
-Run these commands in your Slack workspace:
-
-1. `/calypso help`
-2. `/calypso status`
-3. `/calypso tested <PR_NUMBER>` (for a merged untested PR)
-4. `/calypso deploy prod` (if DO deploy vars are set)
-
-Expected:
-
-- Help/status/tested respond ephemerally.
-- Deploy is blocked when untested PRs exist.
-- Deploy triggers only when gate is clear and DO deploy vars are configured.
-
-### 7. Cutover notes
-
-- Stop relying on local/ngrok webhook delivery once hosted webhook is active.
-- Keep only one primary always-on Calypso instance.
-- Rotate secrets after deployment if they were ever exposed in logs/chat.
+```bash
+docker build -t calypso:local .
+docker run --rm -p 3000:3000 --env-file .env calypso:local
+```
 
 ## Code-Host Webhook
 
