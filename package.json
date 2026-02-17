@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "node src/app.js",
     "start": "bash scripts/runtime/start.sh",
+    "start:long": "bash scripts/runtime/start_long.sh",
     "start:app": "node src/app.js",
     "stop": "bash scripts/runtime/stop.sh",
+    "stop:long": "bash scripts/runtime/stop_long.sh",
+    "stop:long:all": "bash scripts/runtime/stop_long_all.sh",
     "test": "node --test"
   },
   "repository": {
