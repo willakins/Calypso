@@ -187,6 +187,13 @@ test("handleCalypsoCommand routes whitelist command with mention", () => {
   assert.equal(result.targetUserId, "U123ABC");
 });
 
+test("handleCalypsoCommand routes whitelist command with @handle", () => {
+  const result = handleCalypsoCommand({ text: "whitelist @travis", user_id: "UADMIN" });
+
+  assert.equal(result.action, "whitelist_add");
+  assert.equal(result.targetUserHandle, "travis");
+});
+
 test("handleCalypsoCommand routes config time-format input", () => {
   const result = handleCalypsoCommand({ text: "config time-format:long", user_id: "UADMIN" });
 
@@ -1242,6 +1249,167 @@ test("registerCalypsoCommand whitelist command adds user for whitelisted caller"
   assert.equal(captured.addedBy, "UWHITELISTED");
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Added <@U777> to deploy whitelist/);
+});
+
+test("registerCalypsoCommand whitelist command resolves @handle to user id", async () => {
+  let commandHandler;
+  const captured = {};
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true, source: "workspace_admin" }),
+    isWorkspaceAdminFn: async () => true,
+    addUserToDeployWhitelistFn: async (_pool, targetUserId, addedBy) => {
+      captured.targetUserId = targetUserId;
+      captured.addedBy = addedBy;
+      return { added: true };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "whitelist @travis", user_id: "UADMIN" },
+    client: {
+      users: {
+        list: async () => ({
+          members: [{ id: "U092UMU4T4Z", name: "travis", deleted: false }],
+          response_metadata: {},
+        }),
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(captured.targetUserId, "U092UMU4T4Z");
+  assert.equal(captured.addedBy, "UADMIN");
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Added <@U092UMU4T4Z> to deploy whitelist/);
+});
+
+test("registerCalypsoCommand whitelist command reports unresolved @handle", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true, source: "workspace_admin" }),
+    isWorkspaceAdminFn: async () => true,
+    addUserToDeployWhitelistFn: async () => {
+      throw new Error("should not be called for unresolved handle");
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "whitelist @travis", user_id: "UADMIN" },
+    client: {
+      users: {
+        list: async () => ({
+          members: [{ id: "U111", name: "someone-else", deleted: false }],
+          response_metadata: {},
+        }),
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Could not resolve `@travis`/);
+});
+
+test("registerCalypsoCommand whitelist command reports missing scope for @handle lookup", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true, source: "workspace_admin" }),
+    isWorkspaceAdminFn: async () => true,
+    addUserToDeployWhitelistFn: async () => {
+      throw new Error("should not be called when Slack user lookup is unauthorized");
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "whitelist @travis", user_id: "UADMIN" },
+    client: {
+      users: {
+        list: async () => {
+          const error = new Error("An API error occurred: missing_scope");
+          error.data = {
+            error: "missing_scope",
+            needed: "users:read",
+            provided: "commands,chat:write",
+          };
+          throw error;
+        },
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /missing_scope/);
+  assert.match(payload.text, /users:read/);
+  assert.match(payload.text, /\/calypso whitelist U123ABC/);
+});
+
+test("registerCalypsoCommand whitelist command returns usage for missing target user", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true, source: "workspace_admin" }),
+    isWorkspaceAdminFn: async () => true,
+    addUserToDeployWhitelistFn: async () => {
+      throw new Error("should not be called for invalid whitelist input");
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "whitelist", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.text, "Usage: `/calypso whitelist <@USER>`");
 });
 
 test("registerCalypsoCommand config command updates time format", async () => {
