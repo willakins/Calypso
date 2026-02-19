@@ -134,7 +134,7 @@ function loadConfig() {
     codeHostToken,
     codeHostCodexUserLogins,
     codeHostWebhookSecret,
-    port: readPortNumber("PORT", 3000),
+    port: readPortNumber("PORT", 3001),
     communicationBotToken,
     communicationAppToken,
     communicationWebhookUrl,

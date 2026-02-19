@@ -149,7 +149,7 @@ main() {
 
   load_environment_file
 
-  export PORT="${PORT:-3000}"
+  export PORT="${PORT:-3001}"
   export DATABASE_URL="${LONG_DATABASE_URL:-postgresql://calypso_user@127.0.0.1:${LONG_DB_PORT}/postgres}"
 
   ensure_postgres_cluster_exists

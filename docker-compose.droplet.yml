@@ -21,11 +21,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      PORT: ${PORT:-3001}
     depends_on:
       db:
         condition: service_healthy
     expose:
-      - "3000"
+      - "${PORT:-3001}"
 
   caddy:
     image: caddy:2
@@ -34,6 +36,7 @@ services:
       - app
     environment:
       CADDY_EMAIL: ${CADDY_EMAIL:-admin@example.com}
+      PORT: ${PORT:-3001}
     ports:
       - "80:80"
       - "443:443"

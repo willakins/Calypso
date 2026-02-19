@@ -227,7 +227,7 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.codeHostApiPageSize, 100);
       assert.equal(config.codeHostApiMaxPages, 100);
       assert.equal(config.codeHostApiUserAgent, "calypso-bot");
-      assert.equal(config.port, 3000);
+      assert.equal(config.port, 3001);
     },
   );
 });

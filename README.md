@@ -170,7 +170,7 @@ Required when `CODE_HOST_PROVIDER=github` or `CODE_HOST_PROVIDER=bitbucket`:
 
 Optional:
 
-- `PORT` (default `3000`)
+- `PORT` (default `3001`)
 - `POSTGRES_PASSWORD` (required when using `docker-compose.droplet.yml`)
 - `CADDY_EMAIL` (used by `Caddyfile.droplet` for TLS contact email)
 - `DEPLOY_TOKEN`
@@ -312,8 +312,8 @@ Provider support matrix:
 
 `PORT` (optional)
 
-- Local HTTP port for the webhook server and ngrok tunnel.
-- Default is `3000`; only set this if you need a different port.
+- HTTP port Calypso binds to (used by local runtime, ngrok tunnel, and Droplet Docker/Caddy stack).
+- Default is `3001`; only set this if you need a different port.
 
 `DEPLOY_TOKEN` (optional unless using `/calypso deploy prod` or `/calypso deploy staging`)
 
@@ -382,7 +382,7 @@ npm run start
 This local command starts:
 
 - Temporary Postgres at `.tmp/calypso-pg` (first run initializes it).
-- ngrok tunnel on `PORT` (default `3000`).
+- ngrok tunnel on `PORT` (default `3001`).
 - Calypso app process.
 
 4. Configure your code-host webhook to the printed ngrok URL:
@@ -428,7 +428,7 @@ Steps:
      - `CODE_HOST_MAIN_BRANCH`
    - Optional:
      - `BOT_NAME`
-     - `PORT` (defaults to `3000`)
+     - `PORT` (defaults to `3001`)
      - `CODE_HOST_TOKEN` (enables `/calypso sync` and scheduled backfill)
      - `DEPLOY_PROVIDER=digitalocean`
      - `DEPLOY_TOKEN`
@@ -461,6 +461,7 @@ sudo systemctl enable --now docker
 6. In `.env`, use a local Compose DB URL:
    - `POSTGRES_PASSWORD=<strong-password>`
    - `CADDY_EMAIL=you@yourdomain.com`
+   - `PORT=3001` (optional; change only if you want a different app/proxy port)
    - `DATABASE_URL=postgresql://calypso_user:<POSTGRES_PASSWORD>@db:5432/calypso`
 7. Update `Caddyfile.droplet`:
    - replace `calypso.example.com` with your domain

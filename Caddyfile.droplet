@@ -6,5 +6,5 @@
 # Replace with your real domain.
 calypso.example.com {
   encode zstd gzip
-  reverse_proxy app:3000
+  reverse_proxy app:{$PORT:3001}
 }
