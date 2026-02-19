@@ -10,7 +10,7 @@ const TIME_ZONE_ARGUMENT_PATTERN = /^timezone:(.+)$/i;
 const REVIEW_RECAP_CHANNEL_ARGUMENT_PATTERN = /^review-recap-channel:(.+)$/i;
 const REVIEW_RECAP_RECENCY_ARGUMENT_PATTERN = /^review-recap-recency:(\d+)([dw])$/i;
 const REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN =
-  /^review-recap-schedule:(mon|tue|wed|thu|fri|sat|sun)@([01]\d|2[0-3]):([0-5]\d)$/i;
+  /^review-recap-schedule:(daily|mon|tue|wed|thu|fri|sat|sun)@([01]\d|2[0-3]):([0-5]\d)$/i;
 const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "communication-provider",
   Object.values(COMMUNICATION_PROVIDERS),
@@ -326,7 +326,7 @@ function buildConfigUsageMessage() {
     "PR review recap setup:",
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
-    "`/calypso config review-recap-schedule:<weekday>@HH:MM`",
+    "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM`",
     "",
     "Platform provider setup:",
     "`/calypso config communication-provider:slack|microsoft_teams`",

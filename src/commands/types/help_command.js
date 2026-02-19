@@ -75,10 +75,10 @@ function buildReviewingHelpText(botName) {
     "`/calypso reviews recent <day|week|month>` Explicit recent-window form.",
     "`/calypso sync` Run immediate sync with code host.",
     "",
-    "*Weekly Review Recap*",
+    "*Review Recap*",
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
-    "`/calypso config review-recap-schedule:<weekday>@HH:MM`",
+    "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM`",
     "`/calypso config timezone:America/New_York` (shared timezone setting)",
     "Defaults: `1w`, `mon@09:00`, `America/New_York`.",
   ].join("\n");
@@ -100,7 +100,7 @@ function buildConfigHelpText(botName) {
     "*Review Recap Config*",
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
-    "`/calypso config review-recap-schedule:<weekday>@HH:MM`",
+    "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM`",
     "`/calypso config timezone:America/New_York` Sets recap timezone too.",
   ].join("\n");
 }

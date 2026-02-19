@@ -21,7 +21,7 @@ blocks production deploys when untested changes exist, and posts scheduled revie
   - `/calypso config deploy-provider:digitalocean|aws`
   - `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
   - `/calypso config review-recap-recency:<Nd|Nw>`
-  - `/calypso config review-recap-schedule:<weekday>@HH:MM`
+  - `/calypso config review-recap-schedule:<daily|weekday>@HH:MM`
   - `/calypso sync`
   - `/calypso status`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
@@ -506,9 +506,9 @@ Rules:
 
 - Sets recap lookback window (for example `1w`, `2w`, `2d`).
 
-`/calypso config review-recap-schedule:<weekday>@HH:MM`
+`/calypso config review-recap-schedule:<daily|weekday>@HH:MM`
 
-- Sets weekly send slot using weekday + 24h clock (for example `mon@09:00`, `tue@10:15`).
+- Sets recap send slot using `daily` or weekday + 24h clock (for example `daily@09:00`, `mon@09:00`, `tue@10:15`).
 
 `/calypso config timezone:America/New_York`
 
@@ -588,10 +588,10 @@ Rules:
 - Bypasses blocker checks and triggers deploy anyway.
 - Still requires deploy configuration (`DEPLOY_TOKEN`, `DEPLOY_PROD_APP_ID`).
 
-## Weekly Review Recap
+## Review Recap
 
 - Runs as a background scheduler in the app runtime.
-- Checks once per minute for configured recap slot.
+- Checks once per minute for configured recap slot (`daily@HH:MM` or `<weekday>@HH:MM`).
 - Posts in-channel message in configured `review-recap-channel` containing:
   - Header: `Pull Requests waiting on review in the last {recency}`
   - PR rows with title, author login, and `opened for review` timestamp.

@@ -8,6 +8,7 @@ const { formatReviewRecapResponse } = require("../util/format");
 const DEFAULT_TICK_INTERVAL_MS = 60_000;
 const SCHEDULE_LOOKBACK_MINUTES = 8 * 24 * 60;
 const MAX_POST_ATTEMPTS_PER_SLOT = 3;
+const DAILY_SCHEDULE_WEEKDAY = "daily";
 
 function startReviewRecapScheduler(options) {
   const {
@@ -326,7 +327,10 @@ function findMostRecentScheduledSlot({ now, scheduleWeekday, scheduleTime, timeZ
 
     const candidateWeekday = normalizeShortWeekday(candidateParts.weekday);
     if (
-      candidateWeekday === normalizedScheduleWeekday &&
+      (
+        normalizedScheduleWeekday === DAILY_SCHEDULE_WEEKDAY ||
+        candidateWeekday === normalizedScheduleWeekday
+      ) &&
       Number(candidateParts.hour) === scheduledHour &&
       Number(candidateParts.minute) === scheduledMinute
     ) {

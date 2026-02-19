@@ -55,7 +55,7 @@ test("handleCalypsoCommand returns config topic help", () => {
   assert.match(result.responseText, /\*Calypso Config Help\*/);
   assert.match(result.responseText, /\/calypso config time-format:human\|long/);
   assert.match(result.responseText, /\/calypso config communication-provider:slack\|microsoft_teams/);
-  assert.match(result.responseText, /\/calypso config review-recap-schedule:<weekday>@HH:MM/);
+  assert.match(result.responseText, /\/calypso config review-recap-schedule:<daily\|weekday>@HH:MM/);
 });
 
 test("handleCalypsoCommand rejects unknown help topic", () => {
@@ -250,6 +250,17 @@ test("handleCalypsoCommand routes config review recap schedule input", () => {
   assert.equal(result.action, "config_review_recap_schedule");
   assert.equal(result.scheduleWeekday, "tue");
   assert.equal(result.scheduleTime, "10:15");
+});
+
+test("handleCalypsoCommand routes config review recap daily schedule input", () => {
+  const result = handleCalypsoCommand({
+    text: "config review-recap-schedule:daily@09:00",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_review_recap_schedule");
+  assert.equal(result.scheduleWeekday, "daily");
+  assert.equal(result.scheduleTime, "09:00");
 });
 
 test("handleCalypsoCommand routes config communication provider input", () => {
@@ -1946,6 +1957,42 @@ test("registerCalypsoCommand config command updates review recap schedule", asyn
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].scheduleWeekday, "tue");
   assert.equal(capturedCalls[0].scheduleTime, "10:15");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates daily review recap schedule", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapScheduleFn: async (pool, scheduleWeekday, scheduleTime, updatedBy) => {
+      capturedCalls.push({ pool, scheduleWeekday, scheduleTime, updatedBy });
+      return { schedule_weekday: scheduleWeekday, schedule_time: scheduleTime, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-schedule:daily@09:00", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated review recap schedule to `daily@09:00`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].scheduleWeekday, "daily");
+  assert.equal(capturedCalls[0].scheduleTime, "09:00");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 

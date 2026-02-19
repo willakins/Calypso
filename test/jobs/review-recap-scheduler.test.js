@@ -19,6 +19,19 @@ test("findMostRecentScheduledSlot resolves monday 9am America/New_York slot", ()
   assert.equal(slot.toISOString(), "2026-02-16T14:00:00.000Z");
 });
 
+test("findMostRecentScheduledSlot resolves daily 9am America/New_York slot", () => {
+  const slot = findMostRecentScheduledSlot({
+    now: new Date("2026-02-17T14:05:00.000Z"),
+    scheduleWeekday: "daily",
+    scheduleTime: "09:00",
+    timeZone: "America/New_York",
+    lookbackMinutes: 60,
+  });
+
+  assert.ok(slot);
+  assert.equal(slot.toISOString(), "2026-02-17T14:00:00.000Z");
+});
+
 test("runReviewRecapSchedulerTick posts and marks slot when due", async () => {
   const calls = {
     list: [],

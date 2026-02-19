@@ -586,6 +586,31 @@ test("getReviewRecapConfig returns configured values", async () => {
   assert.equal(result.lastSentSlotAt, "2026-02-16T17:00:00.000Z");
 });
 
+test("getReviewRecapConfig supports daily schedule weekday", async () => {
+  const pool = {
+    async query() {
+      return {
+        rows: [
+          {
+            target_channel_id: "C123",
+            recency_value: 1,
+            recency_unit: "w",
+            schedule_weekday: "daily",
+            schedule_time: "09:00",
+            timezone: "America/New_York",
+            last_sent_slot_at: null,
+          },
+        ],
+      };
+    },
+  };
+
+  const result = await getReviewRecapConfig(pool);
+
+  assert.equal(result.scheduleWeekday, "daily");
+  assert.equal(result.scheduleTime, "09:00");
+});
+
 test("getRuntimeProviderConfig returns defaults when singleton row is missing", async () => {
   const pool = {
     async query() {
@@ -709,6 +734,27 @@ test("setReviewRecapSchedule upserts schedule", async () => {
   assert.equal(captured.params[4], "10:15");
   assert.equal(result.schedule_weekday, "tue");
   assert.equal(result.schedule_time, "10:15");
+});
+
+test("setReviewRecapSchedule accepts daily schedule keyword", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ schedule_weekday: "daily", schedule_time: "09:00", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapSchedule(pool, "daily", "09:00", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.equal(captured.params[3], "daily");
+  assert.equal(captured.params[4], "09:00");
+  assert.equal(result.schedule_weekday, "daily");
+  assert.equal(result.schedule_time, "09:00");
 });
 
 test("setReviewRecapSchedule rejects invalid time", async () => {

@@ -16,6 +16,7 @@ const REVIEW_RECAP_RECENCY_UNITS = Object.freeze({
   week: "w",
 });
 const REVIEW_RECAP_WEEKDAYS = Object.freeze({
+  daily: "daily",
   mon: "mon",
   tue: "tue",
   wed: "wed",
