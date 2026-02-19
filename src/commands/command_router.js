@@ -23,6 +23,7 @@ function registerCalypsoCommand(app, options = {}) {
 
       const executionResult = await calypsoCommandService.execute(parsedCommand, {
         userId,
+        callerUserName: resolveCommandUserName(command),
         communicationClient: client,
         currentChannelId: resolveCommandChannelId(command),
         currentChannelName: resolveCommandChannelName(command),
@@ -101,6 +102,14 @@ function resolveCommandUserId(command) {
   }
 
   return command.userId || command.user_id || null;
+}
+
+function resolveCommandUserName(command) {
+  if (!command) {
+    return null;
+  }
+
+  return command.userName || command.user_name || null;
 }
 
 function resolveCommandChannelId(command) {

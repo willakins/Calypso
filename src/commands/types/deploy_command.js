@@ -107,6 +107,7 @@ class DeployCommand extends BaseCalypsoCommand {
 
     try {
       const deployResult = await runtime.triggerProdDeployFn(deployConfiguration);
+      const deploymentTriggeredBy = await this.resolveDeploymentTriggeredBy(runtime);
       const deployProvider =
         deployResult.deployProvider || deployConfiguration.deployProvider || "digitalocean";
       let deploymentSummary = {
@@ -129,7 +130,7 @@ class DeployCommand extends BaseCalypsoCommand {
         Boolean(deploymentSummary.externalDeploymentId);
       if (isProductionDeploy && forceDeployment && blockingPullRequestCount > 0) {
         return this.buildExecutionResult(
-          `Force deploy to prod is in progress (id: ${deploymentId}). Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+          `Force deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
           this.buildDeploymentExecutionFields({
             externalDeploymentId: deploymentSummary.externalDeploymentId,
             deployProvider,
@@ -141,7 +142,7 @@ class DeployCommand extends BaseCalypsoCommand {
 
       if (!isProductionDeploy) {
         return this.buildExecutionResult(
-          `Deploy to staging is in progress (id: ${deploymentId}).`,
+          `Deploy to staging is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}.`,
           this.buildDeploymentExecutionFields({
             externalDeploymentId: deploymentSummary.externalDeploymentId,
             deployProvider,
@@ -152,7 +153,7 @@ class DeployCommand extends BaseCalypsoCommand {
       }
 
       return this.buildExecutionResult(
-        `Deploy to prod is in progress (id: ${deploymentId}). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+        `Deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
         this.buildDeploymentExecutionFields({
           externalDeploymentId: deploymentSummary.externalDeploymentId,
           deployProvider,
@@ -251,6 +252,36 @@ class DeployCommand extends BaseCalypsoCommand {
       deployTargetEnvironment: deployConfiguration.deployTargetEnvironment,
       deployProductionAppId: deployConfiguration.deployProductionAppId,
     };
+  }
+
+  async resolveDeploymentTriggeredBy(runtime) {
+    const callerUserName = String(runtime.callerUserName || "").trim();
+    if (callerUserName !== "") {
+      return callerUserName;
+    }
+
+    const callerUserId = String(runtime.userId || "").trim();
+    const resolveUserDisplayNameFn = runtime.resolveUserDisplayNameFn;
+    if (callerUserId !== "" && typeof resolveUserDisplayNameFn === "function") {
+      try {
+        const displayName = await resolveUserDisplayNameFn(
+          runtime.communicationClient,
+          callerUserId,
+        );
+        const normalizedDisplayName = String(displayName || "").trim();
+        if (normalizedDisplayName !== "") {
+          return normalizedDisplayName;
+        }
+      } catch (_error) {
+        // Ignore lookup failures and fall back to user id.
+      }
+    }
+
+    if (callerUserId !== "") {
+      return callerUserId;
+    }
+
+    return "unknown user";
   }
 
   async recordDeploymentAndMarkPullRequests({
