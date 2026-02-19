@@ -21,7 +21,7 @@ blocks production deploys when untested changes exist, and posts scheduled revie
   - `/calypso config deploy-provider:digitalocean|aws`
   - `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
   - `/calypso config review-recap-recency:<Nd|Nw>`
-  - `/calypso config review-recap-schedule:<daily|weekday>@HH:MM`
+  - `/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`
   - `/calypso sync`
   - `/calypso status`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
@@ -527,9 +527,10 @@ Rules:
 
 - Sets recap lookback window (for example `1w`, `2w`, `2d`).
 
-`/calypso config review-recap-schedule:<daily|weekday>@HH:MM`
+`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`
 
-- Sets recap send slot using `daily` or weekday + 24h clock (for example `daily@09:00`, `mon@09:00`, `tue@10:15`).
+- Sets one or more recap send slots using `daily` or weekday + 24h clock.
+- Examples: `daily@09:00`, `daily@09:00,17:00`, `mon@09:00,17:30`, `tue@10:15`.
 
 `/calypso config timezone:America/New_York`
 

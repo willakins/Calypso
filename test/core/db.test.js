@@ -787,6 +787,27 @@ test("setReviewRecapSchedule accepts daily schedule keyword", async () => {
   assert.equal(result.schedule_time, "09:00");
 });
 
+test("setReviewRecapSchedule accepts and normalizes multiple schedule times", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ schedule_weekday: "daily", schedule_time: "09:00,17:00", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapSchedule(pool, "daily", "17:00,09:00,17:00", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.equal(captured.params[3], "daily");
+  assert.equal(captured.params[4], "09:00,17:00");
+  assert.equal(result.schedule_weekday, "daily");
+  assert.equal(result.schedule_time, "09:00,17:00");
+});
+
 test("setReviewRecapSchedule rejects invalid time", async () => {
   const pool = {
     async query() {

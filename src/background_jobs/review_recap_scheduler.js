@@ -304,14 +304,8 @@ function computeSinceTimestamp({ now, recencyValue, recencyUnit }) {
 
 function findMostRecentScheduledSlot({ now, scheduleWeekday, scheduleTime, timeZone, lookbackMinutes }) {
   const normalizedScheduleWeekday = String(scheduleWeekday || "").toLowerCase().trim();
-  const scheduleTimeParts = String(scheduleTime || "").split(":");
-  if (scheduleTimeParts.length !== 2) {
-    return null;
-  }
-
-  const scheduledHour = Number(scheduleTimeParts[0]);
-  const scheduledMinute = Number(scheduleTimeParts[1]);
-  if (!Number.isInteger(scheduledHour) || !Number.isInteger(scheduledMinute)) {
+  const scheduledMinuteOfDaySet = parseScheduledMinuteOfDaySet(scheduleTime);
+  if (scheduledMinuteOfDaySet.size === 0) {
     return null;
   }
 
@@ -331,8 +325,9 @@ function findMostRecentScheduledSlot({ now, scheduleWeekday, scheduleTime, timeZ
         normalizedScheduleWeekday === DAILY_SCHEDULE_WEEKDAY ||
         candidateWeekday === normalizedScheduleWeekday
       ) &&
-      Number(candidateParts.hour) === scheduledHour &&
-      Number(candidateParts.minute) === scheduledMinute
+      scheduledMinuteOfDaySet.has(
+        Number(candidateParts.hour) * 60 + Number(candidateParts.minute),
+      )
     ) {
       return candidateSlot;
     }
@@ -381,6 +376,27 @@ function normalizeShortWeekday(shortWeekday) {
   };
 
   return weekdayMap[normalizedWeekday] || null;
+}
+
+function parseScheduledMinuteOfDaySet(scheduleTime) {
+  const scheduleTimes = String(scheduleTime || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const scheduleMinuteSet = new Set();
+
+  for (const timePart of scheduleTimes) {
+    const timeMatch = timePart.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+    if (!timeMatch) {
+      return new Set();
+    }
+
+    const hour = Number(timeMatch[1]);
+    const minute = Number(timeMatch[2]);
+    scheduleMinuteSet.add(hour * 60 + minute);
+  }
+
+  return scheduleMinuteSet;
 }
 
 module.exports = {

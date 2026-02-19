@@ -10,7 +10,8 @@ const TIME_ZONE_ARGUMENT_PATTERN = /^timezone:(.+)$/i;
 const REVIEW_RECAP_CHANNEL_ARGUMENT_PATTERN = /^review-recap-channel:(.+)$/i;
 const REVIEW_RECAP_RECENCY_ARGUMENT_PATTERN = /^review-recap-recency:(\d+)([dw])$/i;
 const REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN =
-  /^review-recap-schedule:(daily|mon|tue|wed|thu|fri|sat|sun)@([01]\d|2[0-3]):([0-5]\d)$/i;
+  /^review-recap-schedule:(daily|mon|tue|wed|thu|fri|sat|sun)@(.+)$/i;
+const REVIEW_RECAP_SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "communication-provider",
   Object.values(COMMUNICATION_PROVIDERS),
@@ -77,10 +78,15 @@ class ConfigCommand extends BaseCalypsoCommand {
 
     const recapScheduleMatch = argument.match(REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN);
     if (recapScheduleMatch) {
+      const normalizedScheduleTime = normalizeReviewRecapScheduleTimes(recapScheduleMatch[2]);
+      if (!normalizedScheduleTime) {
+        return this.buildRespondParsedCommand(buildConfigUsageMessage());
+      }
+
       return this.buildParsedCommand({
         action: "config_review_recap_schedule",
         scheduleWeekday: recapScheduleMatch[1].toLowerCase(),
-        scheduleTime: `${recapScheduleMatch[2]}:${recapScheduleMatch[3]}`,
+        scheduleTime: normalizedScheduleTime,
       });
     }
 
@@ -326,7 +332,7 @@ function buildConfigUsageMessage() {
     "PR review recap setup:",
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
-    "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM`",
+    "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
     "",
     "Platform provider setup:",
     "`/calypso config communication-provider:slack|microsoft_teams`",
@@ -334,6 +340,25 @@ function buildConfigUsageMessage() {
     "`/calypso config deploy-provider:digitalocean|aws`",
     "Defaults: `1w`, `mon@09:00`, timezone from `/calypso config timezone`.",
   ].join("\n");
+}
+
+function normalizeReviewRecapScheduleTimes(rawScheduleTimes) {
+  const scheduleTimeParts = String(rawScheduleTimes || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (scheduleTimeParts.length === 0) {
+    return null;
+  }
+
+  const uniqueScheduleTimes = [...new Set(scheduleTimeParts)];
+  for (const scheduleTime of uniqueScheduleTimes) {
+    if (!REVIEW_RECAP_SCHEDULE_TIME_PATTERN.test(scheduleTime)) {
+      return null;
+    }
+  }
+
+  return uniqueScheduleTimes.sort().join(",");
 }
 
 function buildProviderArgumentPattern(prefix, providers) {

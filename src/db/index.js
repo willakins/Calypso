@@ -973,10 +973,22 @@ function normalizeReviewScheduleWeekday(scheduleWeekday) {
 }
 
 function normalizeReviewScheduleTime(scheduleTime) {
-  const normalizedScheduleTime = String(scheduleTime || "").trim();
-  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(normalizedScheduleTime)
-    ? normalizedScheduleTime
-    : null;
+  const scheduleTimeParts = String(scheduleTime || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (scheduleTimeParts.length === 0) {
+    return null;
+  }
+
+  const uniqueScheduleTimes = [...new Set(scheduleTimeParts)];
+  for (const normalizedScheduleTime of uniqueScheduleTimes) {
+    if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(normalizedScheduleTime)) {
+      return null;
+    }
+  }
+
+  return uniqueScheduleTimes.sort().join(",");
 }
 
 function normalizeReviewRecapChannelId(targetChannelId) {
