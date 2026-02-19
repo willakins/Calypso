@@ -122,6 +122,7 @@ function buildDeployConfig(config) {
     deploymentTimeoutMs: config.deployTimeoutSeconds * 1000,
     deployToken: config.deployToken,
     deployProductionAppId: config.deployProductionAppId,
+    deployStagingAppId: config.deployStagingAppId,
     deployRegion: config.deployRegion,
     deployAccessKeyId: config.deployAccessKeyId,
     deploySecretAccessKey: config.deploySecretAccessKey,

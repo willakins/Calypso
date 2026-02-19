@@ -69,6 +69,7 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
       externalDeploymentId,
       {
         communicationClient,
+        deployConfig: executionResult.deployConfigOverrides || {},
         deployProvider: executionResult.deployProvider,
         userId,
       },

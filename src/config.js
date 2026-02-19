@@ -100,6 +100,7 @@ function loadConfig() {
   );
   const deployToken = readOptionalEnvironmentValue("DEPLOY_TOKEN");
   const deployProductionAppId = readOptionalEnvironmentValue("DEPLOY_PROD_APP_ID");
+  const deployStagingAppId = readOptionalEnvironmentValue("DEPLOY_STAGING_APP_ID");
   const deployRegion = readOptionalEnvironmentValue("DEPLOY_REGION") || DEFAULT_DEPLOY_REGION;
   const deployAccessKeyId = readOptionalEnvironmentValue("DEPLOY_ACCESS_KEY_ID");
   const deploySecretAccessKey = readOptionalEnvironmentValue("DEPLOY_SECRET_ACCESS_KEY");
@@ -116,6 +117,7 @@ function loadConfig() {
     deployTimeoutSeconds,
     deployToken,
     deployProductionAppId,
+    deployStagingAppId,
     deployRegion,
     deployAccessKeyId,
     deploySecretAccessKey,

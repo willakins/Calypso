@@ -166,6 +166,13 @@ test("handleCalypsoCommand routes deploy prod input", () => {
   assert.equal(result.action, "deploy_prod");
 });
 
+test("handleCalypsoCommand routes deploy staging input", () => {
+  const result = handleCalypsoCommand({ text: "deploy staging", user_id: "U123" });
+
+  assert.equal(result.action, "deploy_staging");
+  assert.equal(result.deployEnvironment, "staging");
+});
+
 test("handleCalypsoCommand routes deploy prod force input", () => {
   const result = handleCalypsoCommand({ text: "deploy prod force", user_id: "U123" });
 
@@ -177,7 +184,8 @@ test("handleCalypsoCommand rejects invalid deploy input", () => {
   const result = handleCalypsoCommand({ text: "deploy", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /Usage: `\/calypso deploy prod`/);
+  assert.match(result.responseText, /`\/calypso deploy staging`/);
+  assert.match(result.responseText, /`\/calypso deploy prod force`/);
 });
 
 test("handleCalypsoCommand routes whitelist command with mention", () => {
@@ -952,6 +960,101 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
 });
 
+test("registerCalypsoCommand triggers staging deploy without deploy-gate transaction", async () => {
+  let commandHandler;
+  let capturedDeployConfiguration;
+  const queryCalls = [];
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+  const pool = {
+    async query(sql) {
+      queryCalls.push(sql);
+      return { rows: [] };
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool,
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    triggerProdDeployFn: async (deployConfiguration) => {
+      capturedDeployConfiguration = deployConfiguration;
+      return { externalDeployId: "dep-stg-123" };
+    },
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id-prod",
+      deployStagingAppId: "app-id-staging",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy staging", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Deploy to staging is in progress \(id: dep-stg-123\)/);
+  assert.deepEqual(queryCalls, []);
+  assert.equal(capturedDeployConfiguration.deployTargetEnvironment, "staging");
+  assert.equal(capturedDeployConfiguration.deployProductionAppId, "app-id-staging");
+});
+
+test("registerCalypsoCommand sends staging deployment completion follow-up with staging config", async () => {
+  let commandHandler;
+  let completionWaitConfig;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    enableDeploymentCompletionNotifications: true,
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    triggerProdDeployFn: async () => ({ externalDeployId: "dep-stg-abc" }),
+    waitForProdDeployCompletionFn: async (deployConfig) => {
+      completionWaitConfig = deployConfig;
+      return { id: "dep-stg-abc", phase: "ACTIVE" };
+    },
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id-prod",
+      deployStagingAppId: "app-id-staging",
+      doDeploymentPollIntervalMs: 1,
+      doDeploymentTimeoutMs: 1000,
+    },
+  });
+
+  const responses = [];
+  await commandHandler({
+    command: { text: "deploy staging", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      responses.push(message);
+    },
+  });
+
+  assert.equal(responses.length, 2);
+  assert.equal(responses[0].response_type, "in_channel");
+  assert.match(responses[0].text, /Deploy to staging is in progress \(id: dep-stg-abc\)/);
+  assert.equal(responses[1].response_type, "in_channel");
+  assert.match(
+    responses[1].text,
+    /Deployment dep-stg-abc finished successfully with phase ACTIVE/,
+  );
+  assert.equal(completionWaitConfig.deployTargetEnvironment, "staging");
+  assert.equal(completionWaitConfig.deployProductionAppId, "app-id-staging");
+});
+
 test("registerCalypsoCommand sends deployment completion follow-up when enabled", async () => {
   let commandHandler;
   const app = {
@@ -1033,6 +1136,37 @@ test("registerCalypsoCommand returns deploy not configured when clear", async ()
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /deploy not configured/i);
+});
+
+test("registerCalypsoCommand returns staging deploy not configured when staging app id is missing", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id-prod",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy staging", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Deploy to staging is not configured/);
 });
 
 test("registerCalypsoCommand triggers deploy and records deployment when clear and configured", async () => {

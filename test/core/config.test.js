@@ -69,6 +69,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       DEPLOY_TIMEOUT_SECONDS: "900",
       DEPLOY_TOKEN: "  do-token  ",
       DEPLOY_PROD_APP_ID: "  app-id  ",
+      DEPLOY_STAGING_APP_ID: "  staging-app-id  ",
       DEPLOY_REGION: " us-west-2 ",
       DEPLOY_ACCESS_KEY_ID: " AKIA123 ",
       DEPLOY_SECRET_ACCESS_KEY: " secret-123 ",
@@ -106,6 +107,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.deployTimeoutSeconds, 900);
       assert.equal(config.deployToken, "do-token");
       assert.equal(config.deployProductionAppId, "app-id");
+      assert.equal(config.deployStagingAppId, "staging-app-id");
       assert.equal(config.deployRegion, "us-west-2");
       assert.equal(config.deployAccessKeyId, "AKIA123");
       assert.equal(config.deploySecretAccessKey, "secret-123");
@@ -193,6 +195,7 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       DEPLOY_TIMEOUT_SECONDS: undefined,
       DEPLOY_TOKEN: undefined,
       DEPLOY_PROD_APP_ID: undefined,
+      DEPLOY_STAGING_APP_ID: undefined,
       DEPLOY_REGION: undefined,
       DEPLOY_ACCESS_KEY_ID: undefined,
       DEPLOY_SECRET_ACCESS_KEY: undefined,
@@ -207,6 +210,7 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.deployTimeoutSeconds, 1200);
       assert.equal(config.deployToken, "");
       assert.equal(config.deployProductionAppId, "");
+      assert.equal(config.deployStagingAppId, "");
       assert.equal(config.deployRegion, "us-east-1");
       assert.equal(config.deployAccessKeyId, "");
       assert.equal(config.deploySecretAccessKey, "");
@@ -345,6 +349,7 @@ function withEnvironment(overrides, fn) {
     "DEPLOY_TIMEOUT_SECONDS",
     "DEPLOY_TOKEN",
     "DEPLOY_PROD_APP_ID",
+    "DEPLOY_STAGING_APP_ID",
     "DEPLOY_REGION",
     "DEPLOY_ACCESS_KEY_ID",
     "DEPLOY_SECRET_ACCESS_KEY",

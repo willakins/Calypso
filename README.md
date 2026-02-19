@@ -26,10 +26,12 @@ blocks production deploys when untested changes exist, and posts scheduled revie
   - `/calypso status`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
   - `/calypso tested <PR_NUMBER>`
+  - `/calypso deploy staging`
   - `/calypso deploy prod`
 - Enforces deploy blocking rules:
   - A blocker is any PR with `merged_at > last_prod_deploy_at` and `status` not in `tested`, `deployed`.
 - Optionally triggers deploy-platform production deploy when gate is clear.
+- Optionally triggers staging deploy directly when staging app/pipeline is configured.
 - Runtime display config is per communication user (defaults: time format `human`, timezone `America/New_York`).
 - Review recap schedule config is workspace-wide (defaults: Monday 9:00 AM `America/New_York`, recency `1w`).
 
@@ -173,6 +175,7 @@ Optional:
 - `CADDY_EMAIL` (used by `Caddyfile.droplet` for TLS contact email)
 - `DEPLOY_TOKEN`
 - `DEPLOY_PROD_APP_ID`
+- `DEPLOY_STAGING_APP_ID`
 - `DEPLOY_POLL_INTERVAL_SECONDS` (default `10`)
 - `DEPLOY_TIMEOUT_SECONDS` (default `1200`)
 - `CODE_HOST_TOKEN` (recommended for daily open-PR reconciliation)
@@ -312,7 +315,7 @@ Provider support matrix:
 - Local HTTP port for the webhook server and ngrok tunnel.
 - Default is `3000`; only set this if you need a different port.
 
-`DEPLOY_TOKEN` (optional unless using `/calypso deploy prod`)
+`DEPLOY_TOKEN` (optional unless using `/calypso deploy prod` or `/calypso deploy staging`)
 
 - DigitalOcean -> `API` -> `Tokens/Keys` -> generate personal access token.
 - Recommended custom scopes for this app-deploy flow:
@@ -323,7 +326,12 @@ Provider support matrix:
 - DigitalOcean App Platform app UUID.
 - Find it with:
   - `doctl apps list --format ID,Spec.Name`
-- Safe rollout: set this to a staging app first.
+
+`DEPLOY_STAGING_APP_ID` (optional unless using `/calypso deploy staging`)
+
+- DigitalOcean App Platform staging app UUID (or AWS staging pipeline name).
+- Find it with:
+  - `doctl apps list --format ID,Spec.Name`
 
 `DEPLOY_POLL_INTERVAL_SECONDS` (optional)
 
@@ -425,6 +433,7 @@ Steps:
      - `DEPLOY_PROVIDER=digitalocean`
      - `DEPLOY_TOKEN`
      - `DEPLOY_PROD_APP_ID`
+     - `DEPLOY_STAGING_APP_ID`
 6. Configure App health check path to `/healthz`.
 7. Deploy the app.
 8. Set webhook URL to `https://<your-app-domain>/codehost/webhook`.
@@ -604,6 +613,14 @@ Rules:
   - does not write deployment row
   - does not mark PRs deployed
 - After trigger, Calypso sends a follow-up message when DigitalOcean finishes the deployment.
+
+`/calypso deploy staging`
+
+- Access restricted to workspace admins and whitelisted users.
+- Triggers deployment using `DEPLOY_STAGING_APP_ID`.
+- Does not run prod blocker checks.
+- Does not mark PRs as deployed.
+- Sends a deployment-completion follow-up when provider returns an external deployment id.
 
 `/calypso deploy prod force` (or `/calypso deploy prod forced`)
 
