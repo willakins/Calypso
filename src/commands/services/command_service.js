@@ -94,6 +94,7 @@ function createDefaultDependencies() {
     readTimeFormatPreferenceFn: readTimeFormatPreference,
     readTimeZonePreferenceFn: readTimeZonePreference,
     resolveUserDisplayNameFn: resolveUserDisplayNameFromCommunicationClient,
+    resolveCurrentChannelTopicFn: resolveCurrentChannelTopicFromCommunicationClient,
     resolveDeployAccessFn: resolveDeployAccess,
     runOpenPullRequestSyncNowFn: null,
     setConfiguredTimeFormatFn: setConfiguredTimeFormat,
@@ -170,6 +171,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.readTimeZonePreferenceFn || defaultDependencies.readTimeZonePreferenceFn,
     resolveUserDisplayNameFn:
       mergedOptions.resolveUserDisplayNameFn || defaultDependencies.resolveUserDisplayNameFn,
+    resolveCurrentChannelTopicFn:
+      mergedOptions.resolveCurrentChannelTopicFn ||
+      defaultDependencies.resolveCurrentChannelTopicFn,
     resolveDeployAccessFn:
       mergedOptions.resolveDeployAccessFn || defaultDependencies.resolveDeployAccessFn,
     runOpenPullRequestSyncNowFn:
@@ -323,6 +327,22 @@ async function resolveUserDisplayNameFromCommunicationClient(communicationClient
     const user = response.user || {};
     const profile = user.profile || {};
     return profile.display_name || profile.real_name || user.name || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function resolveCurrentChannelTopicFromCommunicationClient(runtimeContext) {
+  const channelId = String(runtimeContext.currentChannelId || "").trim();
+  const conversationsApi = runtimeContext.communicationClient?.conversations;
+  if (channelId === "" || !conversationsApi || typeof conversationsApi.info !== "function") {
+    return null;
+  }
+
+  try {
+    const response = await conversationsApi.info({ channel: channelId });
+    const topic = response?.channel?.topic?.value;
+    return typeof topic === "string" ? topic : null;
   } catch (_error) {
     return null;
   }

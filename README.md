@@ -605,6 +605,7 @@ Rules:
 
 - Blocks when untested blockers exist.
 - Access restricted to workspace admins and whitelisted users.
+- Blocks when channel topic marks production as red.
 - If no blockers and DigitalOcean env vars missing, returns "deploy not configured".
 - If configured and deploy succeeds:
   - inserts a `deployments` row
@@ -618,6 +619,7 @@ Rules:
 
 - Access restricted to workspace admins and whitelisted users.
 - Triggers deployment using `DEPLOY_STAGING_APP_ID`.
+- Blocks when channel topic marks staging as red.
 - Does not run prod blocker checks.
 - Does not mark PRs as deployed.
 - Sends a deployment-completion follow-up when provider returns an external deployment id.

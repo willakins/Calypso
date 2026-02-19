@@ -57,6 +57,13 @@ class DeployCommand extends BaseCalypsoCommand {
     const deployEnvironment = this.resolveDeployEnvironment(parsedCommand);
     const isProductionDeploy = deployEnvironment === "prod";
     const forceDeployment = Boolean(parsedCommand.forceDeployment);
+    const channelTopicGuardDecision = await this.evaluateChannelTopicGuard({
+      runtime,
+      deployEnvironment,
+    });
+    if (!channelTopicGuardDecision.isAllowed) {
+      return this.buildExecutionResult(channelTopicGuardDecision.reasonText);
+    }
     let deployGateState = {
       blockingPullRequests: [],
       lastProductionDeploymentAt: null,
@@ -201,6 +208,31 @@ class DeployCommand extends BaseCalypsoCommand {
     return "prod";
   }
 
+  async evaluateChannelTopicGuard({ runtime, deployEnvironment }) {
+    const resolveCurrentChannelTopicFn = runtime.resolveCurrentChannelTopicFn;
+    if (typeof resolveCurrentChannelTopicFn !== "function") {
+      return { isAllowed: true };
+    }
+
+    const channelTopic = await resolveCurrentChannelTopicFn(runtime);
+    if (typeof channelTopic !== "string" || channelTopic.trim() === "") {
+      return { isAllowed: true };
+    }
+
+    const topicStatus = readDeployAvailabilityFromTopic(channelTopic, deployEnvironment);
+    if (topicStatus !== "blocked") {
+      return { isAllowed: true };
+    }
+
+    return {
+      isAllowed: false,
+      reasonText: [
+        `Cannot deploy to ${deployEnvironment} from this channel right now.`,
+        "Channel topic indicates deploy is not allowed for that environment (red status).",
+      ].join(" "),
+    };
+  }
+
   resolveDeployConfiguration(deployConfig = {}, deployEnvironment = "prod") {
     const deployProductionAppId = deployConfig.deployProductionAppId || deployConfig.doAppIdProd;
     const deployStagingAppId = deployConfig.deployStagingAppId || deployConfig.doAppIdStaging;
@@ -304,6 +336,45 @@ class DeployCommand extends BaseCalypsoCommand {
       shouldNotifyDeploymentCompletion,
     };
   }
+}
+
+function readDeployAvailabilityFromTopic(topicText, deployEnvironment) {
+  const rawTopic = String(topicText || "");
+  const segment = readEnvironmentTopicSegment(rawTopic, deployEnvironment);
+  if (!segment) {
+    return "unknown";
+  }
+
+  const normalizedSegment = segment.toLowerCase();
+  const hasRedStatus = [":red_circle:", ":large_red_circle:", "🔴"].some((token) =>
+    normalizedSegment.includes(token.toLowerCase()),
+  );
+  if (hasRedStatus) {
+    return "blocked";
+  }
+
+  const hasGreenStatus = [":green_circle:", ":large_green_circle:", "🟢"].some((token) =>
+    normalizedSegment.includes(token.toLowerCase()),
+  );
+  if (hasGreenStatus) {
+    return "allowed";
+  }
+
+  return "unknown";
+}
+
+function readEnvironmentTopicSegment(topicText, deployEnvironment) {
+  const normalizedEnvironment = String(deployEnvironment || "").toLowerCase();
+  const targetLabel =
+    normalizedEnvironment === "prod" ? "(?:prod|production)" : "(?:staging)";
+  const otherLabel =
+    normalizedEnvironment === "prod" ? "(?:staging)" : "(?:prod|production)";
+  const pattern = new RegExp(
+    `\\b${targetLabel}\\b\\s*:\\s*(.*?)(?=\\b${otherLabel}\\b\\s*:|$)`,
+    "i",
+  );
+  const match = String(topicText || "").match(pattern);
+  return match?.[1] ? String(match[1]).trim() : "";
 }
 
 module.exports = {

@@ -882,6 +882,105 @@ test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
   assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|croft-eng\/croft#12> \(untested\)/);
 });
 
+test("registerCalypsoCommand blocks prod deploy when channel topic marks production red", async () => {
+  let commandHandler;
+  let deployTriggered = false;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    triggerProdDeployFn: async () => {
+      deployTriggered = true;
+      return { externalDeployId: "dep-123" };
+    },
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id-prod",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy prod", user_id: "U123", channel_id: "CDEPLOY" },
+    client: {
+      conversations: {
+        info: async () => ({
+          channel: {
+            topic: {
+              value: "Production: :red_circle: Staging: :large_green_circle:",
+            },
+          },
+        }),
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Cannot deploy to prod from this channel right now/);
+  assert.match(payload.text, /Channel topic indicates deploy is not allowed/);
+  assert.equal(deployTriggered, false);
+});
+
+test("registerCalypsoCommand blocks staging deploy when channel topic marks staging red", async () => {
+  let commandHandler;
+  let deployTriggered = false;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    triggerProdDeployFn: async () => {
+      deployTriggered = true;
+      return { externalDeployId: "dep-123" };
+    },
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id-prod",
+      deployStagingAppId: "app-id-staging",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy staging", user_id: "U123", channel_id: "CDEPLOY" },
+    client: {
+      conversations: {
+        info: async () => ({
+          channel: {
+            topic: {
+              value: "Production: :large_green_circle: Staging: 🔴",
+            },
+          },
+        }),
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Cannot deploy to staging from this channel right now/);
+  assert.match(payload.text, /Channel topic indicates deploy is not allowed/);
+  assert.equal(deployTriggered, false);
+});
+
 test("registerCalypsoCommand denies deploy for non-admin, non-whitelisted user", async () => {
   let commandHandler;
 
