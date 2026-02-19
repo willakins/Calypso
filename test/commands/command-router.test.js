@@ -529,6 +529,8 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
         title: "Add observability",
         url: "https://github.com/croft-eng/croft/pull/55",
         author_login: "octocat",
+        is_draft: false,
+        review_state: "waiting",
         opened_for_review_at: "2026-02-13T22:00:17.000Z",
       },
     ],
@@ -549,6 +551,8 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
   assert.match(payload.text, /Open PRs waiting on review:/);
   assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/55\|croft-eng\/croft#55> - Add observability/);
   assert.match(payload.text, /created by octocat/);
+  assert.match(payload.text, /📝 Draft: No/);
+  assert.match(payload.text, /🤖 Codex Approved: No/);
   assert.match(payload.text, /opened for review on February 13th, 2026 at 5:00 PM EST/);
 });
 
@@ -569,6 +573,8 @@ test("registerCalypsoCommand filters waiting reviews by github user", async () =
         title: "One",
         url: "https://github.com/croft-eng/croft/pull/11",
         author_login: "octocat",
+        is_draft: false,
+        review_state: "waiting",
         opened_for_review_at: "2026-02-13T22:00:17.000Z",
       },
       {
@@ -577,6 +583,8 @@ test("registerCalypsoCommand filters waiting reviews by github user", async () =
         title: "Two",
         url: "https://github.com/croft-eng/croft/pull/12",
         author_login: "hubot",
+        is_draft: false,
+        review_state: "approved",
         opened_for_review_at: "2026-02-13T22:00:17.000Z",
       },
     ],

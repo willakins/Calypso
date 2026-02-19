@@ -107,6 +107,65 @@ test("listClosedPullRequests uses expected endpoint and query", async () => {
   );
 });
 
+test("isPullRequestCodexApproved returns true for codex +1 reaction", async () => {
+  let requestedUrl = "";
+  await withMockedFetch(
+    async (url) => {
+      requestedUrl = url;
+      return {
+        ok: true,
+        async json() {
+          return [
+            {
+              content: "+1",
+              user: { login: "chatgpt-codex-connector[bot]" },
+            },
+          ];
+        },
+      };
+    },
+    async () => {
+      const client = createGithubClient(buildClientOptions({
+        codexUserLogins: ["chatgpt-codex-connector[bot]"],
+        token: "ghp-token",
+      }));
+      const approved = await client.isPullRequestCodexApproved({
+        repositoryFullName: "croft-eng/croft",
+        prNumber: 77,
+      });
+
+      assert.equal(approved, true);
+      assert.match(requestedUrl, /\/repos\/croft-eng\/croft\/issues\/77\/reactions\?/);
+    },
+  );
+});
+
+test("isPullRequestCodexApproved returns false when codex +1 is missing", async () => {
+  await withMockedFetch(
+    async () => ({
+      ok: true,
+      async json() {
+        return [
+          { content: "heart", user: { login: "chatgpt-codex-connector[bot]" } },
+          { content: "+1", user: { login: "octocat" } },
+        ];
+      },
+    }),
+    async () => {
+      const client = createGithubClient(buildClientOptions({
+        codexUserLogins: ["chatgpt-codex-connector[bot]"],
+        token: "ghp-token",
+      }));
+      const approved = await client.isPullRequestCodexApproved({
+        repositoryFullName: "croft-eng/croft",
+        prNumber: 77,
+      });
+
+      assert.equal(approved, false);
+    },
+  );
+});
+
 test("github client throws details when API request fails", async () => {
   await withMockedFetch(
     async () => ({

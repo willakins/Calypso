@@ -176,7 +176,9 @@ Optional:
 - `DEPLOY_POLL_INTERVAL_SECONDS` (default `10`)
 - `DEPLOY_TIMEOUT_SECONDS` (default `1200`)
 - `CODE_HOST_TOKEN` (recommended for daily open-PR reconciliation)
+- `CODE_HOST_CODEX_USER_LOGINS` (default: `codex,codex[bot]`)
 - `CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS` (default `24`)
+- `CODEX_APPROVAL_POLL_INTERVAL_MINUTES` (default `5`)
 
 Provider support matrix:
 
@@ -289,10 +291,21 @@ Provider support matrix:
 - Minimum needed access for this repo: read pull requests.
 - Used only for scheduled read-only sync of open PR and review state.
 
+`CODE_HOST_CODEX_USER_LOGINS` (optional)
+
+- Comma-separated GitHub logins that count as "Codex approved" when they react 👍 to the PR description.
+- Default: `codex,codex[bot]`.
+- Example: `CODE_HOST_CODEX_USER_LOGINS=codex,openai-codex[bot]`
+
 `CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS` (optional)
 
 - How often Calypso reconciles open PR review state from GitHub API.
 - Default: `24`.
+
+`CODEX_APPROVAL_POLL_INTERVAL_MINUTES` (optional)
+
+- How often Calypso refreshes Codex 👍 approval from PR-description reactions.
+- Default: `5`.
 
 `PORT` (optional)
 
@@ -489,8 +502,16 @@ Rules:
 - Performs a full open-PR reconciliation for `CODE_HOST_REPOSITORY` + `CODE_HOST_MAIN_BRANCH`.
 - Frequency is controlled by `CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS` (default every 24 hours).
 - Requires `CODE_HOST_TOKEN`; without it, webhook-based tracking still works but no periodic backfill runs.
+- Reconciles Codex approval by checking current 👍 reactions on PR descriptions from configured `CODE_HOST_CODEX_USER_LOGINS`.
 - Upserts all currently open PR review-state rows and marks stale local open rows as `closed`.
 - Backfills merged PRs newer than last prod deploy into deploy-gating state as `untested` (without downgrading already `tested`/`deployed` rows).
+
+## Codex Approval Sync
+
+- Runs as a separate background scheduler in the app runtime.
+- Refreshes `codex_approved` using PR-description 👍 reactions from configured `CODE_HOST_CODEX_USER_LOGINS`.
+- Frequency is controlled by `CODEX_APPROVAL_POLL_INTERVAL_MINUTES` (default every 5 minutes).
+- Requires `CODE_HOST_TOKEN`.
 
 ## Slash Command Behavior
 

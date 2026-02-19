@@ -20,6 +20,7 @@ class GithubCodeHostPlatform extends BaseCodeHostPlatform {
       apiPageSize: this.config.codeHostApiPageSize || this.config.githubApiPageSize,
       apiUserAgent: this.config.codeHostApiUserAgent || this.config.githubApiUserAgent,
       apiVersion: this.config.codeHostApiVersion || this.config.githubApiVersion,
+      codexUserLogins: this.config.codeHostCodexUserLogins,
       token: codeHostToken,
     });
   }
@@ -31,6 +32,7 @@ class GithubCodeHostPlatform extends BaseCodeHostPlatform {
         mainBranch: this.config.codeHostMainBranch || this.config.githubMainBranch,
         repositoryFullName: this.config.codeHostRepository || this.config.githubRepo,
         webhookSecret: this.config.codeHostWebhookSecret || this.config.githubWebhookSecret,
+        codexUserLogins: this.config.codeHostCodexUserLogins,
       },
       paths: ["/codehost/webhook"],
     });

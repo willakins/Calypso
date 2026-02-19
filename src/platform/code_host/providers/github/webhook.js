@@ -1,4 +1,5 @@
 const {
+  updatePullRequestCodexApproval,
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntested,
@@ -24,6 +25,7 @@ function createGithubWebhookHandler(options) {
     upsertPullRequestAsUntestedFn = upsertPullRequestAsUntested,
     upsertOpenPullRequestReviewStateFn = upsertOpenPullRequestReviewState,
     updatePullRequestReviewSubmissionFn = updatePullRequestReviewSubmission,
+    updatePullRequestCodexApprovalFn = updatePullRequestCodexApproval,
   } = options;
   const githubSettings = readGithubSettings(options);
 
@@ -33,7 +35,8 @@ function createGithubWebhookHandler(options) {
     isRequestSignatureValid,
     readEventName: readGithubEventName,
     isSupportedEvent: isSupportedGithubWebhookEvent,
-    isPullRequestForTrackedMain: (payload) => isPullRequestForTrackedMain(payload, githubSettings),
+    isPullRequestForTrackedMain: (payload, eventName) =>
+      isPullRequestForTrackedMain(payload, githubSettings, eventName),
     processEvent: ({ eventName, payload }) =>
       processWebhookEvent({
         eventName,
@@ -42,6 +45,8 @@ function createGithubWebhookHandler(options) {
         upsertPullRequestAsUntestedFn,
         upsertOpenPullRequestReviewStateFn,
         updatePullRequestReviewSubmissionFn,
+        updatePullRequestCodexApprovalFn,
+        githubSettings,
       }),
   });
 }
@@ -53,6 +58,8 @@ async function processWebhookEvent({
   upsertPullRequestAsUntestedFn,
   upsertOpenPullRequestReviewStateFn,
   updatePullRequestReviewSubmissionFn,
+  updatePullRequestCodexApprovalFn,
+  githubSettings,
 }) {
   if (eventName === "pull_request") {
     return processPullRequestWebhookEvent({
@@ -68,6 +75,15 @@ async function processWebhookEvent({
       payload,
       pool,
       updatePullRequestReviewSubmissionFn,
+    });
+  }
+
+  if (eventName === "reaction") {
+    return processReactionWebhookEvent({
+      payload,
+      pool,
+      updatePullRequestCodexApprovalFn,
+      codexUserLogins: githubSettings.codexUserLogins,
     });
   }
 
@@ -132,12 +148,32 @@ async function processPullRequestReviewWebhookEvent({
   };
 }
 
+async function processReactionWebhookEvent({
+  payload,
+  pool,
+  updatePullRequestCodexApprovalFn,
+  codexUserLogins,
+}) {
+  const mappedApprovalUpdate = mapCodexApprovalReactionPayload(payload, codexUserLogins);
+  if (!mappedApprovalUpdate) {
+    return { ignored: true };
+  }
+
+  const updatedReviewRecord = await updatePullRequestCodexApprovalFn(pool, mappedApprovalUpdate);
+  return {
+    review_tracking_updated: Boolean(updatedReviewRecord),
+    pr_number: mappedApprovalUpdate.prNumber,
+    codex_approved: updatedReviewRecord?.codex_approved || false,
+  };
+}
+
 function readGithubSettings(options) {
   if (options.github) {
     return {
       mainBranch: options.github.mainBranch,
       repositoryFullName: options.github.repositoryFullName,
       webhookSecret: options.github.webhookSecret,
+      codexUserLogins: normalizeCodexUserLogins(options.github.codexUserLogins),
     };
   }
 
@@ -146,6 +182,7 @@ function readGithubSettings(options) {
     mainBranch: legacyConfig.codeHostMainBranch || legacyConfig.githubMainBranch,
     repositoryFullName: legacyConfig.codeHostRepository || legacyConfig.githubRepo,
     webhookSecret: legacyConfig.codeHostWebhookSecret || legacyConfig.githubWebhookSecret,
+    codexUserLogins: normalizeCodexUserLogins(legacyConfig.codeHostCodexUserLogins),
   };
 }
 
@@ -162,10 +199,18 @@ function readGithubEventName(request) {
 }
 
 function isSupportedGithubWebhookEvent(eventName) {
-  return eventName === "pull_request" || eventName === "pull_request_review";
+  return eventName === "pull_request" || eventName === "pull_request_review" || eventName === "reaction";
 }
 
-function isPullRequestForTrackedMain(payload, githubSettings) {
+function isPullRequestForTrackedMain(payload, githubSettings, eventName) {
+  if (eventName === "reaction") {
+    return (
+      payload.repository &&
+      payload.repository.full_name === githubSettings.repositoryFullName &&
+      isPullRequestDescriptionReaction(payload)
+    );
+  }
+
   return (
     payload.pull_request &&
     payload.pull_request.base &&
@@ -300,6 +345,62 @@ function mapPullRequestReviewState(rawReviewState) {
   }
 
   return undefined;
+}
+
+function mapCodexApprovalReactionPayload(payload, codexUserLogins) {
+  if (!isPullRequestDescriptionReaction(payload)) {
+    return null;
+  }
+
+  const action = String(payload.action || "").toLowerCase().trim();
+  if (action !== "created" && action !== "deleted") {
+    return null;
+  }
+
+  const reactionContent = String(payload.reaction?.content || "").toLowerCase().trim();
+  if (reactionContent !== "+1") {
+    return null;
+  }
+
+  const actorLogin = String(payload.sender?.login || payload.reaction?.user?.login || "")
+    .toLowerCase()
+    .trim();
+  if (!actorLogin || !codexUserLogins.includes(actorLogin)) {
+    return null;
+  }
+
+  const repo = payload.repository?.full_name;
+  const prNumber = Number(payload.issue?.number);
+  if (!repo || !Number.isInteger(prNumber) || prNumber <= 0) {
+    return null;
+  }
+
+  return {
+    repo,
+    prNumber,
+    codexApproved: action === "created",
+  };
+}
+
+function isPullRequestDescriptionReaction(payload) {
+  return (
+    payload.issue &&
+    payload.issue.pull_request &&
+    !payload.comment
+  );
+}
+
+function normalizeCodexUserLogins(rawLogins) {
+  const rawValues = Array.isArray(rawLogins) ? rawLogins : [rawLogins];
+  const normalizedLogins = rawValues
+    .map((value) => String(value || "").toLowerCase().trim())
+    .filter(Boolean);
+
+  if (normalizedLogins.length > 0) {
+    return normalizedLogins;
+  }
+
+  return ["codex", "codex[bot]"];
 }
 
 module.exports = {

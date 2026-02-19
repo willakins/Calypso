@@ -11,6 +11,9 @@ const {
   runOpenPullRequestSyncTick,
   startOpenPullRequestSyncScheduler,
 } = require("./background_jobs/scheduler");
+const {
+  startCodexApprovalSyncScheduler,
+} = require("./background_jobs/codex_approval_scheduler");
 const { createCodeHostPlatform } = require("./platform/code_host/factory");
 const { createCommunicationPlatform } = require("./platform/communication/factory");
 const { createDeployPlatform } = require("./platform/deploy/factory");
@@ -151,6 +154,14 @@ function startBackgroundSchedulers(runtime) {
     pool: runtime.pool,
     repository: runtime.config.codeHostRepository,
     syncIntervalMs: runtime.config.codeHostOpenPrSyncIntervalHours * 60 * 60 * 1000,
+  });
+
+  runtime.codexApprovalSyncScheduler = startCodexApprovalSyncScheduler({
+    codeHostClient: runtime.codeHostSyncClient,
+    mainBranch: runtime.config.codeHostMainBranch,
+    pool: runtime.pool,
+    repository: runtime.config.codeHostRepository,
+    syncIntervalMs: runtime.config.codexApprovalPollIntervalMinutes * 60 * 1000,
   });
 }
 

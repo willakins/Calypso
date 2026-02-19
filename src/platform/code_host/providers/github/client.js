@@ -49,6 +49,22 @@ function createGithubClient(options) {
         },
       });
     },
+
+    async isPullRequestCodexApproved({ repositoryFullName, prNumber }) {
+      const repository = splitRepositoryFullName(repositoryFullName);
+      assertPositiveInteger(prNumber, "pull request number");
+
+      const reactions = await fetchAllPagesFromGithub({
+        clientSettings,
+        endpointPath: `/repos/${repository.owner}/${repository.name}/issues/${prNumber}/reactions`,
+      });
+
+      return reactions.some((reaction) => {
+        const reactionContent = String(reaction?.content || "").toLowerCase().trim();
+        const reactionUserLogin = String(reaction?.user?.login || "").toLowerCase().trim();
+        return reactionContent === "+1" && clientSettings.codexUserLogins.includes(reactionUserLogin);
+      });
+    },
   };
 }
 
@@ -68,7 +84,20 @@ function normalizeGithubClientSettings(options) {
     apiUserAgent: settings.apiUserAgent,
     apiPageSize: settings.apiPageSize,
     apiMaxPages: settings.apiMaxPages,
+    codexUserLogins: normalizeCodexUserLogins(settings.codexUserLogins),
   };
+}
+
+function normalizeCodexUserLogins(rawLogins) {
+  const rawValues = Array.isArray(rawLogins) ? rawLogins : [rawLogins];
+  const normalizedLogins = rawValues
+    .map((value) => String(value || "").toLowerCase().trim())
+    .filter(Boolean);
+  if (normalizedLogins.length > 0) {
+    return normalizedLogins;
+  }
+
+  return ["codex", "codex[bot]"];
 }
 
 async function fetchAllPagesFromGithub({ clientSettings, endpointPath, queryParameters = {} }) {

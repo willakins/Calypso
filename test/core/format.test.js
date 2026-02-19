@@ -113,6 +113,8 @@ test("formatReviewRecapResponse renders waiting pull request lines", () => {
         title: "Improve metrics",
         url: "https://github.com/croft-eng/croft/pull/71",
         author_login: "octocat",
+        is_draft: false,
+        review_state: "waiting",
         opened_for_review_at: "2026-02-13T22:00:17.000Z",
       },
       {
@@ -121,6 +123,9 @@ test("formatReviewRecapResponse renders waiting pull request lines", () => {
         title: null,
         url: null,
         author_login: "hubot",
+        is_draft: false,
+        review_state: "waiting",
+        codex_approved: true,
         opened_for_review_at: "2026-02-14T12:00:00.000Z",
       },
     ],
@@ -132,11 +137,11 @@ test("formatReviewRecapResponse renders waiting pull request lines", () => {
   assert.match(message, /^\*Pull Requests waiting on review in the last week\*/);
   assert.match(
     message,
-    /• <https:\/\/github.com\/croft-eng\/croft\/pull\/71\|croft-eng\/croft#71> - Improve metrics \| created by octocat \| opened for review on February 13th, 2026 at 5:00 PM EST/,
+    /• <https:\/\/github.com\/croft-eng\/croft\/pull\/71\|croft-eng\/croft#71> - Improve metrics \| created by octocat \| 📝 Draft: No \| 🤖 Codex Approved: No \| opened for review on February 13th, 2026 at 5:00 PM EST/,
   );
   assert.match(
     message,
-    /• croft-eng\/croft#72 - \(no title\) \| created by hubot \| opened for review on February 14th, 2026 at 7:00 AM EST/,
+    /• croft-eng\/croft#72 - \(no title\) \| created by hubot \| 📝 Draft: No \| 🤖 Codex Approved: Yes \| opened for review on February 14th, 2026 at 7:00 AM EST/,
   );
 });
 

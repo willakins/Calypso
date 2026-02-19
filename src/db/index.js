@@ -333,10 +333,11 @@ async function upsertOpenPullRequestReviewState(pool, pullRequestState) {
       closed_at,
       merged_at,
       last_reviewed_at,
+      codex_approved,
       updated_at
     )
     VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15, false), NOW()
     )
     ON CONFLICT (repo, pr_number)
     DO UPDATE SET
@@ -352,6 +353,10 @@ async function upsertOpenPullRequestReviewState(pool, pullRequestState) {
       closed_at = EXCLUDED.closed_at,
       merged_at = EXCLUDED.merged_at,
       last_reviewed_at = COALESCE(EXCLUDED.last_reviewed_at, open_pr_review_state.last_reviewed_at),
+      codex_approved = CASE
+        WHEN $15 IS NULL THEN open_pr_review_state.codex_approved
+        ELSE EXCLUDED.codex_approved
+      END,
       updated_at = NOW()
     RETURNING
       repo,
@@ -360,6 +365,7 @@ async function upsertOpenPullRequestReviewState(pool, pullRequestState) {
       author_login,
       lifecycle_state,
       review_state,
+      codex_approved,
       opened_for_review_at
   `;
   const queryValues = [
@@ -377,6 +383,7 @@ async function upsertOpenPullRequestReviewState(pool, pullRequestState) {
     pullRequestState.closedAt || null,
     pullRequestState.mergedAt || null,
     pullRequestState.lastReviewedAt || null,
+    pullRequestState.codexApproved ?? null,
   ];
   const result = await pool.query(query, queryValues);
   return result.rows[0];
@@ -410,6 +417,25 @@ async function updatePullRequestReviewSubmission(pool, reviewStateUpdate) {
   return result.rows[0] || null;
 }
 
+async function updatePullRequestCodexApproval(pool, approvalUpdate) {
+  const query = `
+    UPDATE open_pr_review_state
+    SET codex_approved = $3,
+        updated_at = NOW()
+    WHERE repo = $1
+      AND pr_number = $2
+      AND lifecycle_state = 'open'
+    RETURNING repo, pr_number, codex_approved
+  `;
+  const queryValues = [
+    approvalUpdate.repo,
+    approvalUpdate.prNumber,
+    Boolean(approvalUpdate.codexApproved),
+  ];
+  const result = await pool.query(query, queryValues);
+  return result.rows[0] || null;
+}
+
 async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
   const query = `
     SELECT
@@ -418,6 +444,9 @@ async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
       title,
       url,
       author_login,
+      is_draft,
+      review_state,
+      codex_approved,
       opened_for_review_at
     FROM open_pr_review_state
     WHERE lifecycle_state = 'open'
@@ -428,6 +457,25 @@ async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
     ORDER BY opened_for_review_at ASC, pr_number ASC
   `;
   const result = await pool.query(query, [sinceTimestamp]);
+  return result.rows;
+}
+
+async function listTrackedOpenPullRequestsForCodexApproval(pool, options) {
+  const query = `
+    SELECT
+      repo,
+      pr_number,
+      codex_approved
+    FROM open_pr_review_state
+    WHERE repo = $1
+      AND base_branch = $2
+      AND lifecycle_state = 'open'
+    ORDER BY pr_number ASC
+  `;
+  const result = await pool.query(query, [
+    options.repo,
+    options.baseBranch,
+  ]);
   return result.rows;
 }
 
@@ -565,6 +613,7 @@ async function setReviewRecapSchedule(pool, scheduleWeekday, scheduleTime, updat
   const normalizedScheduleWeekday = normalizeReviewScheduleWeekday(scheduleWeekday);
   const normalizedScheduleTime = normalizeReviewScheduleTime(scheduleTime);
   const normalizedUserId = normalizeUserId(updatedBy);
+  const scheduleUpdatedAt = new Date().toISOString();
   if (!normalizedScheduleWeekday) {
     throw new Error(`Unsupported review recap schedule weekday: ${scheduleWeekday}`);
   }
@@ -578,6 +627,7 @@ async function setReviewRecapSchedule(pool, scheduleWeekday, scheduleTime, updat
   return upsertReviewRecapConfig(pool, {
     scheduleWeekday: normalizedScheduleWeekday,
     scheduleTime: normalizedScheduleTime,
+    lastSentSlotAt: scheduleUpdatedAt,
     updatedBy: normalizedUserId,
   });
 }
@@ -671,6 +721,7 @@ async function upsertReviewRecapConfig(pool, updates) {
         schedule_weekday,
         schedule_time,
         timezone,
+        last_sent_slot_at,
         updated_by,
         updated_at
       )
@@ -682,7 +733,8 @@ async function upsertReviewRecapConfig(pool, updates) {
         COALESCE($4, '${REVIEW_RECAP_DEFAULTS.scheduleWeekday}'),
         COALESCE($5, '${REVIEW_RECAP_DEFAULTS.scheduleTime}'),
         COALESCE($6, '${REVIEW_RECAP_DEFAULTS.timeZone}'),
-        $7,
+        COALESCE($7, NULL),
+        $8,
         NOW()
       )
       ON CONFLICT (id)
@@ -693,6 +745,7 @@ async function upsertReviewRecapConfig(pool, updates) {
         schedule_weekday = COALESCE($4, review_recap_config.schedule_weekday),
         schedule_time = COALESCE($5, review_recap_config.schedule_time),
         timezone = COALESCE($6, review_recap_config.timezone),
+        last_sent_slot_at = COALESCE($7, review_recap_config.last_sent_slot_at),
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
       RETURNING
@@ -713,6 +766,7 @@ async function upsertReviewRecapConfig(pool, updates) {
       updates.scheduleWeekday || null,
       updates.scheduleTime || null,
       updates.timeZone || null,
+      updates.lastSentSlotAt || null,
       updates.updatedBy || null,
     ],
   );
@@ -988,11 +1042,13 @@ module.exports = {
   insertDeployment,
   listRecentlyTestedPullRequests,
   listOpenPullRequestsWaitingOnReviewSince,
+  listTrackedOpenPullRequestsForCodexApproval,
   listBlockingPullRequests,
   markStaleOpenPullRequestsClosed,
   markAllUntestedPullRequestsTested,
   markReviewRecapSent,
   markPullRequestsDeployedSince,
+  updatePullRequestCodexApproval,
   markPullRequestTested,
   runMigrations,
   setReviewRecapChannel,

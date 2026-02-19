@@ -94,7 +94,9 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.codeHostRepository, "croft-eng/croft");
       assert.equal(config.codeHostMainBranch, "main");
       assert.equal(config.codeHostToken, "");
+      assert.deepEqual(config.codeHostCodexUserLogins, ["codex", "codex[bot]"]);
       assert.equal(config.codeHostOpenPrSyncIntervalHours, 24);
+      assert.equal(config.codexApprovalPollIntervalMinutes, 5);
       assert.equal(config.codeHostApiBaseUrl, "https://api.github.com");
       assert.equal(config.codeHostApiVersion, "2022-11-28");
       assert.equal(config.codeHostApiPageSize, 100);
@@ -139,6 +141,7 @@ test("loadConfig supports non-default provider selections without requiring unre
       assert.equal(config.codeHostWebhookSecret, "secret");
       assert.equal(config.codeHostRepository, "workspace/repo");
       assert.equal(config.codeHostMainBranch, "main");
+      assert.deepEqual(config.codeHostCodexUserLogins, ["codex", "codex[bot]"]);
     },
   );
 });
@@ -209,10 +212,12 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.deploySecretAccessKey, "");
       assert.equal(config.deploySessionToken, "");
       assert.equal(config.codeHostToken, "");
+      assert.deepEqual(config.codeHostCodexUserLogins, ["codex", "codex[bot]"]);
       assert.equal(config.communicationWebhookUrl, "");
       assert.equal(config.communicationCommandPath, "/communication/commands");
       assert.deepEqual(config.communicationAdminUserIds, []);
       assert.equal(config.codeHostOpenPrSyncIntervalHours, 24);
+      assert.equal(config.codexApprovalPollIntervalMinutes, 5);
       assert.equal(config.codeHostApiBaseUrl, "https://api.github.com");
       assert.equal(config.codeHostApiVersion, "2022-11-28");
       assert.equal(config.codeHostApiPageSize, 100);
@@ -255,12 +260,16 @@ test("loadConfig reads GitHub sync optional values", { concurrency: false }, () 
     {
       ...REQUIRED_ENV,
       CODE_HOST_TOKEN: "  ghp-token  ",
+      CODE_HOST_CODEX_USER_LOGINS: " codex-bot , codex[bot] ",
       CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS: "12",
+      CODEX_APPROVAL_POLL_INTERVAL_MINUTES: "7",
     },
     () => {
       const config = loadConfig();
       assert.equal(config.codeHostToken, "ghp-token");
+      assert.deepEqual(config.codeHostCodexUserLogins, ["codex-bot", "codex[bot]"]);
       assert.equal(config.codeHostOpenPrSyncIntervalHours, 12);
+      assert.equal(config.codexApprovalPollIntervalMinutes, 7);
     },
   );
 });
@@ -275,6 +284,21 @@ test("loadConfig rejects invalid GitHub sync interval", { concurrency: false }, 
       assert.throws(
         () => loadConfig(),
         /CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS must be a positive integer/,
+      );
+    },
+  );
+});
+
+test("loadConfig rejects invalid codex approval poll interval", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      CODEX_APPROVAL_POLL_INTERVAL_MINUTES: "0",
+    },
+    () => {
+      assert.throws(
+        () => loadConfig(),
+        /CODEX_APPROVAL_POLL_INTERVAL_MINUTES must be a positive integer/,
       );
     },
   );
@@ -314,7 +338,9 @@ function withEnvironment(overrides, fn) {
     "CODE_HOST_REPOSITORY",
     "CODE_HOST_MAIN_BRANCH",
     "CODE_HOST_TOKEN",
+    "CODE_HOST_CODEX_USER_LOGINS",
     "CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS",
+    "CODEX_APPROVAL_POLL_INTERVAL_MINUTES",
     "DEPLOY_POLL_INTERVAL_SECONDS",
     "DEPLOY_TIMEOUT_SECONDS",
     "DEPLOY_TOKEN",

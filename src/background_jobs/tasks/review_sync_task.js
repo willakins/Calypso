@@ -81,6 +81,11 @@ async function mapOpenPullRequestToReviewState({
     repositoryFullName: repository,
     prNumber,
   });
+  const codexApproved = await readCodexApproval({
+    codeHostClient,
+    repository,
+    prNumber,
+  });
 
   return {
     repo: repository,
@@ -92,6 +97,7 @@ async function mapOpenPullRequestToReviewState({
     isDraft,
     lifecycleState: "open",
     reviewState: isDraft ? "waiting" : deriveReviewStateFromReviews(reviews),
+    codexApproved,
     openedAt,
     openedForReviewAt: isDraft ? null : openedAt,
     closedAt: null,
@@ -156,6 +162,26 @@ function readReviewTimestamp(review) {
 
 function readReviewTimestampIso(review) {
   return review?.submitted_at || review?.updated_at || review?.created_at || null;
+}
+
+async function readCodexApproval({
+  codeHostClient,
+  repository,
+  prNumber,
+}) {
+  if (typeof codeHostClient?.isPullRequestCodexApproved !== "function") {
+    return false;
+  }
+
+  try {
+    return await codeHostClient.isPullRequestCodexApproved({
+      repository,
+      repositoryFullName: repository,
+      prNumber,
+    });
+  } catch (_error) {
+    return false;
+  }
 }
 
 function buildEmptyReviewSyncResult() {

@@ -69,8 +69,25 @@ function formatWaitingPullRequestLine({ pullRequest, timeZone }) {
   return [
     `• ${pullRequestLink} - ${pullRequestTitle}`,
     `created by ${pullRequest.author_login}`,
+    formatPullRequestReviewIndicators(pullRequest),
     `opened for review ${formattedTimestamp}`,
   ].join(" | ");
+}
+
+function formatPullRequestReviewIndicators(pullRequest) {
+  return [
+    formatDraftIndicator(pullRequest?.is_draft),
+    formatCodexApprovalIndicator(pullRequest),
+  ].join(" | ");
+}
+
+function formatDraftIndicator(isDraft) {
+  return isDraft ? "📝 Draft: Yes" : "📝 Draft: No";
+}
+
+function formatCodexApprovalIndicator(pullRequest) {
+  const isCodexApproved = pullRequest?.codex_approved === true;
+  return isCodexApproved ? "🤖 Codex Approved: Yes" : "🤖 Codex Approved: No";
 }
 
 function buildNoBlockersMessage(lastDeploymentTimestamp) {
@@ -251,6 +268,7 @@ function readOrdinalSuffix(dayOfMonth) {
 
 module.exports = {
   TIMESTAMP_STYLES,
+  formatPullRequestReviewIndicators,
   formatReviewRecapResponse,
   formatReviewRecencyLabel,
   formatPullRequestReference,

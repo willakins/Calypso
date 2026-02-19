@@ -1,6 +1,10 @@
 const { BaseCalypsoCommand } = require("./base_command");
 const { isValidTimeframe, timeframeSince } = require("../../shared/timeframes");
-const { formatPullRequestReference, formatTimestampByTimeFormat } = require("../../util/format");
+const {
+  formatPullRequestReference,
+  formatPullRequestReviewIndicators,
+  formatTimestampByTimeFormat,
+} = require("../../util/format");
 
 class ReviewsCommand extends BaseCalypsoCommand {
   constructor() {
@@ -140,7 +144,12 @@ function formatWaitingPullRequestLine({ pullRequest, timeFormat, timeZone }) {
   const openedForReviewAt = pullRequest.opened_for_review_at
     ? formatTimestampByTimeFormat(pullRequest.opened_for_review_at, { timeFormat, timeZone })
     : "at an unknown time";
-  return `• ${pullRequestReference}${titleSuffix} | created by ${authorLogin} | opened for review ${openedForReviewAt}`;
+  return [
+    `• ${pullRequestReference}${titleSuffix}`,
+    `created by ${authorLogin}`,
+    formatPullRequestReviewIndicators(pullRequest),
+    `opened for review ${openedForReviewAt}`,
+  ].join(" | ");
 }
 
 module.exports = {

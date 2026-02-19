@@ -26,7 +26,9 @@ const DEFAULT_CODE_HOST_API_VERSION = "2022-11-28";
 const DEFAULT_CODE_HOST_API_PAGE_SIZE = 100;
 const DEFAULT_CODE_HOST_API_MAX_PAGES = 100;
 const DEFAULT_CODE_HOST_API_USER_AGENT = "calypso-bot";
+const DEFAULT_CODE_HOST_CODEX_USER_LOGINS = Object.freeze(["codex", "codex[bot]"]);
 const DEFAULT_DEPLOY_REGION = "us-east-1";
+const DEFAULT_CODEX_APPROVAL_POLL_INTERVAL_MINUTES = 5;
 
 function loadConfig() {
   const communicationProvider = readProviderSelection(
@@ -75,9 +77,18 @@ function loadConfig() {
     name: "CODE_HOST_WEBHOOK_SECRET",
   });
   const codeHostToken = readOptionalEnvironmentValue("CODE_HOST_TOKEN");
+  const configuredCodexUserLogins = readCommaSeparatedValues("CODE_HOST_CODEX_USER_LOGINS");
+  const codeHostCodexUserLogins =
+    configuredCodexUserLogins.length > 0
+      ? configuredCodexUserLogins
+      : [...DEFAULT_CODE_HOST_CODEX_USER_LOGINS];
   const codeHostOpenPrSyncIntervalHours = readPositiveInteger(
     "CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS",
     DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS,
+  );
+  const codexApprovalPollIntervalMinutes = readPositiveInteger(
+    "CODEX_APPROVAL_POLL_INTERVAL_MINUTES",
+    DEFAULT_CODEX_APPROVAL_POLL_INTERVAL_MINUTES,
   );
   const deployPollIntervalSeconds = readPositiveInteger(
     "DEPLOY_POLL_INTERVAL_SECONDS",
@@ -110,6 +121,7 @@ function loadConfig() {
     deploySecretAccessKey,
     deploySessionToken,
     codeHostOpenPrSyncIntervalHours,
+    codexApprovalPollIntervalMinutes,
     codeHostApiBaseUrl: resolveCodeHostApiBaseUrl(codeHostProvider),
     codeHostApiVersion: DEFAULT_CODE_HOST_API_VERSION,
     codeHostApiPageSize: DEFAULT_CODE_HOST_API_PAGE_SIZE,
@@ -118,6 +130,7 @@ function loadConfig() {
     codeHostMainBranch,
     codeHostRepository,
     codeHostToken,
+    codeHostCodexUserLogins,
     codeHostWebhookSecret,
     port: readPortNumber("PORT", 3000),
     communicationBotToken,
@@ -270,7 +283,9 @@ module.exports = {
   DEFAULT_CODE_HOST_API_PAGE_SIZE,
   DEFAULT_CODE_HOST_API_USER_AGENT,
   DEFAULT_CODE_HOST_API_VERSION,
+  DEFAULT_CODE_HOST_CODEX_USER_LOGINS,
   DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS,
+  DEFAULT_CODEX_APPROVAL_POLL_INTERVAL_MINUTES,
   DEFAULT_COMMUNICATION_COMMAND_PATH,
   DEFAULT_BOT_NAME,
   resolveCodeHostApiBaseUrl,

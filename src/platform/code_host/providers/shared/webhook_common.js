@@ -32,7 +32,7 @@ function createCodeHostWebhookHandler({
       return response.status(200).json({ ok: true, ignored: true });
     }
 
-    if (!isPullRequestForTrackedMain(payload)) {
+    if (!isPullRequestForTrackedMain(payload, eventName)) {
       return response.status(200).json({ ok: true, ignored: true });
     }
 

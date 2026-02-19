@@ -142,6 +142,57 @@ test("runReviewRecapSchedulerTick skips when slot already sent", async () => {
   assert.equal(markCalled, false);
 });
 
+test("runReviewRecapSchedulerTick does not backfill immediately after schedule update", async () => {
+  const calls = {
+    post: 0,
+    mark: 0,
+  };
+  let now = new Date("2026-02-19T13:57:00.000Z");
+  const scheduleUpdatedAt = "2026-02-19T13:57:00.000Z";
+
+  const runTick = async () =>
+    runReviewRecapSchedulerTick({
+      getReviewRecapConfigFn: async () => ({
+        targetChannelId: "CDEPLOY",
+        recencyValue: 1,
+        recencyUnit: "w",
+        scheduleWeekday: "daily",
+        scheduleTime: "09:00",
+        timeZone: "America/New_York",
+        lastSentSlotAt: scheduleUpdatedAt,
+      }),
+      listOpenPullRequestsWaitingOnReviewSinceFn: async () => [],
+      markReviewRecapSentFn: async () => {
+        calls.mark += 1;
+      },
+      formatReviewRecapResponseFn: () => "recap message",
+      nowFn: () => now,
+      logger: {
+        info() {},
+        warn() {},
+        error() {},
+      },
+      messageClient: {
+        async postChannelMessage() {
+          calls.post += 1;
+        },
+      },
+      pool: {},
+      schedulerState: {
+        lastNoChannelLogMinuteKey: null,
+      },
+    });
+
+  await runTick();
+  assert.equal(calls.post, 0);
+  assert.equal(calls.mark, 0);
+
+  now = new Date("2026-02-19T14:00:00.000Z");
+  await runTick();
+  assert.equal(calls.post, 1);
+  assert.equal(calls.mark, 1);
+});
+
 test("runReviewRecapSchedulerTick logs when no channel configured", async () => {
   const infoLogs = [];
 

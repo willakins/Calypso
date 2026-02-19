@@ -55,6 +55,9 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
         }
         return [];
       },
+      async isPullRequestCodexApproved({ prNumber }) {
+        return prNumber === 71;
+      },
       async listClosedPullRequests() {
         return [];
       },
@@ -85,7 +88,9 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
 
   assert.equal(calls.upserted.length, 2);
   assert.equal(calls.upserted[0].reviewState, "approved");
+  assert.equal(calls.upserted[0].codexApproved, true);
   assert.equal(calls.upserted[1].reviewState, "waiting");
+  assert.equal(calls.upserted[1].codexApproved, false);
   assert.equal(calls.upserted[1].openedForReviewAt, null);
   assert.deepEqual(calls.open, [71, 72]);
   assert.equal(calls.closed.length, 1);
@@ -150,6 +155,57 @@ test("runOpenPullRequestSyncTick ignores open PRs not on tracked branch", async 
   assert.equal(calls.upserted.length, 0);
   assert.equal(calls.closed.length, 1);
   assert.deepEqual(calls.closed[0].openPrNumbers, []);
+});
+
+test("runOpenPullRequestSyncTick defaults codex approval to false when reaction lookup fails", async () => {
+  const calls = {
+    upserted: [],
+  };
+
+  await runOpenPullRequestSyncTick({
+    codeHostClient: {
+      async listOpenPullRequests() {
+        return [
+          {
+            number: 71,
+            title: "Improve metrics",
+            html_url: "https://github.com/croft-eng/croft/pull/71",
+            user: { login: "octocat" },
+            base: { ref: "main" },
+            draft: false,
+            created_at: "2026-02-10T14:00:00.000Z",
+          },
+        ];
+      },
+      async listPullRequestReviews() {
+        return [];
+      },
+      async isPullRequestCodexApproved() {
+        throw new Error("forbidden");
+      },
+      async listClosedPullRequests() {
+        return [];
+      },
+    },
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    logger: {
+      info() {},
+      error() {},
+    },
+    mainBranch: "main",
+    markStaleOpenPullRequestsClosedFn: async () => 0,
+    nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
+    pool: {},
+    repository: "croft-eng/croft",
+    upsertPullRequestAsUntestedFromSyncFn: async () => null,
+    upsertOpenPullRequestReviewStateFn: async (_pool, record) => {
+      calls.upserted.push(record);
+      return record;
+    },
+  });
+
+  assert.equal(calls.upserted.length, 1);
+  assert.equal(calls.upserted[0].codexApproved, false);
 });
 
 test("runOpenPullRequestSyncTick uses default now when nowFn is not provided", async () => {

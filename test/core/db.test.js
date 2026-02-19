@@ -23,6 +23,7 @@ const {
   setReviewRecapRecency,
   setReviewRecapSchedule,
   setReviewRecapTimeZone,
+  updatePullRequestCodexApproval,
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntestedFromSync,
@@ -376,6 +377,7 @@ test("upsertOpenPullRequestReviewState upserts expected fields", async () => {
   assert.equal(captured.params[0], "croft-eng/croft");
   assert.equal(captured.params[1], 77);
   assert.equal(captured.params[8], "waiting");
+  assert.equal(captured.params[14], null);
   assert.deepEqual(result, { repo: "croft-eng/croft", pr_number: 77, review_state: "waiting" });
 });
 
@@ -485,6 +487,30 @@ test("updatePullRequestReviewSubmission rejects unsupported review state", async
       lastReviewedAt: "2026-02-16T14:00:00.000Z",
     });
   }, /Unsupported review state/);
+});
+
+test("updatePullRequestCodexApproval updates codex approval state", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ repo: "croft-eng/croft", pr_number: 77, codex_approved: true }],
+      };
+    },
+  };
+
+  const result = await updatePullRequestCodexApproval(pool, {
+    repo: "croft-eng/croft",
+    prNumber: 77,
+    codexApproved: true,
+  });
+
+  assert.match(captured.sql, /UPDATE open_pr_review_state/);
+  assert.match(captured.sql, /SET codex_approved = \$3/);
+  assert.deepEqual(captured.params, ["croft-eng/croft", 77, true]);
+  assert.equal(result.codex_approved, true);
 });
 
 test("listOpenPullRequestsWaitingOnReviewSince returns rows in recency window", async () => {
@@ -732,6 +758,8 @@ test("setReviewRecapSchedule upserts schedule", async () => {
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
   assert.equal(captured.params[3], "tue");
   assert.equal(captured.params[4], "10:15");
+  assert.ok(captured.params[6]);
+  assert.equal(Number.isNaN(Date.parse(captured.params[6])), false);
   assert.equal(result.schedule_weekday, "tue");
   assert.equal(result.schedule_time, "10:15");
 });
@@ -753,6 +781,8 @@ test("setReviewRecapSchedule accepts daily schedule keyword", async () => {
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
   assert.equal(captured.params[3], "daily");
   assert.equal(captured.params[4], "09:00");
+  assert.ok(captured.params[6]);
+  assert.equal(Number.isNaN(Date.parse(captured.params[6])), false);
   assert.equal(result.schedule_weekday, "daily");
   assert.equal(result.schedule_time, "09:00");
 });

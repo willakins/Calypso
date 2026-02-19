@@ -79,6 +79,25 @@ function buildPullRequestReviewPayload(overrides = {}) {
   };
 }
 
+function buildPullRequestReactionPayload(overrides = {}) {
+  return {
+    action: "created",
+    repository: { full_name: "croft-eng/croft" },
+    issue: {
+      number: 77,
+      pull_request: {
+        url: "https://api.github.com/repos/croft-eng/croft/pulls/77",
+      },
+    },
+    reaction: {
+      content: "+1",
+      user: { login: "codex" },
+    },
+    sender: { login: "codex" },
+    ...overrides,
+  };
+}
+
 test("verifyGithubSignature validates a correct sha256 signature", () => {
   const secret = "test-secret";
   const payloadBuffer = Buffer.from('{"ok":true}', "utf8");
@@ -436,6 +455,149 @@ test("github webhook ignores review events outside tracked branch/repo", async (
     payload,
     event: "pull_request_review",
     signature: signPayload(secret, body),
+  });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ignored, true);
+  assert.equal(updateCalled, false);
+});
+
+test("github webhook tracks codex thumbs-up reactions on pull request descriptions", async () => {
+  let approvalUpdate;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "secret",
+      codeHostCodexUserLogins: ["codex"],
+    },
+    updatePullRequestCodexApprovalFn: async (_pool, update) => {
+      approvalUpdate = update;
+      return { repo: update.repo, pr_number: update.prNumber, codex_approved: update.codexApproved };
+    },
+  });
+  const payload = buildPullRequestReactionPayload();
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
+    payload,
+    event: "reaction",
+    signature: signPayload("secret", body),
+  });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(approvalUpdate, {
+    repo: "croft-eng/croft",
+    prNumber: 77,
+    codexApproved: true,
+  });
+  assert.equal(res.body.review_tracking_updated, true);
+  assert.equal(res.body.codex_approved, true);
+});
+
+test("github webhook tracks codex thumbs-up deletion as unapproval", async () => {
+  let approvalUpdate;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "secret",
+      codeHostCodexUserLogins: ["codex"],
+    },
+    updatePullRequestCodexApprovalFn: async (_pool, update) => {
+      approvalUpdate = update;
+      return { repo: update.repo, pr_number: update.prNumber, codex_approved: update.codexApproved };
+    },
+  });
+  const payload = buildPullRequestReactionPayload({ action: "deleted" });
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
+    payload,
+    event: "reaction",
+    signature: signPayload("secret", body),
+  });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(approvalUpdate, {
+    repo: "croft-eng/croft",
+    prNumber: 77,
+    codexApproved: false,
+  });
+  assert.equal(res.body.review_tracking_updated, true);
+  assert.equal(res.body.codex_approved, false);
+});
+
+test("github webhook ignores non-codex reactions", async () => {
+  let updateCalled = false;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "secret",
+      codeHostCodexUserLogins: ["codex"],
+    },
+    updatePullRequestCodexApprovalFn: async () => {
+      updateCalled = true;
+    },
+  });
+  const payload = buildPullRequestReactionPayload({
+    sender: { login: "octocat" },
+    reaction: {
+      content: "+1",
+      user: { login: "octocat" },
+    },
+  });
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
+    payload,
+    event: "reaction",
+    signature: signPayload("secret", body),
+  });
+
+  req.body = body;
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ignored, true);
+  assert.equal(updateCalled, false);
+});
+
+test("github webhook ignores reactions on pull request comments", async () => {
+  let updateCalled = false;
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "secret",
+      codeHostCodexUserLogins: ["codex"],
+    },
+    updatePullRequestCodexApprovalFn: async () => {
+      updateCalled = true;
+    },
+  });
+  const payload = buildPullRequestReactionPayload({
+    comment: {
+      id: 12345,
+      body: "Looks good",
+    },
+  });
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const { req, res } = buildReqRes({
+    payload,
+    event: "reaction",
+    signature: signPayload("secret", body),
   });
 
   req.body = body;
