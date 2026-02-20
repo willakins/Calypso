@@ -81,8 +81,10 @@ function buildReviewingHelpText(botName) {
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
     "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
+    "`/calypso config review-recap-send-weekends:<on|off>`",
+    "`/calypso config review-recap-send-holidays:<on|off>`",
     "`/calypso config timezone:America/New_York` (shared timezone setting)",
-    "Defaults: `1w`, `mon@09:00`, `America/New_York`.",
+    "Defaults: `1w`, `mon@09:00`, weekend sends `off`, holiday sends `off`, `America/New_York`.",
   ].join("\n");
 }
 
@@ -103,6 +105,8 @@ function buildConfigHelpText(botName) {
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
     "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
+    "`/calypso config review-recap-send-weekends:<on|off>`",
+    "`/calypso config review-recap-send-holidays:<on|off>`",
     "`/calypso config timezone:America/New_York` Sets recap timezone too.",
   ].join("\n");
 }

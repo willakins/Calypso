@@ -22,6 +22,8 @@ blocks production deploys when untested changes exist, and posts scheduled revie
   - `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
   - `/calypso config review-recap-recency:<Nd|Nw>`
   - `/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`
+  - `/calypso config review-recap-send-weekends:<on|off>`
+  - `/calypso config review-recap-send-holidays:<on|off>`
   - `/calypso sync`
   - `/calypso status`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
@@ -542,6 +544,16 @@ Rules:
 - Sets one or more recap send slots using `daily` or weekday + 24h clock.
 - Examples: `daily@09:00`, `daily@09:00,17:00`, `mon@09:00,17:30`, `tue@10:15`.
 
+`/calypso config review-recap-send-weekends:<on|off>`
+
+- Controls whether recap posts are sent on Saturday/Sunday.
+- Default is `off`.
+
+`/calypso config review-recap-send-holidays:<on|off>`
+
+- Controls whether recap posts are sent on observed US federal holidays.
+- Default is `off`.
+
 `/calypso config timezone:America/New_York`
 
 - Sets timezone (IANA), used by human timestamps and recap schedule rendering.
@@ -634,6 +646,7 @@ Rules:
 
 - Runs as a background scheduler in the app runtime.
 - Checks once per minute for configured recap slot (`daily@HH:MM` or `<weekday>@HH:MM`).
+- Optionally skips scheduled recap posts on weekends and/or observed US federal holidays.
 - Posts in-channel message in configured `review-recap-channel` containing:
   - Header: `Pull Requests waiting on review in the last {recency}`
   - PR rows with title, author login, and `opened for review` timestamp.

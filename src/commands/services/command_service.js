@@ -23,6 +23,8 @@ const {
   setReviewRecapChannel,
   setReviewRecapRecency,
   setReviewRecapSchedule,
+  setReviewRecapSendHolidays,
+  setReviewRecapSendWeekends,
   setReviewRecapTimeZone,
 } = require("../../db");
 const { DEFAULT_BOT_NAME } = require("../../config");
@@ -105,6 +107,8 @@ function createDefaultDependencies() {
     setReviewRecapChannelFn: setReviewRecapChannel,
     setReviewRecapRecencyFn: setReviewRecapRecency,
     setReviewRecapScheduleFn: setReviewRecapSchedule,
+    setReviewRecapSendWeekendsFn: setReviewRecapSendWeekends,
+    setReviewRecapSendHolidaysFn: setReviewRecapSendHolidays,
     setReviewRecapTimeZoneFn: setReviewRecapTimeZone,
     triggerProdDeployFn: triggerProductionDeploymentUnavailable,
     waitForProdDeployCompletionFn: waitForProductionDeploymentCompletionUnavailable,
@@ -197,6 +201,12 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.setReviewRecapRecencyFn || defaultDependencies.setReviewRecapRecencyFn,
     setReviewRecapScheduleFn:
       mergedOptions.setReviewRecapScheduleFn || defaultDependencies.setReviewRecapScheduleFn,
+    setReviewRecapSendWeekendsFn:
+      mergedOptions.setReviewRecapSendWeekendsFn ||
+      defaultDependencies.setReviewRecapSendWeekendsFn,
+    setReviewRecapSendHolidaysFn:
+      mergedOptions.setReviewRecapSendHolidaysFn ||
+      defaultDependencies.setReviewRecapSendHolidaysFn,
     setReviewRecapTimeZoneFn:
       mergedOptions.setReviewRecapTimeZoneFn || defaultDependencies.setReviewRecapTimeZoneFn,
     communicationClient,

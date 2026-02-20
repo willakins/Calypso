@@ -45,7 +45,7 @@ test("handleCalypsoCommand returns reviewing topic help", () => {
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\*Calypso Reviewing Help\*/);
   assert.match(result.responseText, /\/calypso reviews <GITHUB_USER>/);
-  assert.match(result.responseText, /Defaults: `1w`, `mon@09:00`, `America\/New_York`/);
+  assert.match(result.responseText, /Defaults: `1w`, `mon@09:00`, weekend sends `off`, holiday sends `off`, `America\/New_York`/);
 });
 
 test("handleCalypsoCommand returns config topic help", () => {
@@ -56,6 +56,8 @@ test("handleCalypsoCommand returns config topic help", () => {
   assert.match(result.responseText, /\/calypso config time-format:human\|long/);
   assert.match(result.responseText, /\/calypso config communication-provider:slack\|microsoft_teams/);
   assert.match(result.responseText, /\/calypso config review-recap-schedule:<daily\|weekday>@HH:MM\[,HH:MM\.\.\.\]/);
+  assert.match(result.responseText, /\/calypso config review-recap-send-weekends:<on\|off>/);
+  assert.match(result.responseText, /\/calypso config review-recap-send-holidays:<on\|off>/);
 });
 
 test("handleCalypsoCommand rejects unknown help topic", () => {
@@ -280,6 +282,26 @@ test("handleCalypsoCommand routes config review recap schedule input with multip
   assert.equal(result.action, "config_review_recap_schedule");
   assert.equal(result.scheduleWeekday, "daily");
   assert.equal(result.scheduleTime, "09:00,17:00");
+});
+
+test("handleCalypsoCommand routes config review recap send weekends input", () => {
+  const result = handleCalypsoCommand({
+    text: "config review-recap-send-weekends:off",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_review_recap_send_weekends");
+  assert.equal(result.sendOnWeekends, false);
+});
+
+test("handleCalypsoCommand routes config review recap send holidays input", () => {
+  const result = handleCalypsoCommand({
+    text: "config review-recap-send-holidays:on",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_review_recap_send_holidays");
+  assert.equal(result.sendOnHolidays, true);
 });
 
 test("handleCalypsoCommand routes config communication provider input", () => {
@@ -2284,6 +2306,76 @@ test("registerCalypsoCommand config command updates multi-time daily review reca
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].scheduleWeekday, "daily");
   assert.equal(capturedCalls[0].scheduleTime, "09:00,17:00");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates review recap weekend delivery", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapSendWeekendsFn: async (pool, sendOnWeekends, updatedBy) => {
+      capturedCalls.push({ pool, sendOnWeekends, updatedBy });
+      return { send_on_weekends: sendOnWeekends, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-send-weekends:off", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated review recap weekend sending to `off`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].sendOnWeekends, false);
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates review recap holiday delivery", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapSendHolidaysFn: async (pool, sendOnHolidays, updatedBy) => {
+      capturedCalls.push({ pool, sendOnHolidays, updatedBy });
+      return { send_on_holidays: sendOnHolidays, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-send-holidays:off", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated review recap holiday sending to `off`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].sendOnHolidays, false);
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 

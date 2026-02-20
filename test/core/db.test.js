@@ -21,6 +21,8 @@ const {
   setConfiguredTimeZone,
   setReviewRecapChannel,
   setReviewRecapRecency,
+  setReviewRecapSendHolidays,
+  setReviewRecapSendWeekends,
   setReviewRecapSchedule,
   setReviewRecapTimeZone,
   updatePullRequestCodexApproval,
@@ -578,6 +580,8 @@ test("getReviewRecapConfig returns defaults when singleton row is missing", asyn
   assert.equal(result.recencyUnit, "w");
   assert.equal(result.scheduleWeekday, "mon");
   assert.equal(result.scheduleTime, "09:00");
+  assert.equal(result.sendOnWeekends, false);
+  assert.equal(result.sendOnHolidays, false);
   assert.equal(result.timeZone, "America/New_York");
   assert.equal(result.lastSentSlotAt, null);
 });
@@ -593,6 +597,8 @@ test("getReviewRecapConfig returns configured values", async () => {
             recency_unit: "d",
             schedule_weekday: "tue",
             schedule_time: "10:15",
+            send_on_weekends: false,
+            send_on_holidays: false,
             timezone: "America/Los_Angeles",
             last_sent_slot_at: "2026-02-16T17:00:00.000Z",
           },
@@ -608,6 +614,8 @@ test("getReviewRecapConfig returns configured values", async () => {
   assert.equal(result.recencyUnit, "d");
   assert.equal(result.scheduleWeekday, "tue");
   assert.equal(result.scheduleTime, "10:15");
+  assert.equal(result.sendOnWeekends, false);
+  assert.equal(result.sendOnHolidays, false);
   assert.equal(result.timeZone, "America/Los_Angeles");
   assert.equal(result.lastSentSlotAt, "2026-02-16T17:00:00.000Z");
 });
@@ -837,6 +845,68 @@ test("setReviewRecapTimeZone upserts timezone", async () => {
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
   assert.equal(captured.params[5], "America/Chicago");
   assert.equal(result.timezone, "America/Chicago");
+});
+
+test("setReviewRecapSendWeekends upserts weekend delivery flag", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ send_on_weekends: false, updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapSendWeekends(pool, false, "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.equal(captured.params[7], false);
+  assert.equal(result.send_on_weekends, false);
+});
+
+test("setReviewRecapSendWeekends rejects unsupported values", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setReviewRecapSendWeekends(pool, "maybe", "UADMIN");
+  }, /Unsupported review recap weekend toggle/);
+});
+
+test("setReviewRecapSendHolidays upserts holiday delivery flag", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ send_on_holidays: false, updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapSendHolidays(pool, false, "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.equal(captured.params[8], false);
+  assert.equal(result.send_on_holidays, false);
+});
+
+test("setReviewRecapSendHolidays rejects unsupported values", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setReviewRecapSendHolidays(pool, "maybe", "UADMIN");
+  }, /Unsupported review recap holiday toggle/);
 });
 
 test("setConfiguredCommunicationProvider upserts provider", async () => {

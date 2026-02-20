@@ -60,6 +60,8 @@ test("runReviewRecapSchedulerTick posts and marks slot when due", async () => {
       recencyUnit: "w",
       scheduleWeekday: "mon",
       scheduleTime: "09:00",
+      sendOnWeekends: true,
+      sendOnHolidays: true,
       timeZone: "America/New_York",
       lastSentSlotAt: null,
     }),
@@ -206,6 +208,106 @@ test("runReviewRecapSchedulerTick does not backfill immediately after schedule u
   assert.equal(calls.mark, 1);
 });
 
+test("runReviewRecapSchedulerTick skips weekend slots when weekend sending is disabled", async () => {
+  const calls = {
+    list: 0,
+    post: 0,
+    mark: [],
+  };
+
+  await runReviewRecapSchedulerTick({
+    getReviewRecapConfigFn: async () => ({
+      targetChannelId: "CDEPLOY",
+      recencyValue: 1,
+      recencyUnit: "w",
+      scheduleWeekday: "daily",
+      scheduleTime: "09:00",
+      sendOnWeekends: false,
+      sendOnHolidays: true,
+      timeZone: "America/New_York",
+      lastSentSlotAt: null,
+    }),
+    listOpenPullRequestsWaitingOnReviewSinceFn: async () => {
+      calls.list += 1;
+      return [];
+    },
+    markReviewRecapSentFn: async (_pool, slotTimestamp) => {
+      calls.mark.push(slotTimestamp);
+      return { id: 1, last_sent_slot_at: slotTimestamp };
+    },
+    formatReviewRecapResponseFn: () => "recap message",
+    nowFn: () => new Date("2026-02-14T14:05:00.000Z"),
+    logger: {
+      info() {},
+      warn() {},
+      error() {},
+    },
+    messageClient: {
+      async postChannelMessage() {
+        calls.post += 1;
+      },
+    },
+    pool: {},
+    schedulerState: {
+      lastNoChannelLogMinuteKey: null,
+    },
+  });
+
+  assert.equal(calls.list, 0);
+  assert.equal(calls.post, 0);
+  assert.deepEqual(calls.mark, ["2026-02-14T14:00:00.000Z"]);
+});
+
+test("runReviewRecapSchedulerTick skips US federal holiday slots when holiday sending is disabled", async () => {
+  const calls = {
+    list: 0,
+    post: 0,
+    mark: [],
+  };
+
+  await runReviewRecapSchedulerTick({
+    getReviewRecapConfigFn: async () => ({
+      targetChannelId: "CDEPLOY",
+      recencyValue: 1,
+      recencyUnit: "w",
+      scheduleWeekday: "daily",
+      scheduleTime: "09:00",
+      sendOnWeekends: true,
+      sendOnHolidays: false,
+      timeZone: "America/New_York",
+      lastSentSlotAt: null,
+    }),
+    listOpenPullRequestsWaitingOnReviewSinceFn: async () => {
+      calls.list += 1;
+      return [];
+    },
+    markReviewRecapSentFn: async (_pool, slotTimestamp) => {
+      calls.mark.push(slotTimestamp);
+      return { id: 1, last_sent_slot_at: slotTimestamp };
+    },
+    formatReviewRecapResponseFn: () => "recap message",
+    nowFn: () => new Date("2026-11-26T14:05:00.000Z"),
+    logger: {
+      info() {},
+      warn() {},
+      error() {},
+    },
+    messageClient: {
+      async postChannelMessage() {
+        calls.post += 1;
+      },
+    },
+    pool: {},
+    schedulerState: {
+      lastNoChannelLogMinuteKey: null,
+    },
+  });
+
+  assert.equal(calls.list, 0);
+  assert.equal(calls.post, 0);
+  assert.deepEqual(calls.mark, ["2026-11-26T14:00:00.000Z"]);
+});
+
 test("runReviewRecapSchedulerTick logs when no channel configured", async () => {
   const infoLogs = [];
 
@@ -255,15 +357,17 @@ test("runReviewRecapSchedulerTick stops retrying after 3 not_in_channel failures
 
   const runTick = async () =>
     runReviewRecapSchedulerTick({
-      getReviewRecapConfigFn: async () => ({
-        targetChannelId: "CDEPLOY",
-        recencyValue: 1,
-        recencyUnit: "w",
-        scheduleWeekday: "mon",
-        scheduleTime: "09:00",
-        timeZone: "America/New_York",
-        lastSentSlotAt: null,
-      }),
+    getReviewRecapConfigFn: async () => ({
+      targetChannelId: "CDEPLOY",
+      recencyValue: 1,
+      recencyUnit: "w",
+      scheduleWeekday: "mon",
+      scheduleTime: "09:00",
+      sendOnWeekends: true,
+      sendOnHolidays: true,
+      timeZone: "America/New_York",
+      lastSentSlotAt: null,
+    }),
       listOpenPullRequestsWaitingOnReviewSinceFn: async () => {
         listCallCount += 1;
         return [];

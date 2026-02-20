@@ -30,6 +30,8 @@ const REVIEW_RECAP_DEFAULTS = Object.freeze({
   recencyUnit: REVIEW_RECAP_RECENCY_UNITS.week,
   scheduleWeekday: REVIEW_RECAP_WEEKDAYS.mon,
   scheduleTime: "09:00",
+  sendOnWeekends: false,
+  sendOnHolidays: false,
   timeZone: DEFAULT_TIME_ZONE,
 });
 const RUNTIME_PROVIDER_DEFAULTS = Object.freeze({
@@ -511,6 +513,8 @@ async function getReviewRecapConfig(pool) {
         recency_unit,
         schedule_weekday,
         schedule_time,
+        send_on_weekends,
+        send_on_holidays,
         timezone,
         last_sent_slot_at
       FROM review_recap_config
@@ -527,6 +531,8 @@ async function getReviewRecapConfig(pool) {
       recencyUnit: REVIEW_RECAP_DEFAULTS.recencyUnit,
       scheduleWeekday: REVIEW_RECAP_DEFAULTS.scheduleWeekday,
       scheduleTime: REVIEW_RECAP_DEFAULTS.scheduleTime,
+      sendOnWeekends: REVIEW_RECAP_DEFAULTS.sendOnWeekends,
+      sendOnHolidays: REVIEW_RECAP_DEFAULTS.sendOnHolidays,
       timeZone: REVIEW_RECAP_DEFAULTS.timeZone,
       lastSentSlotAt: null,
     };
@@ -540,6 +546,14 @@ async function getReviewRecapConfig(pool) {
       normalizeReviewScheduleWeekday(row.schedule_weekday) || REVIEW_RECAP_DEFAULTS.scheduleWeekday,
     scheduleTime:
       normalizeReviewScheduleTime(row.schedule_time) || REVIEW_RECAP_DEFAULTS.scheduleTime,
+    sendOnWeekends: normalizeReviewRecapBoolean(
+      row.send_on_weekends,
+      REVIEW_RECAP_DEFAULTS.sendOnWeekends,
+    ),
+    sendOnHolidays: normalizeReviewRecapBoolean(
+      row.send_on_holidays,
+      REVIEW_RECAP_DEFAULTS.sendOnHolidays,
+    ),
     timeZone: normalizeTimeZone(row.timezone) || REVIEW_RECAP_DEFAULTS.timeZone,
     lastSentSlotAt: row.last_sent_slot_at || null,
   };
@@ -648,6 +662,38 @@ async function setReviewRecapTimeZone(pool, timeZone, updatedBy) {
   });
 }
 
+async function setReviewRecapSendWeekends(pool, sendOnWeekends, updatedBy) {
+  const normalizedSendOnWeekends = normalizeReviewRecapBoolean(sendOnWeekends, null);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (normalizedSendOnWeekends === null) {
+    throw new Error(`Unsupported review recap weekend toggle: ${sendOnWeekends}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertReviewRecapConfig(pool, {
+    sendOnWeekends: normalizedSendOnWeekends,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setReviewRecapSendHolidays(pool, sendOnHolidays, updatedBy) {
+  const normalizedSendOnHolidays = normalizeReviewRecapBoolean(sendOnHolidays, null);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (normalizedSendOnHolidays === null) {
+    throw new Error(`Unsupported review recap holiday toggle: ${sendOnHolidays}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertReviewRecapConfig(pool, {
+    sendOnHolidays: normalizedSendOnHolidays,
+    updatedBy: normalizedUserId,
+  });
+}
+
 async function markReviewRecapSent(pool, scheduledSlotAt) {
   const result = await pool.query(
     `
@@ -722,6 +768,8 @@ async function upsertReviewRecapConfig(pool, updates) {
         schedule_time,
         timezone,
         last_sent_slot_at,
+        send_on_weekends,
+        send_on_holidays,
         updated_by,
         updated_at
       )
@@ -734,7 +782,9 @@ async function upsertReviewRecapConfig(pool, updates) {
         COALESCE($5, '${REVIEW_RECAP_DEFAULTS.scheduleTime}'),
         COALESCE($6, '${REVIEW_RECAP_DEFAULTS.timeZone}'),
         COALESCE($7, NULL),
-        $8,
+        COALESCE($8, ${REVIEW_RECAP_DEFAULTS.sendOnWeekends}),
+        COALESCE($9, ${REVIEW_RECAP_DEFAULTS.sendOnHolidays}),
+        $10,
         NOW()
       )
       ON CONFLICT (id)
@@ -746,6 +796,8 @@ async function upsertReviewRecapConfig(pool, updates) {
         schedule_time = COALESCE($5, review_recap_config.schedule_time),
         timezone = COALESCE($6, review_recap_config.timezone),
         last_sent_slot_at = COALESCE($7, review_recap_config.last_sent_slot_at),
+        send_on_weekends = COALESCE($8, review_recap_config.send_on_weekends),
+        send_on_holidays = COALESCE($9, review_recap_config.send_on_holidays),
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
       RETURNING
@@ -756,6 +808,8 @@ async function upsertReviewRecapConfig(pool, updates) {
         schedule_time,
         timezone,
         last_sent_slot_at,
+        send_on_weekends,
+        send_on_holidays,
         updated_by,
         updated_at
     `,
@@ -767,6 +821,8 @@ async function upsertReviewRecapConfig(pool, updates) {
       updates.scheduleTime || null,
       updates.timeZone || null,
       updates.lastSentSlotAt || null,
+      updates.sendOnWeekends ?? null,
+      updates.sendOnHolidays ?? null,
       updates.updatedBy || null,
     ],
   );
@@ -996,6 +1052,22 @@ function normalizeReviewRecapChannelId(targetChannelId) {
   return normalizedChannelId === "" ? null : normalizedChannelId;
 }
 
+function normalizeReviewRecapBoolean(value, fallbackValue = null) {
+  if (value === true || value === false) {
+    return value;
+  }
+
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  if (["true", "1", "yes", "on"].includes(normalizedValue)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(normalizedValue)) {
+    return false;
+  }
+
+  return fallbackValue;
+}
+
 function normalizePositiveInteger(value) {
   const parsedValue = Number(value);
   return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
@@ -1066,6 +1138,8 @@ module.exports = {
   setReviewRecapChannel,
   setReviewRecapRecency,
   setReviewRecapSchedule,
+  setReviewRecapSendHolidays,
+  setReviewRecapSendWeekends,
   setReviewRecapTimeZone,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,

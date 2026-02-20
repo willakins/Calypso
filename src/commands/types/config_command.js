@@ -11,6 +11,8 @@ const REVIEW_RECAP_CHANNEL_ARGUMENT_PATTERN = /^review-recap-channel:(.+)$/i;
 const REVIEW_RECAP_RECENCY_ARGUMENT_PATTERN = /^review-recap-recency:(\d+)([dw])$/i;
 const REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN =
   /^review-recap-schedule:(daily|mon|tue|wed|thu|fri|sat|sun)@(.+)$/i;
+const REVIEW_RECAP_SEND_WEEKENDS_ARGUMENT_PATTERN = /^review-recap-send-weekends:(on|off)$/i;
+const REVIEW_RECAP_SEND_HOLIDAYS_ARGUMENT_PATTERN = /^review-recap-send-holidays:(on|off)$/i;
 const REVIEW_RECAP_SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "communication-provider",
@@ -87,6 +89,22 @@ class ConfigCommand extends BaseCalypsoCommand {
         action: "config_review_recap_schedule",
         scheduleWeekday: recapScheduleMatch[1].toLowerCase(),
         scheduleTime: normalizedScheduleTime,
+      });
+    }
+
+    const recapSendWeekendsMatch = argument.match(REVIEW_RECAP_SEND_WEEKENDS_ARGUMENT_PATTERN);
+    if (recapSendWeekendsMatch) {
+      return this.buildParsedCommand({
+        action: "config_review_recap_send_weekends",
+        sendOnWeekends: recapSendWeekendsMatch[1].toLowerCase() === "on",
+      });
+    }
+
+    const recapSendHolidaysMatch = argument.match(REVIEW_RECAP_SEND_HOLIDAYS_ARGUMENT_PATTERN);
+    if (recapSendHolidaysMatch) {
+      return this.buildParsedCommand({
+        action: "config_review_recap_send_holidays",
+        sendOnHolidays: recapSendHolidaysMatch[1].toLowerCase() === "on",
       });
     }
 
@@ -224,6 +242,32 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
+    if (parsedCommand.action === "config_review_recap_send_weekends") {
+      await runtime.setReviewRecapSendWeekendsFn(
+        runtime.pool,
+        parsedCommand.sendOnWeekends,
+        runtime.userId,
+      );
+
+      const weekendStatus = parsedCommand.sendOnWeekends ? "on" : "off";
+      return this.buildExecutionResult(
+        `Updated review recap weekend sending to \`${weekendStatus}\`.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_review_recap_send_holidays") {
+      await runtime.setReviewRecapSendHolidaysFn(
+        runtime.pool,
+        parsedCommand.sendOnHolidays,
+        runtime.userId,
+      );
+
+      const holidayStatus = parsedCommand.sendOnHolidays ? "on" : "off";
+      return this.buildExecutionResult(
+        `Updated review recap holiday sending to \`${holidayStatus}\` (US federal holidays).`,
+      );
+    }
+
     if (parsedCommand.action === "config_communication_provider") {
       const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.communicationProvider);
       if (unavailableMessage) {
@@ -316,6 +360,8 @@ function isWorkspaceScopedConfigAction(action) {
     action === "config_review_recap_channel" ||
     action === "config_review_recap_recency" ||
     action === "config_review_recap_schedule" ||
+    action === "config_review_recap_send_weekends" ||
+    action === "config_review_recap_send_holidays" ||
     action === "config_communication_provider" ||
     action === "config_code_host_provider" ||
     action === "config_deploy_provider"
@@ -333,12 +379,14 @@ function buildConfigUsageMessage() {
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
     "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
+    "`/calypso config review-recap-send-weekends:<on|off>`",
+    "`/calypso config review-recap-send-holidays:<on|off>`",
     "",
     "Platform provider setup:",
     "`/calypso config communication-provider:slack|microsoft_teams`",
     "`/calypso config code-host-provider:github|bitbucket`",
     "`/calypso config deploy-provider:digitalocean|aws`",
-    "Defaults: `1w`, `mon@09:00`, timezone from `/calypso config timezone`.",
+    "Defaults: `1w`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/calypso config timezone`.",
   ].join("\n");
 }
 
