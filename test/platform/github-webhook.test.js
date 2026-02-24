@@ -107,6 +107,16 @@ test("verifyGithubSignature validates a correct sha256 signature", () => {
   assert.equal(valid, true);
 });
 
+test("verifyGithubSignature returns false when payload body is missing", () => {
+  const valid = verifyGithubSignature({
+    payloadBuffer: undefined,
+    signatureHeader: "sha256=abc123",
+    secret: "test-secret",
+  });
+
+  assert.equal(valid, false);
+});
+
 test("registerGithubWebhook registers configured webhook path", () => {
   const registeredPaths = [];
   const app = {
@@ -147,6 +157,46 @@ test("github webhook returns 401 on invalid signature", async () => {
 
   assert.equal(res.statusCode, 401);
   assert.equal(res.body.ok, false);
+});
+
+test("github webhook returns 401 when request body is missing", async () => {
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: "correct-secret",
+    },
+  });
+  const req = {
+    body: undefined,
+    get(name) {
+      if (String(name).toLowerCase() === "x-github-event") {
+        return "pull_request";
+      }
+      if (String(name).toLowerCase() === "x-hub-signature-256") {
+        return "sha256=not-valid";
+      }
+      return undefined;
+    },
+  };
+  const res = {
+    statusCode: 200,
+    body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payloadBody) {
+      this.body = payloadBody;
+      return this;
+    },
+  };
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.error, "invalid signature");
 });
 
 test("github webhook returns 400 on invalid json payload", async () => {

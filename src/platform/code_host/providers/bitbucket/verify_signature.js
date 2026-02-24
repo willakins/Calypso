@@ -5,17 +5,24 @@ function verifyBitbucketSignature({ payloadBuffer, signatureHeader, secret }) {
     return false;
   }
 
+  const normalizedPayloadBuffer = normalizePayloadBuffer(payloadBuffer);
+  if (!normalizedPayloadBuffer) {
+    return false;
+  }
+
   const normalizedSignatureHeader = String(signatureHeader || "").trim();
   if (normalizedSignatureHeader === "") {
     return false;
   }
 
-  const expectedWithPrefix = createSha256Signature(payloadBuffer, secret, { withPrefix: true });
+  const expectedWithPrefix = createSha256Signature(normalizedPayloadBuffer, secret, { withPrefix: true });
   if (timingSafeEquals(expectedWithPrefix, normalizedSignatureHeader)) {
     return true;
   }
 
-  const expectedWithoutPrefix = createSha256Signature(payloadBuffer, secret, { withPrefix: false });
+  const expectedWithoutPrefix = createSha256Signature(normalizedPayloadBuffer, secret, {
+    withPrefix: false,
+  });
   return timingSafeEquals(expectedWithoutPrefix, normalizedSignatureHeader);
 }
 
@@ -32,6 +39,26 @@ function timingSafeEquals(left, right) {
   }
 
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function normalizePayloadBuffer(payloadBuffer) {
+  if (Buffer.isBuffer(payloadBuffer)) {
+    return payloadBuffer;
+  }
+
+  if (typeof payloadBuffer === "string") {
+    return Buffer.from(payloadBuffer, "utf8");
+  }
+
+  if (payloadBuffer instanceof ArrayBuffer) {
+    return Buffer.from(payloadBuffer);
+  }
+
+  if (ArrayBuffer.isView(payloadBuffer)) {
+    return Buffer.from(payloadBuffer.buffer, payloadBuffer.byteOffset, payloadBuffer.byteLength);
+  }
+
+  return null;
 }
 
 module.exports = {

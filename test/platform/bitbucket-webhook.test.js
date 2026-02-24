@@ -79,6 +79,16 @@ test("verifyBitbucketSignature validates a correct sha256 signature", () => {
   assert.equal(valid, true);
 });
 
+test("verifyBitbucketSignature returns false when payload body is missing", () => {
+  const valid = verifyBitbucketSignature({
+    payloadBuffer: undefined,
+    signatureHeader: "sha256=abc123",
+    secret: "test-secret",
+  });
+
+  assert.equal(valid, false);
+});
+
 test("registerBitbucketWebhook registers both configured webhook paths", () => {
   const registeredPaths = [];
   const app = {
@@ -119,6 +129,46 @@ test("bitbucket webhook returns 401 on invalid signature", async () => {
 
   assert.equal(res.statusCode, 401);
   assert.equal(res.body.ok, false);
+});
+
+test("bitbucket webhook returns 401 when request body is missing", async () => {
+  const handler = createBitbucketWebhookHandler({
+    pool: {},
+    bitbucket: {
+      mainBranch: "main",
+      repositoryFullName: "workspace/repo",
+      webhookSecret: "correct-secret",
+    },
+  });
+  const req = {
+    body: undefined,
+    get(name) {
+      if (String(name).toLowerCase() === "x-event-key") {
+        return "pullrequest:created";
+      }
+      if (String(name).toLowerCase() === "x-hub-signature") {
+        return "sha256=not-valid";
+      }
+      return undefined;
+    },
+  };
+  const res = {
+    statusCode: 200,
+    body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payloadBody) {
+      this.body = payloadBody;
+      return this;
+    },
+  };
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.error, "invalid signature");
 });
 
 test("bitbucket webhook tracks created pull request review lifecycle", async () => {

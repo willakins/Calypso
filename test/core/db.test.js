@@ -764,6 +764,7 @@ test("setReviewRecapSchedule upserts schedule", async () => {
   const result = await setReviewRecapSchedule(pool, "tue", "10:15", "UADMIN");
 
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.match(captured.sql, /COALESCE\(\$7::timestamptz, NULL\)/);
   assert.equal(captured.params[3], "tue");
   assert.equal(captured.params[4], "10:15");
   assert.ok(captured.params[6]);
