@@ -1,4 +1,8 @@
 const { registerCalypsoCommand } = require("../../../commands/command_router");
+const {
+  DEPLOY_PROD_TIP_TEXT,
+  shouldSendDeployProdTip,
+} = require("../deploy_prod_tip");
 const { BaseCommunicationPlatform } = require("../base_communication_platform");
 
 const DEFAULT_TEAMS_COMMAND_PATH = "/communication/commands";
@@ -54,6 +58,14 @@ class MicrosoftTeamsCommunicationPlatform extends BaseCommunicationPlatform {
             normalizedCommand.userId,
             normalizedCommand.userName || normalizedCommand.userId,
           );
+        }
+
+        if (shouldSendDeployProdTip(normalizedCommand.commandText)) {
+          response.status(200).json({
+            type: "message",
+            text: DEPLOY_PROD_TIP_TEXT,
+          });
+          return;
         }
 
         const responses = [];

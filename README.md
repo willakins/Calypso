@@ -146,6 +146,7 @@ test/
 - A Slack app with:
   - Socket Mode enabled.
   - Slash command `/calypso`.
+  - Relevant Slack message event subscriptions/history scopes if you want Calypso to nudge users who type `deploying prod`.
 - Optional:
   - DigitalOcean App Platform app and token for live deploy trigger.
 
@@ -244,6 +245,7 @@ Provider support matrix:
 
 - Slack App -> `OAuth & Permissions` -> install/reinstall app -> copy `Bot User OAuth Token` (`xoxb-...`).
 - Add bot scope `users:read` so Calypso can detect workspace admins for deploy authorization.
+- Add the matching Slack history scopes for any surfaces where Calypso should detect `deploying prod` messages.
 
 `COMMUNICATION_APP_TOKEN`
 
@@ -485,6 +487,7 @@ curl https://<your-domain>/healthz
 Operational notes:
 
 - Slack Socket Mode means slash commands do not require a public Slack request URL.
+- Slack `deploying prod` tips require the app to receive the relevant Slack message events for the channels or conversations you want monitored.
 - Keep one primary Calypso runtime for stable webhook ingestion and schedulers.
 - If you use the Droplet Compose DB service, do not expose `5432` publicly.
 

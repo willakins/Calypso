@@ -2,6 +2,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  DEPLOY_PROD_TIP_TEXT,
+} = require("../../src/platform/communication/deploy_prod_tip");
+const {
   MicrosoftTeamsCommunicationPlatform,
 } = require("../../src/platform/communication/providers/microsoft_teams_communication_platform");
 
@@ -115,6 +118,43 @@ test("microsoft teams platform strips configured bot prefix", async () => {
 
   assert.equal(response.statusCode, 200);
   assert.match(response.payload.text, /\*Voyager\*/);
+});
+
+test("microsoft teams platform returns deploy prod tip for matching text", async () => {
+  const platform = new MicrosoftTeamsCommunicationPlatform({
+    config: {
+      botName: "Calypso",
+    },
+  });
+  platform.registerCalypsoCommand({
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+  });
+
+  const routes = [];
+  platform.registerHttpRoutes({
+    post(path, handler) {
+      routes.push({ path, handler });
+    },
+  });
+
+  const response = createResponseRecorder();
+  await routes[0].handler(
+    {
+      body: {
+        text: "deploying prod",
+        from: {
+          id: "U123",
+          name: "will.akins",
+        },
+      },
+      headers: {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.text, DEPLOY_PROD_TIP_TEXT);
 });
 
 test("microsoft teams platform posts channel message via webhook", async () => {

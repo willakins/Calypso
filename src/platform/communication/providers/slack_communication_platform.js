@@ -1,16 +1,23 @@
 const { App } = require("@slack/bolt");
 
 const { registerCalypsoCommand } = require("../../../commands/command_router");
+const {
+  DEPLOY_PROD_TIP_TEXT,
+  shouldSendDeployProdTip,
+} = require("../deploy_prod_tip");
 const { BaseCommunicationPlatform } = require("../base_communication_platform");
 
 class SlackCommunicationPlatform extends BaseCommunicationPlatform {
-  constructor({ config }) {
+  constructor({ config, app } = {}) {
     super({ provider: "slack" });
-    this.app = new App({
-      token: config.communicationBotToken || config.slackBotToken,
-      appToken: config.communicationAppToken || config.slackAppToken,
-      socketMode: true,
-    });
+    this.app =
+      app ||
+      new App({
+        token: config.communicationBotToken || config.slackBotToken,
+        appToken: config.communicationAppToken || config.slackAppToken,
+        socketMode: true,
+      });
+    this.registerDeployProdTipListener();
   }
 
   registerCalypsoCommand(options = {}) {
@@ -61,6 +68,41 @@ class SlackCommunicationPlatform extends BaseCommunicationPlatform {
       return null;
     }
   }
+
+  registerDeployProdTipListener() {
+    if (typeof this.app.message !== "function") {
+      return;
+    }
+
+    this.app.message(async ({ client, message }) => {
+      if (!shouldPostDeployProdTip(message) || typeof client?.chat?.postEphemeral !== "function") {
+        return;
+      }
+
+      try {
+        await client.chat.postEphemeral({
+          channel: message.channel,
+          text: DEPLOY_PROD_TIP_TEXT,
+          user: message.user,
+        });
+      } catch (error) {
+        console.error("Failed to send deploy prod tip.");
+        console.error(error.message);
+      }
+    });
+  }
+}
+
+function shouldPostDeployProdTip(message) {
+  if (!message || message.subtype || message.bot_id) {
+    return false;
+  }
+
+  if (!message.channel || !message.user) {
+    return false;
+  }
+
+  return shouldSendDeployProdTip(message.text);
 }
 
 module.exports = {
