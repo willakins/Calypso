@@ -14,12 +14,18 @@ const DEPLOY_PROVIDERS = Object.freeze({
   digitalocean: "digitalocean",
   aws: "aws",
 });
+const EMAIL_PROVIDERS = Object.freeze({
+  gmail: "gmail",
+  outlook: "outlook",
+});
 const ERROR_TRACKING_PROVIDERS = Object.freeze({
   sentry: "sentry",
+  rollbar: "rollbar",
 });
 const DEFAULT_COMMUNICATION_PROVIDER = COMMUNICATION_PROVIDERS.slack;
 const DEFAULT_CODE_HOST_PROVIDER = CODE_HOST_PROVIDERS.github;
 const DEFAULT_DEPLOY_PROVIDER = DEPLOY_PROVIDERS.digitalocean;
+const DEFAULT_EMAIL_PROVIDER = EMAIL_PROVIDERS.gmail;
 const DEFAULT_ERROR_TRACKING_PROVIDER = ERROR_TRACKING_PROVIDERS.sentry;
 const DEFAULT_BOT_NAME = "Calypso";
 const DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS = 24;
@@ -40,6 +46,7 @@ const DEFAULT_EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES = 5;
 const DEFAULT_ERROR_TRACKING_POLL_INTERVAL_SECONDS = 300;
 const DEFAULT_ERROR_TRACKING_TIMEOUT_SECONDS = 15;
 const DEFAULT_SENTRY_BASE_URL = "https://sentry.io";
+const DEFAULT_ROLLBAR_BASE_URL = "https://api.rollbar.com";
 
 function loadConfig() {
   const communicationProvider = readProviderSelection(
@@ -56,6 +63,11 @@ function loadConfig() {
     "DEPLOY_PROVIDER",
     DEFAULT_DEPLOY_PROVIDER,
     Object.values(DEPLOY_PROVIDERS),
+  );
+  const emailProvider = readProviderSelection(
+    "EMAIL_PROVIDER",
+    DEFAULT_EMAIL_PROVIDER,
+    Object.values(EMAIL_PROVIDERS),
   );
   const errorTrackingProvider = readProviderSelection(
     "ERROR_TRACKING_PROVIDER",
@@ -136,6 +148,10 @@ function loadConfig() {
   const emailGmailPubsubTopic = readOptionalEnvironmentValue("EMAIL_GMAIL_PUBSUB_TOPIC");
   const emailWebhookAudience = readOptionalEnvironmentValue("EMAIL_WEBHOOK_AUDIENCE");
   const emailPushServiceAccountEmail = readOptionalEnvironmentValue("EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL");
+  const emailOutlookAddress = readOptionalEnvironmentValue("EMAIL_OUTLOOK_ADDRESS");
+  const emailOutlookTenantId = readOptionalEnvironmentValue("EMAIL_OUTLOOK_TENANT_ID");
+  const emailOutlookClientId = readOptionalEnvironmentValue("EMAIL_OUTLOOK_CLIENT_ID");
+  const emailOutlookClientSecret = readOptionalEnvironmentValue("EMAIL_OUTLOOK_CLIENT_SECRET");
   const emailWatchRenewIntervalHours = readPositiveInteger(
     "EMAIL_WATCH_RENEW_INTERVAL_HOURS",
     DEFAULT_EMAIL_WATCH_RENEW_INTERVAL_HOURS,
@@ -158,6 +174,11 @@ function loadConfig() {
   const errorTrackingSentryOrganizationSlug = readOptionalEnvironmentValue(
     "ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG",
   );
+  const errorTrackingRollbarBaseUrl =
+    readOptionalEnvironmentValue("ERROR_TRACKING_ROLLBAR_BASE_URL") || DEFAULT_ROLLBAR_BASE_URL;
+  const errorTrackingRollbarAccessToken = readOptionalEnvironmentValue(
+    "ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN",
+  );
   const botName = readOptionalEnvironmentValue("BOT_NAME") || DEFAULT_BOT_NAME;
 
   return {
@@ -165,6 +186,7 @@ function loadConfig() {
     communicationProvider,
     codeHostProvider,
     deployProvider,
+    emailProvider,
     errorTrackingProvider,
     databaseUrl: readRequiredEnvironmentVariable("DATABASE_URL"),
     deployPollIntervalSeconds,
@@ -203,6 +225,10 @@ function loadConfig() {
     emailGmailPubsubTopic,
     emailWebhookAudience,
     emailPushServiceAccountEmail,
+    emailOutlookAddress,
+    emailOutlookTenantId,
+    emailOutlookClientId,
+    emailOutlookClientSecret,
     emailWatchRenewIntervalHours,
     emailSyncFallbackIntervalMinutes,
     errorTrackingPollIntervalSeconds,
@@ -210,6 +236,8 @@ function loadConfig() {
     errorTrackingSentryBaseUrl,
     errorTrackingSentryAuthToken,
     errorTrackingSentryOrganizationSlug,
+    errorTrackingRollbarBaseUrl,
+    errorTrackingRollbarAccessToken,
   };
 }
 
@@ -348,8 +376,10 @@ module.exports = {
   DEFAULT_CODE_HOST_PROVIDER,
   DEFAULT_COMMUNICATION_PROVIDER,
   DEFAULT_DEPLOY_PROVIDER,
+  DEFAULT_EMAIL_PROVIDER,
   DEFAULT_ERROR_TRACKING_PROVIDER,
   DEPLOY_PROVIDERS,
+  EMAIL_PROVIDERS,
   ERROR_TRACKING_PROVIDERS,
   DEFAULT_GITHUB_API_BASE_URL,
   DEFAULT_BITBUCKET_API_BASE_URL,
@@ -364,6 +394,7 @@ module.exports = {
   DEFAULT_BOT_NAME,
   DEFAULT_ERROR_TRACKING_POLL_INTERVAL_SECONDS,
   DEFAULT_ERROR_TRACKING_TIMEOUT_SECONDS,
+  DEFAULT_ROLLBAR_BASE_URL,
   DEFAULT_SENTRY_BASE_URL,
   resolveCodeHostApiBaseUrl,
   DEFAULT_DEPLOY_REGION,

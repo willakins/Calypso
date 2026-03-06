@@ -297,6 +297,81 @@ test("runSupportEmailSchedulerTick re-establishes watch and reruns backfill when
   assert.equal(state.threads.length, 1);
 });
 
+test("runSupportEmailSchedulerTick polls recent messages for providers without history sync", async () => {
+  const state = createSupportEmailState({
+    config: {
+      backfillCompletedAt: "2026-03-05T12:00:00.000Z",
+      enabled: true,
+      lastSyncAt: "2026-03-06T11:50:00.000Z",
+      targetChannelId: null,
+    },
+  });
+  let recentMessageCalls = 0;
+
+  await runSupportEmailSchedulerTick({
+    communicationClient: null,
+    emailClient: {
+      mailboxAddress: "support@example.com",
+      provider: "outlook",
+      async getMessageMetadata(messageId) {
+        assert.equal(messageId, "m-outlook-1");
+        return {
+          conversationId: "conversation-1",
+          from: {
+            emailAddress: {
+              address: "alice@example.com",
+            },
+          },
+          id: "m-outlook-1",
+          receivedDateTime: "2026-03-06T11:55:00.000Z",
+          subject: "Need help",
+        };
+      },
+      async listRecentInboxMessages({ afterTimestamp }) {
+        recentMessageCalls += 1;
+        assert.equal(afterTimestamp, "2026-03-06T11:50:00.000Z");
+        return [{ id: "m-outlook-1" }];
+      },
+    },
+    emailSyncFallbackIntervalMs: 5 * 60 * 1000,
+    emailWatchRenewIntervalMs: 24 * 60 * 60 * 1000,
+    getSupportEmailConfigFn: async () => state.config,
+    insertSupportEmailThreadFn: async (_pool, thread) => {
+      if (!state.threads.some((candidate) => candidate.gmail_thread_id === thread.gmailThreadId)) {
+        state.threads.push({
+          id: state.nextId++,
+          first_sender: thread.firstSender,
+          first_received_at: thread.firstReceivedAt,
+          gmail_thread_id: thread.gmailThreadId,
+          notification_sent_at: null,
+          subject: thread.subject,
+          status: "pending",
+        });
+      }
+      return state.threads[state.threads.length - 1];
+    },
+    listUnnotifiedSupportEmailThreadsFn: async () => [],
+    logger: silentLogger(),
+    markSupportEmailThreadNotificationSentFn: async () => null,
+    nowFn: () => new Date("2026-03-06T12:00:00.000Z"),
+    pool: createTransactionalPool(),
+    schedulerState: {
+      lastSkipLogMinuteKeyByReason: new Map(),
+      lastWatchRenewAttemptAt: 0,
+    },
+    updateSupportEmailRuntimeStateFn: async (_pool, updates) => {
+      applySupportEmailConfigUpdates(state.config, updates);
+      return { ...state.config };
+    },
+  });
+
+  assert.equal(recentMessageCalls, 1);
+  assert.equal(state.threads.length, 1);
+  assert.equal(state.threads[0].gmail_thread_id, "conversation-1");
+  assert.equal(state.threads[0].first_sender, "alice@example.com");
+  assert.equal(state.config.lastSyncAt, "2026-03-06T12:00:00.000Z");
+});
+
 function buildGmailMessage({ from, id, internalDate, subject, threadId }) {
   return {
     id,

@@ -46,10 +46,18 @@ class ErrorsCommand extends BaseCalypsoCommand {
       return this.buildExecutionResult(responseLines.join("\n"));
     }
 
+    const runtimeProviderConfig =
+      runtime.pool &&
+      typeof runtime.pool.query === "function" &&
+      typeof runtime.getRuntimeProviderConfigFn === "function"
+        ? await runtime.getRuntimeProviderConfigFn(runtime.pool)
+        : null;
+    const errorTrackingProvider =
+      runtimeProviderConfig?.errorTrackingProvider || runtime.errorTrackingProvider;
     const issues = await runtime.listOpenErrorTrackingIssuesFn(runtime.pool, {
       environment: config.environment,
       projectSlug: config.projectSlug,
-      provider: runtime.errorTrackingProvider,
+      provider: errorTrackingProvider,
     });
     if (issues.length === 0) {
       responseLines.push("No unresolved tracked errors.");

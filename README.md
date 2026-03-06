@@ -2,12 +2,12 @@
 
 Calypso is a platform-abstracted deployment gatekeeper for a single repository workflow.
 It currently runs with Slack + GitHub + DigitalOcean by default, while exposing provider
-abstractions for communication, code-host, deploy, and error-tracking integrations.
+abstractions for communication, code-host, deploy, email, and error-tracking integrations.
 It tracks merged pull requests in Postgres, requires explicit testing confirmation,
 blocks production deploys when untested changes exist, posts scheduled review recap messages,
 can poll one environment health endpoint for outage alerts, and can track customer support
-emails from Gmail as an actionable queue, and can poll Sentry for newly tracked unresolved
-error groups.
+emails from Gmail or Outlook as an actionable queue, and can poll Sentry or Rollbar for
+newly tracked unresolved error groups.
 
 ## What It Does
 
@@ -22,6 +22,8 @@ error groups.
   - `/calypso config communication-provider:slack|microsoft_teams`
   - `/calypso config code-host-provider:github|bitbucket`
   - `/calypso config deploy-provider:digitalocean|aws`
+  - `/calypso config email-provider:gmail|outlook`
+  - `/calypso config error-tracking-provider:sentry|rollbar`
   - `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
   - `/calypso config review-recap-recency:<Nd|Nw>`
   - `/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`
@@ -52,8 +54,8 @@ error groups.
 - Optionally triggers deploy-platform production deploy when gate is clear.
 - Optionally triggers staging deploy directly when staging app/pipeline is configured.
 - Optionally polls one configured environment URL and posts transition-based outage/recovery alerts.
-- Optionally polls one configured Sentry project/environment scope and posts one alert per new or regressed unresolved issue group.
-- Optionally ingests Gmail support mailbox activity into `support_email_threads`, posts new-email
+- Optionally polls one configured Sentry or Rollbar project/environment scope and posts one alert per new or regressed unresolved issue group.
+- Optionally ingests Gmail or Outlook support mailbox activity into `support_email_threads`, posts new-email
   notifications, and lets responders mark queued items handled.
 - Runtime display config is per communication user (defaults: time format `human`, timezone `America/New_York`).
 - Review recap schedule config is workspace-wide (defaults: Monday 9:00 AM `America/New_York`, recency `1w`).
@@ -65,7 +67,8 @@ Calypso is a single Node.js service composed of:
 - Communication platform provider (Slack implemented; Microsoft Teams implemented).
 - Code-host platform provider (GitHub implemented; Bitbucket implemented).
 - Deploy platform provider (DigitalOcean implemented; AWS CodePipeline implemented).
-- Error-tracking platform provider (Sentry implemented).
+- Email platform provider (Gmail implemented; Outlook implemented).
+- Error-tracking platform provider (Sentry implemented; Rollbar implemented).
 - Express HTTP server for webhooks.
 - Postgres persistence through `pg`.
 
@@ -163,14 +166,23 @@ src/
       base_error_tracking_platform.js
       factory.js
       providers/
+        rollbar/
+          client.js
+          error_tracking_platform.js
         sentry/
           client.js
           error_tracking_platform.js
     email/
+      base_email_platform.js
+      factory.js
       providers/
         gmail/
           client.js
+          email_platform.js
           webhook.js
+        outlook/
+          client.js
+          email_platform.js
   shared/
     durations.js
   util/
@@ -190,9 +202,10 @@ test/
   - Slash command `/calypso`.
   - Relevant Slack message event subscriptions/history scopes if you want Calypso to nudge users who type `deploying prod`.
 - Optional support-email setup:
-  - A Gmail mailbox for customer support.
-  - Google Cloud Pub/Sub topic + authenticated push subscription pointing at `POST /email/webhook`.
-  - Google OAuth client credentials + refresh token with Gmail API access.
+  - A Gmail or Outlook mailbox for customer support.
+  - For Gmail: Google Cloud Pub/Sub topic + authenticated push subscription pointing at `POST /email/webhook`.
+  - For Gmail: Google OAuth client credentials + refresh token with Gmail API access.
+  - For Outlook: Azure/Microsoft Entra app credentials with Microsoft Graph mail read access for the support mailbox.
 - Optional:
   - DigitalOcean App Platform app and token for live deploy trigger.
 
@@ -205,6 +218,7 @@ Always required:
 - `COMMUNICATION_PROVIDER` (default: `slack`)
 - `CODE_HOST_PROVIDER` (default: `github`)
 - `DEPLOY_PROVIDER` (default: `digitalocean`)
+- `EMAIL_PROVIDER` (default: `gmail`)
 - `ERROR_TRACKING_PROVIDER` (default: `sentry`)
 
 Required when `COMMUNICATION_PROVIDER=slack`:
@@ -239,6 +253,9 @@ Optional:
 - `ERROR_TRACKING_SENTRY_BASE_URL` (default `https://sentry.io`)
 - `ERROR_TRACKING_SENTRY_AUTH_TOKEN`
 - `ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG`
+- `ERROR_TRACKING_ROLLBAR_BASE_URL` (default `https://api.rollbar.com`)
+- `ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN`
+- `EMAIL_PROVIDER` (default `gmail`)
 - `EMAIL_GMAIL_ADDRESS`
 - `EMAIL_GMAIL_CLIENT_ID`
 - `EMAIL_GMAIL_CLIENT_SECRET`
@@ -246,6 +263,10 @@ Optional:
 - `EMAIL_GMAIL_PUBSUB_TOPIC`
 - `EMAIL_WEBHOOK_AUDIENCE`
 - `EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL`
+- `EMAIL_OUTLOOK_ADDRESS`
+- `EMAIL_OUTLOOK_TENANT_ID`
+- `EMAIL_OUTLOOK_CLIENT_ID`
+- `EMAIL_OUTLOOK_CLIENT_SECRET`
 - `EMAIL_WATCH_RENEW_INTERVAL_HOURS` (default `24`)
 - `EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES` (default `5`)
 
@@ -260,8 +281,12 @@ Provider support matrix:
 - Deploy:
   - `digitalocean`: implemented
   - `aws`: implemented (CodePipeline)
+- Email:
+  - `gmail`: implemented
+  - `outlook`: implemented
 - Error tracking:
   - `sentry`: implemented
+  - `rollbar`: implemented
 
 ### How To Get Each Value
 
@@ -283,10 +308,16 @@ Provider support matrix:
 - Supported values: `digitalocean` (implemented), `aws` (implemented via CodePipeline).
 - Default: `digitalocean`.
 
+`EMAIL_PROVIDER`
+
+- Provider selector for support-email integration.
+- Supported values: `gmail` (implemented), `outlook` (implemented).
+- Default: `gmail`.
+
 `ERROR_TRACKING_PROVIDER`
 
 - Provider selector for error-tracking integration.
-- Supported values: `sentry` (implemented).
+- Supported values: `sentry` (implemented), `rollbar` (implemented).
 - Default: `sentry`.
 
 `DEPLOY_REGION`
@@ -454,6 +485,15 @@ Provider support matrix:
 
 - Organization slug used in Sentry API paths, for example `acme`.
 
+`ERROR_TRACKING_ROLLBAR_BASE_URL` (optional)
+
+- Base URL for Rollbar API requests.
+- Defaults to `https://api.rollbar.com`.
+
+`ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN` (optional, required to enable Rollbar polling)
+
+- Rollbar project or account access token used to list active items.
+
 `EMAIL_GMAIL_ADDRESS` (optional, enables support-email integration when paired with the Gmail credentials below)
 
 - Support mailbox address Calypso should monitor, for example `support@example.com`.
@@ -484,14 +524,27 @@ Provider support matrix:
 - Extra verification for the Pub/Sub authenticated push token.
 - Set this to the service account email used by the push subscription if you want Calypso to reject tokens from other service accounts.
 
+`EMAIL_OUTLOOK_ADDRESS` (optional, enables Outlook support-email integration when paired with the Outlook credentials below)
+
+- Support mailbox address Calypso should monitor with Microsoft Graph, for example `support@example.com`.
+- Also used to ignore messages sent from the support mailbox itself.
+
+`EMAIL_OUTLOOK_TENANT_ID`, `EMAIL_OUTLOOK_CLIENT_ID`, and `EMAIL_OUTLOOK_CLIENT_SECRET` (optional)
+
+- Microsoft Entra application credentials used to fetch Microsoft Graph access tokens.
+- The app needs application permission to read mail for the configured mailbox.
+
 `EMAIL_WATCH_RENEW_INTERVAL_HOURS` (optional)
 
 - How often Calypso attempts to renew the Gmail watch before expiration.
+- Used only by the Gmail provider.
 - Default: `24` hours.
 
 `EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES` (optional)
 
-- Fallback Gmail history sync cadence when no push notification arrives.
+- Fallback support-email sync cadence.
+- For Gmail, this is the fallback history-sync interval when no push notification arrives.
+- For Outlook, this is the main polling interval.
 - Default: `5` minutes.
 
 ## Hosting
@@ -540,7 +593,7 @@ This local command starts:
 
 - `https://<ngrok-domain>/codehost/webhook`
 
-If you enable support-email monitoring locally, also configure your Pub/Sub push subscription to:
+If you enable Gmail support-email monitoring locally, also configure your Pub/Sub push subscription to:
 
 - `https://<ngrok-domain>/email/webhook`
 
@@ -593,7 +646,7 @@ Steps:
 6. Configure App health check path to `/healthz`.
 7. Deploy the app.
 8. Set webhook URL to `https://<your-app-domain>/codehost/webhook`.
-9. If using support email monitoring, set Pub/Sub push endpoint to `https://<your-app-domain>/email/webhook`.
+9. If using Gmail support email monitoring, set Pub/Sub push endpoint to `https://<your-app-domain>/email/webhook`.
 10. Smoke test:
    - `/calypso help`
    - `/calypso status`
@@ -636,14 +689,15 @@ curl https://<your-domain>/healthz
 
 10. Configure webhook:
    - `https://<your-domain>/codehost/webhook`
-11. If using support email monitoring, configure Pub/Sub push endpoint:
+11. If using Gmail support email monitoring, configure Pub/Sub push endpoint:
    - `https://<your-domain>/email/webhook`
 
 Operational notes:
 
 - Slack Socket Mode means slash commands do not require a public Slack request URL.
 - Slack `deploying prod` tips require the app to receive the relevant Slack message events for the channels or conversations you want monitored.
-- Support-email monitoring requires a public `POST /email/webhook` endpoint plus a valid Gmail watch configuration.
+- Gmail support-email monitoring requires a public `POST /email/webhook` endpoint plus a valid Gmail watch configuration.
+- Outlook support-email monitoring is polling-only and does not require a public email webhook.
 - Keep one primary Calypso runtime for stable webhook ingestion and schedulers.
 - If you use the Droplet Compose DB service, do not expose `5432` publicly.
 
@@ -739,9 +793,28 @@ Rules:
 
 - Sets the channel that receives environment down and recovery alerts.
 
+`/calypso config error-tracking:on|off`
+
+- Enables or disables error-tracking polling.
+
+`/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
+
+- Sets the channel that receives new-issue and regression alerts.
+
+`/calypso config error-tracking-project:<PROJECT_SLUG>`
+
+- Sets the active error-tracking project scope.
+- For Sentry, use the project slug.
+- For Rollbar, use the numeric project id if you want Calypso to filter the items API to one project.
+
+`/calypso config error-tracking-environment:<ENVIRONMENT|any>`
+
+- Sets the active error-tracking environment filter.
+- Use `any` to clear the environment filter.
+
 `/calypso config email-monitor:on|off`
 
-- Enables or disables Gmail support-email ingestion.
+- Enables or disables support-email ingestion for the active email provider.
 
 `/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
 
@@ -774,6 +847,16 @@ Rules:
 
 - Sets deploy platform provider in runtime config.
 - Takes effect immediately for `/calypso` command handling.
+
+`/calypso config email-provider:gmail|outlook`
+
+- Sets the support-email provider in runtime config.
+- Resets provider-specific email sync state so the new provider can establish a fresh baseline.
+
+`/calypso config error-tracking-provider:sentry|rollbar`
+
+- Sets the error-tracking provider in runtime config.
+- Resets provider-specific error-tracking sync state so the new provider can establish a fresh baseline.
 
 `/calypso sync`
 
@@ -883,8 +966,10 @@ Rules:
 ## Error Tracking Monitoring
 
 - Runs as a background scheduler in the app runtime.
-- Polls one configured Sentry project scope every `ERROR_TRACKING_POLL_INTERVAL_SECONDS` (default `300`).
-- Uses `ERROR_TRACKING_SENTRY_AUTH_TOKEN` and `ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG` to resolve the configured project slug and list unresolved issue groups.
+- Polls one configured Sentry or Rollbar project scope every `ERROR_TRACKING_POLL_INTERVAL_SECONDS` (default `300`).
+- Provider is selected at runtime with `/calypso config error-tracking-provider:sentry|rollbar`.
+- Sentry uses `ERROR_TRACKING_SENTRY_AUTH_TOKEN` and `ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG`.
+- Rollbar uses `ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN`.
 - First successful sync after enablement or project/environment scope change establishes baseline state and does not back-alert existing unresolved issues.
 - Posts only on transitions:
   - first observation of a newly tracked unresolved issue posts one alert
@@ -895,9 +980,11 @@ Rules:
 ## Support Email Monitoring
 
 - Runs as a background scheduler in the app runtime.
-- Requires Gmail OAuth refresh-token credentials and a Pub/Sub topic for `users.watch`.
+- Provider is selected at runtime with `/calypso config email-provider:gmail|outlook`.
 - First enablement performs a one-time 7-day inbox backfill.
+- Gmail mode requires OAuth refresh-token credentials plus a Pub/Sub topic for `users.watch`.
 - Gmail push notifications update pending history, and Calypso also runs fallback history sync every `EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES` (default `5`).
+- Outlook mode uses Microsoft Graph with app credentials and polls the mailbox every `EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES` (default `5`).
 - New inbox threads create rows in `support_email_threads` with:
   - subject
   - first sender

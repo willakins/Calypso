@@ -9,6 +9,7 @@ const {
   getConfiguredTimeZone,
   getLastProdDeployAt,
   getReviewRecapConfig,
+  getRuntimeProviderConfig,
   getSupportEmailConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
@@ -30,6 +31,8 @@ const {
   setConfiguredCommunicationProvider,
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
+  setConfiguredEmailProvider,
+  setConfiguredErrorTrackingProvider,
   setErrorTrackingChannel,
   setErrorTrackingEnabled,
   setErrorTrackingEnvironment,
@@ -110,6 +113,7 @@ function createDefaultDependencies() {
     isWorkspaceAdminFn: isWorkspaceAdmin,
     insertDeploymentFn: insertDeployment,
     getReviewRecapConfigFn: getReviewRecapConfig,
+    getRuntimeProviderConfigFn: getRuntimeProviderConfig,
     getSupportEmailConfigFn: getSupportEmailConfig,
     listPendingSupportEmailThreadsFn: listPendingSupportEmailThreads,
     listOpenErrorTrackingIssuesFn: listOpenErrorTrackingIssues,
@@ -135,6 +139,8 @@ function createDefaultDependencies() {
     setConfiguredCommunicationProviderFn: setConfiguredCommunicationProvider,
     setConfiguredCodeHostProviderFn: setConfiguredCodeHostProvider,
     setConfiguredDeployProviderFn: setConfiguredDeployProvider,
+    setConfiguredEmailProviderFn: setConfiguredEmailProvider,
+    setConfiguredErrorTrackingProviderFn: setConfiguredErrorTrackingProvider,
     setErrorTrackingChannelFn: setErrorTrackingChannel,
     setErrorTrackingEnabledFn: setErrorTrackingEnabled,
     setErrorTrackingEnvironmentFn: setErrorTrackingEnvironment,
@@ -196,6 +202,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.getConfiguredTimeZoneFn || defaultDependencies.getConfiguredTimeZoneFn,
     getReviewRecapConfigFn:
       mergedOptions.getReviewRecapConfigFn || defaultDependencies.getReviewRecapConfigFn,
+    getRuntimeProviderConfigFn:
+      mergedOptions.getRuntimeProviderConfigFn || defaultDependencies.getRuntimeProviderConfigFn,
     getSupportEmailConfigFn:
       mergedOptions.getSupportEmailConfigFn || defaultDependencies.getSupportEmailConfigFn,
     isUserWhitelistedForDeployFn:
@@ -265,6 +273,11 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.setConfiguredCodeHostProviderFn,
     setConfiguredDeployProviderFn:
       mergedOptions.setConfiguredDeployProviderFn || defaultDependencies.setConfiguredDeployProviderFn,
+    setConfiguredEmailProviderFn:
+      mergedOptions.setConfiguredEmailProviderFn || defaultDependencies.setConfiguredEmailProviderFn,
+    setConfiguredErrorTrackingProviderFn:
+      mergedOptions.setConfiguredErrorTrackingProviderFn ||
+      defaultDependencies.setConfiguredErrorTrackingProviderFn,
     setErrorTrackingChannelFn:
       mergedOptions.setErrorTrackingChannelFn || defaultDependencies.setErrorTrackingChannelFn,
     setErrorTrackingEnabledFn:

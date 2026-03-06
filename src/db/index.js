@@ -38,6 +38,8 @@ const RUNTIME_PROVIDER_DEFAULTS = Object.freeze({
   communicationProvider: "slack",
   codeHostProvider: "github",
   deployProvider: "digitalocean",
+  emailProvider: "gmail",
+  errorTrackingProvider: "sentry",
 });
 const ENVIRONMENT_STATUS_STATES = Object.freeze({
   unknown: "unknown",
@@ -95,6 +97,14 @@ const CODE_HOST_PROVIDERS = Object.freeze({
 const DEPLOY_PROVIDERS = Object.freeze({
   digitalocean: "digitalocean",
   aws: "aws",
+});
+const EMAIL_PROVIDERS = Object.freeze({
+  gmail: "gmail",
+  outlook: "outlook",
+});
+const ERROR_TRACKING_PROVIDERS = Object.freeze({
+  sentry: "sentry",
+  rollbar: "rollbar",
 });
 
 function createPool(databaseConnectionString) {
@@ -675,7 +685,9 @@ async function getRuntimeProviderConfig(pool) {
       SELECT
         communication_provider,
         code_host_provider,
-        deploy_provider
+        deploy_provider,
+        email_provider,
+        error_tracking_provider
       FROM runtime_config
       WHERE id = 1
       LIMIT 1
@@ -693,6 +705,12 @@ async function getRuntimeProviderConfig(pool) {
     deployProvider:
       normalizeDeployProvider(row.deploy_provider) ||
       RUNTIME_PROVIDER_DEFAULTS.deployProvider,
+    emailProvider:
+      normalizeEmailProvider(row.email_provider) ||
+      RUNTIME_PROVIDER_DEFAULTS.emailProvider,
+    errorTrackingProvider:
+      normalizeErrorTrackingProvider(row.error_tracking_provider) ||
+      RUNTIME_PROVIDER_DEFAULTS.errorTrackingProvider,
   };
 }
 
@@ -1655,6 +1673,67 @@ async function setConfiguredDeployProvider(pool, deployProvider, updatedBy) {
   });
 }
 
+async function setConfiguredEmailProvider(pool, emailProvider, updatedBy) {
+  const normalizedEmailProvider = normalizeEmailProvider(emailProvider);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedEmailProvider) {
+    throw new Error(`Unsupported email provider: ${emailProvider}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return withTransaction(pool, async (queryable) => {
+    await upsertRuntimeProviderConfig(queryable, {
+      emailProvider: normalizedEmailProvider,
+      updatedBy: normalizedUserId,
+    });
+
+    await upsertSupportEmailConfig(queryable, {
+      updatedBy: normalizedUserId,
+      clearBackfillCompletedAt: true,
+      clearLastProcessedHistoryId: true,
+      clearLastSyncAt: true,
+      clearPendingHistoryId: true,
+      clearWatchExpirationAt: true,
+    });
+
+    return {
+      emailProvider: normalizedEmailProvider,
+    };
+  });
+}
+
+async function setConfiguredErrorTrackingProvider(pool, errorTrackingProvider, updatedBy) {
+  const normalizedErrorTrackingProvider = normalizeErrorTrackingProvider(errorTrackingProvider);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedErrorTrackingProvider) {
+    throw new Error(`Unsupported error tracking provider: ${errorTrackingProvider}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return withTransaction(pool, async (queryable) => {
+    await upsertRuntimeProviderConfig(queryable, {
+      errorTrackingProvider: normalizedErrorTrackingProvider,
+      updatedBy: normalizedUserId,
+    });
+
+    await upsertErrorTrackingConfig(queryable, {
+      updatedBy: normalizedUserId,
+      clearBaselineCompletedAt: true,
+      clearLastSyncAt: true,
+      clearLastSyncError: true,
+      clearProjectSlug: true,
+    });
+
+    return {
+      errorTrackingProvider: normalizedErrorTrackingProvider,
+    };
+  });
+}
+
 async function upsertReviewRecapConfig(pool, updates) {
   const result = await pool.query(
     `
@@ -1849,17 +1928,26 @@ async function upsertSupportEmailConfig(pool, updates) {
           WHEN $11 THEN NULL
           ELSE COALESCE($4::timestamptz, support_email_config.on_call_expires_at)
         END,
-        last_processed_history_id = COALESCE($5::numeric, support_email_config.last_processed_history_id),
+        last_processed_history_id = CASE
+          WHEN $14 THEN NULL
+          ELSE COALESCE($5::numeric, support_email_config.last_processed_history_id)
+        END,
         pending_history_id = CASE
           WHEN $12 THEN NULL
           ELSE COALESCE($6::numeric, support_email_config.pending_history_id)
         END,
-        watch_expiration_at = COALESCE($7::timestamptz, support_email_config.watch_expiration_at),
+        watch_expiration_at = CASE
+          WHEN $15 THEN NULL
+          ELSE COALESCE($7::timestamptz, support_email_config.watch_expiration_at)
+        END,
         backfill_completed_at = CASE
           WHEN $13 THEN NULL
           ELSE COALESCE($8::timestamptz, support_email_config.backfill_completed_at)
         END,
-        last_sync_at = COALESCE($9::timestamptz, support_email_config.last_sync_at),
+        last_sync_at = CASE
+          WHEN $16 THEN NULL
+          ELSE COALESCE($9::timestamptz, support_email_config.last_sync_at)
+        END,
         updated_by = COALESCE(EXCLUDED.updated_by, support_email_config.updated_by),
         updated_at = NOW()
       RETURNING
@@ -1887,6 +1975,9 @@ async function upsertSupportEmailConfig(pool, updates) {
       Boolean(updates.clearOnCall),
       Boolean(updates.clearPendingHistoryId),
       Boolean(updates.clearBackfillCompletedAt),
+      Boolean(updates.clearLastProcessedHistoryId),
+      Boolean(updates.clearWatchExpirationAt),
+      Boolean(updates.clearLastSyncAt),
     ],
   );
 
@@ -1924,7 +2015,10 @@ async function upsertErrorTrackingConfig(pool, updates) {
       DO UPDATE SET
         enabled = COALESCE($1, error_tracking_config.enabled),
         target_channel_id = COALESCE($2, error_tracking_config.target_channel_id),
-        project_slug = COALESCE($3, error_tracking_config.project_slug),
+        project_slug = CASE
+          WHEN $13 THEN NULL
+          ELSE COALESCE($3, error_tracking_config.project_slug)
+        END,
         environment = CASE
           WHEN $9 THEN NULL
           ELSE COALESCE($4, error_tracking_config.environment)
@@ -1965,6 +2059,7 @@ async function upsertErrorTrackingConfig(pool, updates) {
       Boolean(updates.clearBaselineCompletedAt),
       Boolean(updates.clearLastSyncAt),
       Boolean(updates.clearLastSyncError),
+      Boolean(updates.clearProjectSlug),
     ],
   );
 
@@ -1979,6 +2074,8 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         communication_provider,
         code_host_provider,
         deploy_provider,
+        email_provider,
+        error_tracking_provider,
         updated_by,
         updated_at
       )
@@ -1987,7 +2084,9 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         COALESCE($1, '${RUNTIME_PROVIDER_DEFAULTS.communicationProvider}'),
         COALESCE($2, '${RUNTIME_PROVIDER_DEFAULTS.codeHostProvider}'),
         COALESCE($3, '${RUNTIME_PROVIDER_DEFAULTS.deployProvider}'),
-        $4,
+        COALESCE($4, '${RUNTIME_PROVIDER_DEFAULTS.emailProvider}'),
+        COALESCE($5, '${RUNTIME_PROVIDER_DEFAULTS.errorTrackingProvider}'),
+        $6,
         NOW()
       )
       ON CONFLICT (id)
@@ -1995,12 +2094,16 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         communication_provider = COALESCE($1, runtime_config.communication_provider),
         code_host_provider = COALESCE($2, runtime_config.code_host_provider),
         deploy_provider = COALESCE($3, runtime_config.deploy_provider),
+        email_provider = COALESCE($4, runtime_config.email_provider),
+        error_tracking_provider = COALESCE($5, runtime_config.error_tracking_provider),
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
       RETURNING
         communication_provider,
         code_host_provider,
         deploy_provider,
+        email_provider,
+        error_tracking_provider,
         updated_by,
         updated_at
     `,
@@ -2008,6 +2111,8 @@ async function upsertRuntimeProviderConfig(pool, updates) {
       updates.communicationProvider || null,
       updates.codeHostProvider || null,
       updates.deployProvider || null,
+      updates.emailProvider || null,
+      updates.errorTrackingProvider || null,
       updates.updatedBy || null,
     ],
   );
@@ -2296,6 +2401,33 @@ function normalizeUrl(value) {
   }
 }
 
+async function withTransaction(pool, callback) {
+  if (typeof pool.connect !== "function") {
+    await pool.query("BEGIN");
+    try {
+      const result = await callback(pool);
+      await pool.query("COMMIT");
+      return result;
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      throw error;
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await callback(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 function normalizeErrorTrackingProjectSlug(value) {
   const normalizedValue = normalizeOptionalText(value);
   if (!normalizedValue) {
@@ -2330,9 +2462,16 @@ function normalizeErrorTrackingEnvironmentKey(value) {
   return normalizedEnvironment || "";
 }
 
+function normalizeEmailProvider(value) {
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  return Object.values(EMAIL_PROVIDERS).includes(normalizedValue) ? normalizedValue : null;
+}
+
 function normalizeErrorTrackingProvider(value) {
   const normalizedValue = String(value || "").toLowerCase().trim();
-  return normalizedValue === "" ? null : normalizedValue;
+  return Object.values(ERROR_TRACKING_PROVIDERS).includes(normalizedValue)
+    ? normalizedValue
+    : null;
 }
 
 function normalizeErrorTrackingIssueStatus(value) {
@@ -2602,6 +2741,8 @@ module.exports = {
   setConfiguredCommunicationProvider,
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
+  setConfiguredEmailProvider,
+  setConfiguredErrorTrackingProvider,
   setSupportEmailChannel,
   setSupportEmailMonitorEnabled,
   setSupportEmailOnCall,

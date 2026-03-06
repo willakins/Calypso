@@ -20,6 +20,7 @@ function startErrorTrackingScheduler(options = {}) {
     markErrorTrackingIssueNotificationSentFn = markErrorTrackingIssueNotificationSent,
     nowFn = () => new Date(),
     pool = null,
+    resolveErrorTrackingContextFn = null,
     syncErrorTrackingIssueSnapshotFn = syncErrorTrackingIssueSnapshot,
     tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
     updateErrorTrackingRuntimeStateFn = updateErrorTrackingRuntimeState,
@@ -48,6 +49,7 @@ function startErrorTrackingScheduler(options = {}) {
         markErrorTrackingIssueNotificationSentFn,
         nowFn,
         pool,
+        resolveErrorTrackingContextFn,
         schedulerState,
         syncErrorTrackingIssueSnapshotFn,
         updateErrorTrackingRuntimeStateFn,
@@ -80,17 +82,25 @@ async function runErrorTrackingSchedulerTick({
   markErrorTrackingIssueNotificationSentFn = markErrorTrackingIssueNotificationSent,
   nowFn = () => new Date(),
   pool,
+  resolveErrorTrackingContextFn = null,
   schedulerState = { lastSkipLogMinuteKeyByReason: new Map() },
   syncErrorTrackingIssueSnapshotFn = syncErrorTrackingIssueSnapshot,
   updateErrorTrackingRuntimeStateFn = updateErrorTrackingRuntimeState,
 }) {
   const now = nowFn();
+  const resolvedContext = await resolveCurrentErrorTrackingContext({
+    errorTrackingClient,
+    errorTrackingProvider,
+    resolveErrorTrackingContextFn,
+  });
+  const currentErrorTrackingClient = resolvedContext.errorTrackingClient;
+  const currentErrorTrackingProvider = resolvedContext.errorTrackingProvider;
 
   if (!pool) {
     logSchedulerSkip({ logger, now, reason: "missing_pool", schedulerState });
     return null;
   }
-  if (!errorTrackingClient || typeof errorTrackingClient.listUnresolvedIssues !== "function") {
+  if (!currentErrorTrackingClient || typeof currentErrorTrackingClient.listUnresolvedIssues !== "function") {
     logSchedulerSkip({ logger, now, reason: "missing_client", schedulerState });
     return null;
   }
@@ -115,7 +125,7 @@ async function runErrorTrackingSchedulerTick({
     }
 
     const observedAt = now.toISOString();
-    const unresolvedIssues = await errorTrackingClient.listUnresolvedIssues({
+    const unresolvedIssues = await currentErrorTrackingClient.listUnresolvedIssues({
       environment: config.environment,
       projectSlug: config.projectSlug,
       timeoutMs: errorTrackingTimeoutMs,
@@ -133,7 +143,7 @@ async function runErrorTrackingSchedulerTick({
         })),
         observedAt,
         projectSlug: config.projectSlug,
-        provider: errorTrackingProvider,
+        provider: currentErrorTrackingProvider,
         suppressNotifications,
       });
 
@@ -155,7 +165,7 @@ async function runErrorTrackingSchedulerTick({
     const pendingIssues = await listUnnotifiedErrorTrackingIssuesFn(pool, {
       environment: config.environment,
       projectSlug: config.projectSlug,
-      provider: errorTrackingProvider,
+      provider: currentErrorTrackingProvider,
     });
     let postedCount = 0;
 
@@ -233,6 +243,27 @@ function logSchedulerSkip({ logger, now, reason, schedulerState }) {
   }
 
   logger.info("Error tracking scheduler skipped: no target channel configured.");
+}
+
+async function resolveCurrentErrorTrackingContext({
+  errorTrackingClient,
+  errorTrackingProvider,
+  resolveErrorTrackingContextFn,
+}) {
+  if (typeof resolveErrorTrackingContextFn === "function") {
+    const resolvedValue = await resolveErrorTrackingContextFn();
+    if (resolvedValue && typeof resolvedValue === "object") {
+      return {
+        errorTrackingClient: resolvedValue.errorTrackingClient || null,
+        errorTrackingProvider: resolvedValue.errorTrackingProvider || errorTrackingProvider,
+      };
+    }
+  }
+
+  return {
+    errorTrackingClient,
+    errorTrackingProvider,
+  };
 }
 
 async function withTransaction(pool, callback) {

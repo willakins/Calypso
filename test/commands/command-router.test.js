@@ -78,6 +78,8 @@ test("handleCalypsoCommand returns config topic help", () => {
   assert.match(result.responseText, /\*Calypso Config Help\*/);
   assert.match(result.responseText, /\/calypso config time-format:human\|long/);
   assert.match(result.responseText, /\/calypso config communication-provider:slack\|microsoft_teams/);
+  assert.match(result.responseText, /\/calypso config email-provider:gmail\|outlook/);
+  assert.match(result.responseText, /\/calypso config error-tracking-provider:sentry\|rollbar/);
   assert.match(result.responseText, /\/calypso help reviews/);
   assert.match(result.responseText, /\/calypso help monitoring/);
   assert.match(result.responseText, /\/calypso help email/);
@@ -345,6 +347,26 @@ test("handleCalypsoCommand routes config code-host provider input", () => {
 
   assert.equal(result.action, "config_code_host_provider");
   assert.equal(result.codeHostProvider, "github");
+});
+
+test("handleCalypsoCommand routes config email provider input", () => {
+  const result = handleCalypsoCommand({
+    text: "config email-provider:outlook",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_email_provider");
+  assert.equal(result.emailProvider, "outlook");
+});
+
+test("handleCalypsoCommand routes config error tracking provider input", () => {
+  const result = handleCalypsoCommand({
+    text: "config error-tracking-provider:rollbar",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_error_tracking_provider");
+  assert.equal(result.errorTrackingProvider, "rollbar");
 });
 
 test("handleCalypsoCommand routes config deploy provider input", () => {
@@ -2609,5 +2631,75 @@ test("registerCalypsoCommand config command updates aws deploy provider", async 
   assert.match(payload.text, /Updated deploy provider to `aws`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "aws");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates email provider", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredEmailProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { email_provider: provider, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config email-provider:outlook", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated email provider to `outlook`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].provider, "outlook");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates error-tracking provider", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredErrorTrackingProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { error_tracking_provider: provider, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config error-tracking-provider:rollbar", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated error-tracking provider to `rollbar`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].provider, "rollbar");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });

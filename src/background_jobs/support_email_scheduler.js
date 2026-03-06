@@ -13,6 +13,7 @@ const WATCH_RENEW_LEAD_MS = 24 * 60 * 60 * 1000;
 function startSupportEmailScheduler(options = {}) {
   const {
     communicationClient = null,
+    emailClient = null,
     emailSyncFallbackIntervalMs = 5 * 60 * 1000,
     emailWatchRenewIntervalMs = 24 * 60 * 60 * 1000,
     getSupportEmailConfigFn = getSupportEmailConfig,
@@ -23,12 +24,14 @@ function startSupportEmailScheduler(options = {}) {
     markSupportEmailThreadNotificationSentFn = markSupportEmailThreadNotificationSent,
     nowFn = () => new Date(),
     pool,
+    resolveEmailClientFn = null,
     tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
     updateSupportEmailRuntimeStateFn = updateSupportEmailRuntimeState,
   } = options;
+  const configuredEmailClient = emailClient || gmailClient || null;
 
-  if (!pool || !gmailClient) {
-    logger.warn("Support email scheduler disabled: missing pool or Gmail client.");
+  if (!pool || (!configuredEmailClient && typeof resolveEmailClientFn !== "function")) {
+    logger.warn("Support email scheduler disabled: missing pool or email client.");
     return {
       stop() {},
     };
@@ -42,16 +45,17 @@ function startSupportEmailScheduler(options = {}) {
   async function tick() {
     await runSupportEmailSchedulerTick({
       communicationClient,
+      emailClient: configuredEmailClient,
       emailSyncFallbackIntervalMs,
       emailWatchRenewIntervalMs,
       getSupportEmailConfigFn,
-      gmailClient,
       insertSupportEmailThreadFn,
       listUnnotifiedSupportEmailThreadsFn,
       logger,
       markSupportEmailThreadNotificationSentFn,
       nowFn,
       pool,
+      resolveEmailClientFn,
       schedulerState,
       updateSupportEmailRuntimeStateFn,
     });
@@ -71,6 +75,7 @@ function startSupportEmailScheduler(options = {}) {
 
 async function runSupportEmailSchedulerTick({
   communicationClient,
+  emailClient,
   emailSyncFallbackIntervalMs,
   emailWatchRenewIntervalMs,
   getSupportEmailConfigFn,
@@ -81,20 +86,33 @@ async function runSupportEmailSchedulerTick({
   markSupportEmailThreadNotificationSentFn,
   nowFn,
   pool,
+  resolveEmailClientFn,
   schedulerState,
   updateSupportEmailRuntimeStateFn,
 }) {
   try {
     const now = nowFn();
+    const currentEmailClient = await resolveCurrentEmailClient({
+      emailClient: emailClient || gmailClient || null,
+      resolveEmailClientFn,
+    });
+    if (!currentEmailClient) {
+      logSchedulerSkip({ logger, now, reason: "missing_email_client", schedulerState });
+      return;
+    }
+
     let config = await getSupportEmailConfigFn(pool);
     if (!config.enabled) {
       logSchedulerSkip({ logger, now, reason: "disabled", schedulerState });
       return;
     }
 
-    if (shouldRenewMailboxWatch({ config, emailWatchRenewIntervalMs, now, schedulerState })) {
+    if (
+      typeof currentEmailClient.watchMailbox === "function" &&
+      shouldRenewMailboxWatch({ config, emailWatchRenewIntervalMs, now, schedulerState })
+    ) {
       schedulerState.lastWatchRenewAttemptAt = now.getTime();
-      const watchState = await gmailClient.watchMailbox();
+      const watchState = await currentEmailClient.watchMailbox();
       config = await updateSupportEmailRuntimeStateFn(pool, {
         lastProcessedHistoryId: config.lastProcessedHistoryId || watchState.historyId,
         lastSyncAt: now.toISOString(),
@@ -104,31 +122,43 @@ async function runSupportEmailSchedulerTick({
 
     if (!config.backfillCompletedAt) {
       config = await runSupportEmailBackfill({
-        gmailClient,
+        emailClient: currentEmailClient,
         insertSupportEmailThreadFn,
         now,
         pool,
-        supportMailboxAddress: gmailClient.gmailAddress,
+        supportMailboxAddress: resolveMailboxAddress(currentEmailClient),
         updateSupportEmailRuntimeStateFn,
       });
     }
 
-    const hasPendingHistory =
-      compareHistoryIds(config.pendingHistoryId, config.lastProcessedHistoryId) > 0;
     const fallbackSyncDue = isFallbackSyncDue({
       config,
       emailSyncFallbackIntervalMs,
       now,
     });
-    if (config.lastProcessedHistoryId && (hasPendingHistory || fallbackSyncDue)) {
+    const supportsIncrementalSync = typeof currentEmailClient.listHistory === "function";
+    const hasPendingHistory = supportsIncrementalSync
+      ? compareHistoryIds(config.pendingHistoryId, config.lastProcessedHistoryId) > 0
+      : false;
+    if (supportsIncrementalSync && config.lastProcessedHistoryId && (hasPendingHistory || fallbackSyncDue)) {
       config = await syncSupportEmailHistory({
         config,
-        gmailClient,
+        emailClient: currentEmailClient,
         insertSupportEmailThreadFn,
         logger,
         now,
         pool,
-        supportMailboxAddress: gmailClient.gmailAddress,
+        supportMailboxAddress: resolveMailboxAddress(currentEmailClient),
+        updateSupportEmailRuntimeStateFn,
+      });
+    } else if (!supportsIncrementalSync && fallbackSyncDue) {
+      config = await syncSupportEmailRecentMessages({
+        config,
+        emailClient: currentEmailClient,
+        insertSupportEmailThreadFn,
+        now,
+        pool,
+        supportMailboxAddress: resolveMailboxAddress(currentEmailClient),
         updateSupportEmailRuntimeStateFn,
       });
     }
@@ -150,7 +180,7 @@ async function runSupportEmailSchedulerTick({
 }
 
 async function runSupportEmailBackfill({
-  gmailClient,
+  emailClient,
   insertSupportEmailThreadFn,
   now,
   pool,
@@ -158,11 +188,11 @@ async function runSupportEmailBackfill({
   updateSupportEmailRuntimeStateFn,
 }) {
   const backfillStartAt = new Date(now.getTime() - DEFAULT_BACKFILL_DAYS * 24 * 60 * 60 * 1000);
-  const recentMessages = await gmailClient.listRecentInboxMessages({
+  const recentMessages = await emailClient.listRecentInboxMessages({
     afterTimestamp: backfillStartAt.toISOString(),
   });
   const pendingThreads = await buildSupportEmailThreadsFromMessageRefs({
-    gmailClient,
+    emailClient,
     messageRefs: recentMessages,
     supportMailboxAddress,
   });
@@ -186,7 +216,7 @@ async function runSupportEmailBackfill({
 
 async function syncSupportEmailHistory({
   config,
-  gmailClient,
+  emailClient,
   insertSupportEmailThreadFn,
   logger,
   now,
@@ -195,12 +225,12 @@ async function syncSupportEmailHistory({
   updateSupportEmailRuntimeStateFn,
 }) {
   try {
-    const historyResponse = await gmailClient.listHistory({
+    const historyResponse = await emailClient.listHistory({
       startHistoryId: config.lastProcessedHistoryId,
     });
     const messageRefs = extractMessageRefsFromHistory(historyResponse.history);
     const pendingThreads = await buildSupportEmailThreadsFromMessageRefs({
-      gmailClient,
+      emailClient,
       messageRefs,
       supportMailboxAddress,
     });
@@ -227,7 +257,7 @@ async function syncSupportEmailHistory({
     }
 
     logger.error("Support email history id expired. Re-establishing Gmail watch and rerunning backfill.");
-    const watchState = await gmailClient.watchMailbox();
+    const watchState = await emailClient.watchMailbox();
     await updateSupportEmailRuntimeStateFn(pool, {
       backfillCompletedAt: null,
       lastProcessedHistoryId: watchState.historyId,
@@ -237,7 +267,7 @@ async function syncSupportEmailHistory({
     });
 
     return runSupportEmailBackfill({
-      gmailClient,
+      emailClient,
       insertSupportEmailThreadFn,
       now,
       pool,
@@ -245,6 +275,39 @@ async function syncSupportEmailHistory({
       updateSupportEmailRuntimeStateFn,
     });
   }
+}
+
+async function syncSupportEmailRecentMessages({
+  config,
+  emailClient,
+  insertSupportEmailThreadFn,
+  now,
+  pool,
+  supportMailboxAddress,
+  updateSupportEmailRuntimeStateFn,
+}) {
+  const recentMessages = await emailClient.listRecentInboxMessages({
+    afterTimestamp: config.lastSyncAt || config.backfillCompletedAt || null,
+  });
+  const pendingThreads = await buildSupportEmailThreadsFromMessageRefs({
+    emailClient,
+    messageRefs: recentMessages,
+    supportMailboxAddress,
+  });
+
+  await withTransaction(pool, async (queryable) => {
+    for (const thread of pendingThreads) {
+      await insertSupportEmailThreadFn(queryable, thread);
+    }
+
+    await updateSupportEmailRuntimeStateFn(queryable, {
+      lastSyncAt: now.toISOString(),
+    });
+  });
+
+  return updateSupportEmailRuntimeStateFn(pool, {
+    lastSyncAt: now.toISOString(),
+  });
 }
 
 async function deliverSupportEmailNotifications({
@@ -283,7 +346,7 @@ async function deliverSupportEmailNotifications({
 }
 
 async function buildSupportEmailThreadsFromMessageRefs({
-  gmailClient,
+  emailClient,
   messageRefs,
   supportMailboxAddress,
 }) {
@@ -296,7 +359,7 @@ async function buildSupportEmailThreadsFromMessageRefs({
   const threadCandidatesByThreadId = new Map();
 
   for (const messageId of messageIdSet) {
-    const message = await gmailClient.getMessageMetadata(messageId);
+    const message = await emailClient.getMessageMetadata(messageId);
     const candidateThread = mapMessageToSupportEmailThread(message, normalizedMailboxAddress);
     if (!candidateThread) {
       continue;
@@ -314,13 +377,11 @@ async function buildSupportEmailThreadsFromMessageRefs({
 }
 
 function mapMessageToSupportEmailThread(message, supportMailboxAddress) {
-  const gmailThreadId = String(message?.threadId || "").trim();
+  const gmailThreadId = String(message?.threadId || message?.conversationId || "").trim();
   const gmailFirstMessageId = String(message?.id || "").trim();
-  const internalDate = normalizeInternalDate(message?.internalDate);
-  const headers = Array.isArray(message?.payload?.headers) ? message.payload.headers : [];
-  const subject = readHeaderValue(headers, "Subject");
-  const fromHeader = readHeaderValue(headers, "From");
-  const firstSender = extractEmailAddress(fromHeader) || fromHeader || null;
+  const internalDate = normalizeMessageReceivedAt(message);
+  const subject = readMessageSubject(message);
+  const firstSender = readMessageSender(message);
   const normalizedFirstSender = String(firstSender || "").trim().toLowerCase();
 
   if (!gmailThreadId || !gmailFirstMessageId || !internalDate) {
@@ -421,6 +482,61 @@ function normalizeInternalDate(value) {
   return new Date(milliseconds).toISOString();
 }
 
+function normalizeMessageReceivedAt(message) {
+  const internalDate = normalizeInternalDate(message?.internalDate);
+  if (internalDate) {
+    return internalDate;
+  }
+
+  const receivedDateTime = String(message?.receivedDateTime || "").trim();
+  if (!receivedDateTime) {
+    return null;
+  }
+
+  const parsedDate = new Date(receivedDateTime);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString();
+}
+
+function readMessageSubject(message) {
+  const directSubject = String(message?.subject || "").trim();
+  if (directSubject) {
+    return directSubject;
+  }
+
+  const headers = Array.isArray(message?.payload?.headers) ? message.payload.headers : [];
+  return readHeaderValue(headers, "Subject");
+}
+
+function readMessageSender(message) {
+  const outlookSender = String(message?.from?.emailAddress?.address || "").trim();
+  if (outlookSender) {
+    return outlookSender.toLowerCase();
+  }
+
+  const headers = Array.isArray(message?.payload?.headers) ? message.payload.headers : [];
+  const fromHeader = readHeaderValue(headers, "From");
+  return extractEmailAddress(fromHeader) || fromHeader || null;
+}
+
+function resolveMailboxAddress(emailClient) {
+  return String(emailClient?.mailboxAddress || emailClient?.gmailAddress || "")
+    .trim()
+    .toLowerCase();
+}
+
+async function resolveCurrentEmailClient({ emailClient, resolveEmailClientFn }) {
+  if (typeof resolveEmailClientFn === "function") {
+    const resolvedValue = await resolveEmailClientFn();
+    if (resolvedValue && typeof resolvedValue === "object" && "emailClient" in resolvedValue) {
+      return resolvedValue.emailClient || null;
+    }
+
+    return resolvedValue || null;
+  }
+
+  return emailClient || null;
+}
+
 function shouldRenewMailboxWatch({ config, emailWatchRenewIntervalMs, now, schedulerState }) {
   if (schedulerState.lastWatchRenewAttemptAt + emailWatchRenewIntervalMs > now.getTime()) {
     return false;
@@ -503,6 +619,10 @@ function logSchedulerSkip({ logger, now, reason, schedulerState }) {
   schedulerState.lastSkipLogMinuteKeyByReason.set(reason, minuteKey);
   if (reason === "disabled") {
     logger.info("Support email scheduler skipped: monitoring disabled.");
+    return;
+  }
+  if (reason === "missing_email_client") {
+    logger.info("Support email scheduler skipped: missing email client.");
     return;
   }
   if (reason === "missing_communication_client") {

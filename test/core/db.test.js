@@ -15,6 +15,8 @@ const {
   setConfiguredCodeHostProvider,
   setConfiguredCommunicationProvider,
   setConfiguredDeployProvider,
+  setConfiguredEmailProvider,
+  setConfiguredErrorTrackingProvider,
   markStaleOpenPullRequestsClosed,
   markReviewRecapSent,
   setConfiguredTimeFormat,
@@ -658,6 +660,8 @@ test("getRuntimeProviderConfig returns defaults when singleton row is missing", 
     communicationProvider: "slack",
     codeHostProvider: "github",
     deployProvider: "digitalocean",
+    emailProvider: "gmail",
+    errorTrackingProvider: "sentry",
   });
 });
 
@@ -670,6 +674,8 @@ test("getRuntimeProviderConfig returns configured providers", async () => {
             communication_provider: "microsoft_teams",
             code_host_provider: "bitbucket",
             deploy_provider: "aws",
+            email_provider: "outlook",
+            error_tracking_provider: "rollbar",
           },
         ],
       };
@@ -682,6 +688,8 @@ test("getRuntimeProviderConfig returns configured providers", async () => {
     communicationProvider: "microsoft_teams",
     codeHostProvider: "bitbucket",
     deployProvider: "aws",
+    emailProvider: "outlook",
+    errorTrackingProvider: "rollbar",
   });
 });
 
@@ -977,6 +985,81 @@ test("setConfiguredDeployProvider rejects unsupported provider", async () => {
   await assert.rejects(async () => {
     await setConfiguredDeployProvider(pool, "render", "UADMIN");
   }, /Unsupported deploy provider/);
+});
+
+test("setConfiguredEmailProvider updates runtime config and clears email sync state", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") {
+        return { rows: [] };
+      }
+      if (/INSERT INTO runtime_config/.test(sql)) {
+        return {
+          rows: [{ email_provider: "outlook", updated_by: "UADMIN" }],
+        };
+      }
+      if (/INSERT INTO support_email_config/.test(sql)) {
+        return {
+          rows: [{ enabled: false }],
+        };
+      }
+
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+
+  const result = await setConfiguredEmailProvider(pool, "outlook", "UADMIN");
+
+  assert.deepEqual(result, { emailProvider: "outlook" });
+  assert.equal(calls[0].sql, "BEGIN");
+  assert.equal(calls[1].params[3], "outlook");
+  assert.equal(calls[1].params[5], "UADMIN");
+  assert.equal(calls[2].params[9], "UADMIN");
+  assert.equal(calls[2].params[11], true);
+  assert.equal(calls[2].params[12], true);
+  assert.equal(calls[2].params[13], true);
+  assert.equal(calls[2].params[14], true);
+  assert.equal(calls[2].params[15], true);
+  assert.equal(calls[3].sql, "COMMIT");
+});
+
+test("setConfiguredErrorTrackingProvider updates runtime config and clears error tracking state", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") {
+        return { rows: [] };
+      }
+      if (/INSERT INTO runtime_config/.test(sql)) {
+        return {
+          rows: [{ error_tracking_provider: "rollbar", updated_by: "UADMIN" }],
+        };
+      }
+      if (/INSERT INTO error_tracking_config/.test(sql)) {
+        return {
+          rows: [{ enabled: false }],
+        };
+      }
+
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+
+  const result = await setConfiguredErrorTrackingProvider(pool, "rollbar", "UADMIN");
+
+  assert.deepEqual(result, { errorTrackingProvider: "rollbar" });
+  assert.equal(calls[0].sql, "BEGIN");
+  assert.equal(calls[1].params[4], "rollbar");
+  assert.equal(calls[1].params[5], "UADMIN");
+  assert.equal(calls[2].params[7], "UADMIN");
+  assert.equal(calls[2].params[9], true);
+  assert.equal(calls[2].params[10], true);
+  assert.equal(calls[2].params[11], true);
+  assert.equal(calls[2].params[12], true);
+  assert.equal(calls[3].sql, "COMMIT");
 });
 
 test("markReviewRecapSent updates last sent slot", async () => {

@@ -29,6 +29,29 @@ test("sentry error tracking provider returns null client when auth is missing", 
   assert.equal(platform.createIssueClient(), null);
 });
 
+test("createErrorTrackingPlatform builds rollbar provider", () => {
+  const platform = createErrorTrackingPlatform({
+    provider: ERROR_TRACKING_PROVIDERS.rollbar,
+    config: {
+      errorTrackingRollbarAccessToken: "rollbar-token",
+    },
+  });
+
+  assert.equal(platform.provider, ERROR_TRACKING_PROVIDERS.rollbar);
+  assert.equal(typeof platform.createIssueClient, "function");
+});
+
+test("rollbar error tracking provider returns null client when auth is missing", () => {
+  const platform = createErrorTrackingPlatform({
+    provider: ERROR_TRACKING_PROVIDERS.rollbar,
+    config: {
+      errorTrackingRollbarAccessToken: "",
+    },
+  });
+
+  assert.equal(platform.createIssueClient(), null);
+});
+
 test("createErrorTrackingPlatform rejects unknown providers", () => {
   assert.throws(
     () => createErrorTrackingPlatform({ provider: "unknown", config: {} }),

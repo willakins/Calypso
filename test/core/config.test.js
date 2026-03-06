@@ -7,8 +7,10 @@ const {
   DEFAULT_CODE_HOST_PROVIDER,
   DEFAULT_COMMUNICATION_PROVIDER,
   DEFAULT_DEPLOY_PROVIDER,
+  DEFAULT_EMAIL_PROVIDER,
   DEFAULT_ERROR_TRACKING_PROVIDER,
   DEPLOY_PROVIDERS,
+  EMAIL_PROVIDERS,
   ERROR_TRACKING_PROVIDERS,
   loadConfig,
 } = require("../../src/config");
@@ -48,6 +50,7 @@ test("loadConfig defaults provider selections", { concurrency: false }, () => {
       COMMUNICATION_PROVIDER: undefined,
       CODE_HOST_PROVIDER: undefined,
       DEPLOY_PROVIDER: undefined,
+      EMAIL_PROVIDER: undefined,
       BOT_NAME: undefined,
     },
     () => {
@@ -56,6 +59,7 @@ test("loadConfig defaults provider selections", { concurrency: false }, () => {
       assert.equal(config.communicationProvider, DEFAULT_COMMUNICATION_PROVIDER);
       assert.equal(config.codeHostProvider, DEFAULT_CODE_HOST_PROVIDER);
       assert.equal(config.deployProvider, DEFAULT_DEPLOY_PROVIDER);
+      assert.equal(config.emailProvider, DEFAULT_EMAIL_PROVIDER);
       assert.equal(config.errorTrackingProvider, DEFAULT_ERROR_TRACKING_PROVIDER);
     },
   );
@@ -68,6 +72,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       COMMUNICATION_PROVIDER: "slack",
       CODE_HOST_PROVIDER: "github",
       DEPLOY_PROVIDER: "digitalocean",
+      EMAIL_PROVIDER: "gmail",
       DEPLOY_POLL_INTERVAL_SECONDS: "15",
       DEPLOY_TIMEOUT_SECONDS: "900",
       DEPLOY_TOKEN: "  do-token  ",
@@ -88,6 +93,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.communicationProvider, COMMUNICATION_PROVIDERS.slack);
       assert.equal(config.codeHostProvider, CODE_HOST_PROVIDERS.github);
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.digitalocean);
+      assert.equal(config.emailProvider, EMAIL_PROVIDERS.gmail);
       assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.sentry);
       assert.equal(config.communicationBotToken, "xoxb-test");
       assert.equal(config.communicationAppToken, "xapp-test");
@@ -123,6 +129,8 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.io");
       assert.equal(config.errorTrackingSentryAuthToken, "");
       assert.equal(config.errorTrackingSentryOrganizationSlug, "");
+      assert.equal(config.errorTrackingRollbarBaseUrl, "https://api.rollbar.com");
+      assert.equal(config.errorTrackingRollbarAccessToken, "");
       assert.equal(config.emailGmailAddress, "");
       assert.equal(config.emailGmailClientId, "");
       assert.equal(config.emailGmailClientSecret, "");
@@ -130,6 +138,10 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.emailGmailPubsubTopic, "");
       assert.equal(config.emailWebhookAudience, "");
       assert.equal(config.emailPushServiceAccountEmail, "");
+      assert.equal(config.emailOutlookAddress, "");
+      assert.equal(config.emailOutlookTenantId, "");
+      assert.equal(config.emailOutlookClientId, "");
+      assert.equal(config.emailOutlookClientSecret, "");
       assert.equal(config.emailWatchRenewIntervalHours, 24);
       assert.equal(config.emailSyncFallbackIntervalMinutes, 5);
       assert.equal(config.port, 4100);
@@ -144,6 +156,8 @@ test("loadConfig supports non-default provider selections without requiring unre
       COMMUNICATION_PROVIDER: "microsoft_teams",
       CODE_HOST_PROVIDER: "bitbucket",
       DEPLOY_PROVIDER: "aws",
+      EMAIL_PROVIDER: "outlook",
+      ERROR_TRACKING_PROVIDER: "rollbar",
       CODE_HOST_MAIN_BRANCH: "main",
       CODE_HOST_REPOSITORY: "workspace/repo",
       CODE_HOST_WEBHOOK_SECRET: "secret",
@@ -155,7 +169,8 @@ test("loadConfig supports non-default provider selections without requiring unre
       assert.equal(config.communicationProvider, COMMUNICATION_PROVIDERS.microsoftTeams);
       assert.equal(config.codeHostProvider, CODE_HOST_PROVIDERS.bitbucket);
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.aws);
-      assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.sentry);
+      assert.equal(config.emailProvider, EMAIL_PROVIDERS.outlook);
+      assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.rollbar);
       assert.equal(config.communicationBotToken, "");
       assert.equal(config.communicationAppToken, "");
       assert.equal(config.communicationWebhookUrl, "");
@@ -208,16 +223,31 @@ test("loadConfig rejects unknown deploy provider", { concurrency: false }, () =>
   );
 });
 
-test("loadConfig rejects unknown error tracking provider", { concurrency: false }, () => {
+test("loadConfig rejects unknown email provider", { concurrency: false }, () => {
   withEnvironment(
     {
       ...REQUIRED_ENV,
-      ERROR_TRACKING_PROVIDER: "rollbar",
+      EMAIL_PROVIDER: "zoho",
     },
     () => {
       assert.throws(
         () => loadConfig(),
-        /ERROR_TRACKING_PROVIDER must be one of: sentry/,
+        /EMAIL_PROVIDER must be one of: gmail, outlook/,
+      );
+    },
+  );
+});
+
+test("loadConfig rejects unknown error tracking provider", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      ERROR_TRACKING_PROVIDER: "bugsnag",
+    },
+    () => {
+      assert.throws(
+        () => loadConfig(),
+        /ERROR_TRACKING_PROVIDER must be one of: sentry, rollbar/,
       );
     },
   );
@@ -238,6 +268,9 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       DEPLOY_SESSION_TOKEN: undefined,
       ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS: undefined,
       ENVIRONMENT_STATUS_TIMEOUT_SECONDS: undefined,
+      EMAIL_PROVIDER: undefined,
+      ERROR_TRACKING_ROLLBAR_BASE_URL: undefined,
+      ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN: undefined,
       EMAIL_GMAIL_ADDRESS: undefined,
       EMAIL_GMAIL_CLIENT_ID: undefined,
       EMAIL_GMAIL_CLIENT_SECRET: undefined,
@@ -245,6 +278,10 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       EMAIL_GMAIL_PUBSUB_TOPIC: undefined,
       EMAIL_WEBHOOK_AUDIENCE: undefined,
       EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL: undefined,
+      EMAIL_OUTLOOK_ADDRESS: undefined,
+      EMAIL_OUTLOOK_TENANT_ID: undefined,
+      EMAIL_OUTLOOK_CLIENT_ID: undefined,
+      EMAIL_OUTLOOK_CLIENT_SECRET: undefined,
       EMAIL_WATCH_RENEW_INTERVAL_HOURS: undefined,
       EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES: undefined,
       CODE_HOST_TOKEN: undefined,
@@ -269,6 +306,9 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.io");
       assert.equal(config.errorTrackingSentryAuthToken, "");
       assert.equal(config.errorTrackingSentryOrganizationSlug, "");
+      assert.equal(config.errorTrackingRollbarBaseUrl, "https://api.rollbar.com");
+      assert.equal(config.errorTrackingRollbarAccessToken, "");
+      assert.equal(config.emailProvider, DEFAULT_EMAIL_PROVIDER);
       assert.equal(config.emailGmailAddress, "");
       assert.equal(config.emailGmailClientId, "");
       assert.equal(config.emailGmailClientSecret, "");
@@ -276,6 +316,10 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.emailGmailPubsubTopic, "");
       assert.equal(config.emailWebhookAudience, "");
       assert.equal(config.emailPushServiceAccountEmail, "");
+      assert.equal(config.emailOutlookAddress, "");
+      assert.equal(config.emailOutlookTenantId, "");
+      assert.equal(config.emailOutlookClientId, "");
+      assert.equal(config.emailOutlookClientSecret, "");
       assert.equal(config.emailWatchRenewIntervalHours, 24);
       assert.equal(config.emailSyncFallbackIntervalMinutes, 5);
       assert.equal(config.codeHostToken, "");
@@ -434,6 +478,33 @@ test("loadConfig reads optional environment status and email polling values", { 
   );
 });
 
+test("loadConfig reads optional outlook and rollbar values", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      EMAIL_PROVIDER: "outlook",
+      ERROR_TRACKING_PROVIDER: "rollbar",
+      ERROR_TRACKING_ROLLBAR_BASE_URL: " https://api.rollbar.example.com ",
+      ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN: " rollbar-token ",
+      EMAIL_OUTLOOK_ADDRESS: " support@example.com ",
+      EMAIL_OUTLOOK_TENANT_ID: " tenant-id ",
+      EMAIL_OUTLOOK_CLIENT_ID: " outlook-client-id ",
+      EMAIL_OUTLOOK_CLIENT_SECRET: " outlook-client-secret ",
+    },
+    () => {
+      const config = loadConfig();
+      assert.equal(config.emailProvider, EMAIL_PROVIDERS.outlook);
+      assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.rollbar);
+      assert.equal(config.errorTrackingRollbarBaseUrl, "https://api.rollbar.example.com");
+      assert.equal(config.errorTrackingRollbarAccessToken, "rollbar-token");
+      assert.equal(config.emailOutlookAddress, "support@example.com");
+      assert.equal(config.emailOutlookTenantId, "tenant-id");
+      assert.equal(config.emailOutlookClientId, "outlook-client-id");
+      assert.equal(config.emailOutlookClientSecret, "outlook-client-secret");
+    },
+  );
+});
+
 function withEnvironment(overrides, fn) {
   const originalEnvironment = process.env;
   process.env = { ...originalEnvironment };
@@ -442,6 +513,7 @@ function withEnvironment(overrides, fn) {
     "COMMUNICATION_PROVIDER",
     "CODE_HOST_PROVIDER",
     "DEPLOY_PROVIDER",
+    "EMAIL_PROVIDER",
     "COMMUNICATION_BOT_TOKEN",
     "COMMUNICATION_APP_TOKEN",
     "COMMUNICATION_WEBHOOK_URL",
@@ -460,6 +532,8 @@ function withEnvironment(overrides, fn) {
     "ERROR_TRACKING_SENTRY_BASE_URL",
     "ERROR_TRACKING_SENTRY_AUTH_TOKEN",
     "ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG",
+    "ERROR_TRACKING_ROLLBAR_BASE_URL",
+    "ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN",
     "ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS",
     "ENVIRONMENT_STATUS_TIMEOUT_SECONDS",
     "EMAIL_GMAIL_ADDRESS",
@@ -469,6 +543,10 @@ function withEnvironment(overrides, fn) {
     "EMAIL_GMAIL_PUBSUB_TOPIC",
     "EMAIL_WEBHOOK_AUDIENCE",
     "EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL",
+    "EMAIL_OUTLOOK_ADDRESS",
+    "EMAIL_OUTLOOK_TENANT_ID",
+    "EMAIL_OUTLOOK_CLIENT_ID",
+    "EMAIL_OUTLOOK_CLIENT_SECRET",
     "EMAIL_WATCH_RENEW_INTERVAL_HOURS",
     "EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES",
     "DEPLOY_POLL_INTERVAL_SECONDS",

@@ -3,6 +3,8 @@ const {
   CODE_HOST_PROVIDERS,
   COMMUNICATION_PROVIDERS,
   DEPLOY_PROVIDERS,
+  EMAIL_PROVIDERS,
+  ERROR_TRACKING_PROVIDERS,
 } = require("../../config");
 const { parseDurationToken } = require("../../shared/durations");
 const {
@@ -42,6 +44,14 @@ const CODE_HOST_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
 const DEPLOY_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "deploy-provider",
   Object.values(DEPLOY_PROVIDERS),
+);
+const EMAIL_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
+  "email-provider",
+  Object.values(EMAIL_PROVIDERS),
+);
+const ERROR_TRACKING_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
+  "error-tracking-provider",
+  Object.values(ERROR_TRACKING_PROVIDERS),
 );
 const UNAVAILABLE_PROVIDERS = Object.freeze({});
 
@@ -240,6 +250,22 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildParsedCommand({
         action: "config_deploy_provider",
         deployProvider: deployProviderMatch[1].toLowerCase(),
+      });
+    }
+
+    const emailProviderMatch = argument.match(EMAIL_PROVIDER_ARGUMENT_PATTERN);
+    if (emailProviderMatch) {
+      return this.buildParsedCommand({
+        action: "config_email_provider",
+        emailProvider: emailProviderMatch[1].toLowerCase(),
+      });
+    }
+
+    const errorTrackingProviderMatch = argument.match(ERROR_TRACKING_PROVIDER_ARGUMENT_PATTERN);
+    if (errorTrackingProviderMatch) {
+      return this.buildParsedCommand({
+        action: "config_error_tracking_provider",
+        errorTrackingProvider: errorTrackingProviderMatch[1].toLowerCase(),
       });
     }
 
@@ -568,6 +594,42 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
+    if (parsedCommand.action === "config_email_provider") {
+      const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.emailProvider);
+      if (unavailableMessage) {
+        return this.buildExecutionResult(unavailableMessage);
+      }
+      await runtime.setConfiguredEmailProviderFn(
+        runtime.pool,
+        parsedCommand.emailProvider,
+        runtime.userId,
+      );
+      return this.buildExecutionResult(
+        buildProviderUpdateMessage({
+          baseText: `Updated email provider to \`${parsedCommand.emailProvider}\`.`,
+          provider: parsedCommand.emailProvider,
+        }),
+      );
+    }
+
+    if (parsedCommand.action === "config_error_tracking_provider") {
+      const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.errorTrackingProvider);
+      if (unavailableMessage) {
+        return this.buildExecutionResult(unavailableMessage);
+      }
+      await runtime.setConfiguredErrorTrackingProviderFn(
+        runtime.pool,
+        parsedCommand.errorTrackingProvider,
+        runtime.userId,
+      );
+      return this.buildExecutionResult(
+        buildProviderUpdateMessage({
+          baseText: `Updated error-tracking provider to \`${parsedCommand.errorTrackingProvider}\`.`,
+          provider: parsedCommand.errorTrackingProvider,
+        }),
+      );
+    }
+
     if (parsedCommand.action !== "config_timezone") {
       return this.buildExecutionResult(buildConfigUsageMessage());
     }
@@ -621,7 +683,9 @@ function isWorkspaceScopedConfigAction(action) {
     action === "config_email_on_call_off" ||
     action === "config_communication_provider" ||
     action === "config_code_host_provider" ||
-    action === "config_deploy_provider"
+    action === "config_deploy_provider" ||
+    action === "config_email_provider" ||
+    action === "config_error_tracking_provider"
   );
 }
 
@@ -660,6 +724,8 @@ function buildConfigUsageMessage() {
     "`/calypso config communication-provider:slack|microsoft_teams`",
     "`/calypso config code-host-provider:github|bitbucket`",
     "`/calypso config deploy-provider:digitalocean|aws`",
+    "`/calypso config email-provider:gmail|outlook`",
+    "`/calypso config error-tracking-provider:sentry|rollbar`",
     "Defaults: `1w`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/calypso config timezone`.",
   ].join("\n");
 }

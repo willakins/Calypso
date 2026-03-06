@@ -269,6 +269,7 @@ test("registerCalypsoCommand config command rejects invalid error tracking proje
 
 test("registerCalypsoCommand errors command lists unresolved tracked issues", async () => {
   let commandHandler;
+  const calls = [];
   registerCalypsoCommand(
     {
       command(_name, handler) {
@@ -285,16 +286,30 @@ test("registerCalypsoCommand errors command lists unresolved tracked issues", as
         lastSyncError: null,
         targetChannelId: "COPS",
       }),
-      listOpenErrorTrackingIssuesFn: async () => [
-        {
-          shortId: "API-7",
-          title: "Database unavailable",
-          level: "error",
-          lastSeenAt: "2026-03-06T12:02:00.000Z",
-          regressionCount: 1,
+      getRuntimeProviderConfigFn: async () => ({
+        communicationProvider: "slack",
+        codeHostProvider: "github",
+        deployProvider: "digitalocean",
+        emailProvider: "gmail",
+        errorTrackingProvider: "rollbar",
+      }),
+      listOpenErrorTrackingIssuesFn: async (_pool, scope) => {
+        calls.push(scope);
+        return [
+          {
+            shortId: "API-7",
+            title: "Database unavailable",
+            level: "error",
+            lastSeenAt: "2026-03-06T12:02:00.000Z",
+            regressionCount: 1,
+          },
+        ];
+      },
+      pool: {
+        async query() {
+          return { rows: [] };
         },
-      ],
-      pool: {},
+      },
     },
   );
 
@@ -311,6 +326,13 @@ test("registerCalypsoCommand errors command lists unresolved tracked issues", as
   assert.match(payload.text, /Tracked unresolved errors for project `api` in environment `production`/);
   assert.match(payload.text, /\[API-7\] Database unavailable/);
   assert.match(payload.text, /regressions:1/);
+  assert.deepEqual(calls, [
+    {
+      environment: "production",
+      projectSlug: "api",
+      provider: "rollbar",
+    },
+  ]);
 });
 
 test("registerCalypsoCommand config command rejects invalid environment status url ephemerally", async () => {

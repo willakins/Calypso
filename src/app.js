@@ -27,9 +27,8 @@ const {
 const { createCodeHostPlatform } = require("./platform/code_host/factory");
 const { createCommunicationPlatform } = require("./platform/communication/factory");
 const { createDeployPlatform } = require("./platform/deploy/factory");
+const { createEmailPlatform } = require("./platform/email/factory");
 const { createErrorTrackingPlatform } = require("./platform/error_tracking/factory");
-const { createGmailClient } = require("./platform/email/providers/gmail/client");
-const { registerGmailWebhook } = require("./platform/email/providers/gmail/webhook");
 const { startReviewRecapScheduler } = require("./background_jobs/review_recap_scheduler");
 
 async function start() {
@@ -69,13 +68,7 @@ async function loadRuntime() {
     provider: config.deployProvider,
     config,
   });
-  const errorTrackingPlatform = createErrorTrackingPlatform({
-    provider: config.errorTrackingProvider,
-    config,
-  });
   const codeHostSyncClient = codeHostPlatform.createSyncClient();
-  const errorTrackingClient = errorTrackingPlatform.createIssueClient();
-  const gmailClient = createGmailClient({ config });
 
   return {
     config,
@@ -83,9 +76,6 @@ async function loadRuntime() {
     codeHostPlatform,
     codeHostSyncClient,
     deployPlatform,
-    errorTrackingPlatform,
-    errorTrackingClient,
-    gmailClient,
     httpApp,
     pool,
   };
@@ -99,6 +89,9 @@ async function applyRuntimeProviderSelection({ baseConfig, pool }) {
       runtimeProviderConfig.communicationProvider || baseConfig.communicationProvider,
     codeHostProvider: runtimeProviderConfig.codeHostProvider || baseConfig.codeHostProvider,
     deployProvider: runtimeProviderConfig.deployProvider || baseConfig.deployProvider,
+    emailProvider: runtimeProviderConfig.emailProvider || baseConfig.emailProvider,
+    errorTrackingProvider:
+      runtimeProviderConfig.errorTrackingProvider || baseConfig.errorTrackingProvider,
   };
 }
 
@@ -113,6 +106,7 @@ function wireCommunicationCommands(runtime) {
   runtime.communicationPlatform.registerCalypsoCommand({
     botName: runtime.config.botName,
     enableDeploymentCompletionNotifications: true,
+    getRuntimeProviderConfigFn: getRuntimeProviderConfig,
     errorTrackingProvider: runtime.config.errorTrackingProvider,
     pool: runtime.pool,
     deployPlatform: runtime.deployPlatform,
@@ -161,15 +155,16 @@ function wireCodeHostWebhook(runtime) {
 }
 
 function wireEmailWebhook(runtime) {
-  if (!runtime.config.emailGmailAddress) {
-    return;
+  for (const provider of ["gmail", "outlook"]) {
+    const emailPlatform = createEmailPlatform({
+      provider,
+      config: runtime.config,
+    });
+    emailPlatform.registerWebhookRoutes(runtime.httpApp, {
+      pool: runtime.pool,
+      upsertPendingSupportEmailHistoryIdFn: upsertPendingSupportEmailHistoryId,
+    });
   }
-
-  registerGmailWebhook(runtime.httpApp, {
-    config: runtime.config,
-    pool: runtime.pool,
-    upsertPendingSupportEmailHistoryIdFn: upsertPendingSupportEmailHistoryId,
-  });
 }
 
 async function startServices(runtime) {
@@ -210,10 +205,19 @@ function startBackgroundSchedulers(runtime) {
 
   runtime.errorTrackingScheduler = startErrorTrackingScheduler({
     communicationClient: runtime.communicationPlatform,
-    errorTrackingClient: runtime.errorTrackingClient,
-    errorTrackingProvider: runtime.config.errorTrackingProvider,
     errorTrackingTimeoutMs: runtime.config.errorTrackingTimeoutSeconds * 1000,
     pool: runtime.pool,
+    resolveErrorTrackingContextFn: async () => {
+      const errorTrackingProvider = await resolveErrorTrackingProvider(runtime);
+      const errorTrackingPlatform = createErrorTrackingPlatform({
+        provider: errorTrackingProvider,
+        config: runtime.config,
+      });
+      return {
+        errorTrackingClient: errorTrackingPlatform.createIssueClient(),
+        errorTrackingProvider,
+      };
+    },
     tickIntervalMs: runtime.config.errorTrackingPollIntervalSeconds * 1000,
   });
 
@@ -221,8 +225,18 @@ function startBackgroundSchedulers(runtime) {
     communicationClient: runtime.communicationPlatform,
     emailSyncFallbackIntervalMs: runtime.config.emailSyncFallbackIntervalMinutes * 60 * 1000,
     emailWatchRenewIntervalMs: runtime.config.emailWatchRenewIntervalHours * 60 * 60 * 1000,
-    gmailClient: runtime.gmailClient,
     pool: runtime.pool,
+    resolveEmailClientFn: async () => {
+      const emailProvider = await resolveEmailProvider(runtime);
+      const emailPlatform = createEmailPlatform({
+        provider: emailProvider,
+        config: runtime.config,
+      });
+      return {
+        emailClient: emailPlatform.createEmailClient(),
+        emailProvider,
+      };
+    },
   });
 }
 
@@ -302,6 +316,16 @@ async function resolveCodeHostProviderForCommand(runtime) {
   return runtimeProviderConfig.codeHostProvider || runtime.config.codeHostProvider;
 }
 
+async function resolveEmailProvider(runtime) {
+  const runtimeProviderConfig = await readRuntimeProviderConfigSafe(runtime);
+  return runtimeProviderConfig.emailProvider || runtime.config.emailProvider;
+}
+
+async function resolveErrorTrackingProvider(runtime) {
+  const runtimeProviderConfig = await readRuntimeProviderConfigSafe(runtime);
+  return runtimeProviderConfig.errorTrackingProvider || runtime.config.errorTrackingProvider;
+}
+
 function buildRuntimeCodeHostConfig(runtime, codeHostProvider) {
   return {
     ...runtime.config,
@@ -316,6 +340,8 @@ async function readRuntimeProviderConfigSafe(runtime) {
       communicationProvider: runtime.config.communicationProvider,
       codeHostProvider: runtime.config.codeHostProvider,
       deployProvider: runtime.config.deployProvider,
+      emailProvider: runtime.config.emailProvider,
+      errorTrackingProvider: runtime.config.errorTrackingProvider,
     };
   }
 
@@ -326,6 +352,8 @@ async function readRuntimeProviderConfigSafe(runtime) {
       communicationProvider: runtime.config.communicationProvider,
       codeHostProvider: runtime.config.codeHostProvider,
       deployProvider: runtime.config.deployProvider,
+      emailProvider: runtime.config.emailProvider,
+      errorTrackingProvider: runtime.config.errorTrackingProvider,
     };
   }
 }
