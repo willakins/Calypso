@@ -16,10 +16,12 @@ test("handleCalypsoCommand returns help for help input", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\/calypso help/);
-  assert.match(result.responseText, /\/calypso sync/);
-  assert.match(result.responseText, /Help Topics/);
-  assert.match(result.responseText, /\/calypso help testing/);
-  assert.match(result.responseText, /\/calypso help reviewing/);
+  assert.match(result.responseText, /\/calypso status/);
+  assert.match(result.responseText, /Modules/);
+  assert.match(result.responseText, /\/calypso help deploy/);
+  assert.match(result.responseText, /\/calypso help reviews/);
+  assert.match(result.responseText, /\/calypso help monitoring/);
+  assert.match(result.responseText, /\/calypso help email/);
   assert.match(result.responseText, /\/calypso help config/);
 });
 
@@ -30,22 +32,43 @@ test("handleCalypsoCommand uses configured bot name in help header", () => {
   assert.match(result.responseText, /^\*Voyager\*/);
 });
 
-test("handleCalypsoCommand returns testing topic help", () => {
+test("handleCalypsoCommand returns deploy topic help for testing alias", () => {
   const result = handleCalypsoCommand({ text: "help testing", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\*Calypso Testing Help\*/);
+  assert.match(result.responseText, /\*Calypso Deploy Help\*/);
+  assert.match(result.responseText, /\/calypso status/);
   assert.match(result.responseText, /\/calypso tested <PR_NUMBER>/);
   assert.match(result.responseText, /\/calypso deploy prod force/);
 });
 
-test("handleCalypsoCommand returns reviewing topic help", () => {
+test("handleCalypsoCommand returns reviews topic help for reviewing alias", () => {
   const result = handleCalypsoCommand({ text: "help reviewing", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\*Calypso Reviewing Help\*/);
+  assert.match(result.responseText, /\*Calypso Reviews Help\*/);
   assert.match(result.responseText, /\/calypso reviews <GITHUB_USER>/);
-  assert.match(result.responseText, /Defaults: `1w`, `mon@09:00`, weekend sends `off`, holiday sends `off`, `America\/New_York`/);
+  assert.match(result.responseText, /\/calypso config review-recap-schedule:<daily\|weekday>@HH:MM\[,HH:MM\.\.\.\]/);
+  assert.match(result.responseText, /\/calypso config timezone:America\/New_York/);
+});
+
+test("handleCalypsoCommand returns monitoring topic help", () => {
+  const result = handleCalypsoCommand({ text: "help monitoring", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /\*Calypso Monitoring Help\*/);
+  assert.match(result.responseText, /\/calypso errors/);
+  assert.match(result.responseText, /\/calypso config environment-status-url:https:\/\/example\.com\/healthz/);
+  assert.match(result.responseText, /\/calypso config error-tracking-project:<PROJECT_SLUG>/);
+});
+
+test("handleCalypsoCommand returns email topic help", () => {
+  const result = handleCalypsoCommand({ text: "help email", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /\*Calypso Email Help\*/);
+  assert.match(result.responseText, /\/calypso emails responded <EMAIL_ID>/);
+  assert.match(result.responseText, /\/calypso config email-on-call <@USER\|USER_ID> <Nh\|Nd\|Nw>/);
 });
 
 test("handleCalypsoCommand returns config topic help", () => {
@@ -55,9 +78,9 @@ test("handleCalypsoCommand returns config topic help", () => {
   assert.match(result.responseText, /\*Calypso Config Help\*/);
   assert.match(result.responseText, /\/calypso config time-format:human\|long/);
   assert.match(result.responseText, /\/calypso config communication-provider:slack\|microsoft_teams/);
-  assert.match(result.responseText, /\/calypso config review-recap-schedule:<daily\|weekday>@HH:MM\[,HH:MM\.\.\.\]/);
-  assert.match(result.responseText, /\/calypso config review-recap-send-weekends:<on\|off>/);
-  assert.match(result.responseText, /\/calypso config review-recap-send-holidays:<on\|off>/);
+  assert.match(result.responseText, /\/calypso help reviews/);
+  assert.match(result.responseText, /\/calypso help monitoring/);
+  assert.match(result.responseText, /\/calypso help email/);
 });
 
 test("handleCalypsoCommand rejects unknown help topic", () => {
@@ -65,7 +88,7 @@ test("handleCalypsoCommand rejects unknown help topic", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /Usage:/);
-  assert.match(result.responseText, /\/calypso help testing/);
+  assert.match(result.responseText, /\/calypso help deploy/);
 });
 
 test("handleCalypsoCommand routes status input", () => {
@@ -390,9 +413,9 @@ test("registerCalypsoCommand registers /calypso and responds ephemerally", async
   assert.equal(ackCalled, true);
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /\/calypso help/);
-  assert.match(payload.text, /\/calypso sync/);
-  assert.match(payload.text, /Help Topics/);
-  assert.match(payload.text, /\/calypso help reviewing/);
+  assert.match(payload.text, /\/calypso status/);
+  assert.match(payload.text, /Modules/);
+  assert.match(payload.text, /\/calypso help monitoring/);
 });
 
 test("registerCalypsoCommand runs sync command and returns summary", async () => {

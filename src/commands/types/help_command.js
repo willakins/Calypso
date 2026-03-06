@@ -18,12 +18,20 @@ class HelpCommand extends BaseCalypsoCommand {
 }
 
 function buildHelpText(botName, topic) {
-  if (topic === "testing") {
-    return buildTestingHelpText(botName);
+  if (topic === "deploy") {
+    return buildDeployHelpText(botName);
   }
 
-  if (topic === "reviewing") {
-    return buildReviewingHelpText(botName);
+  if (topic === "reviews") {
+    return buildReviewsHelpText(botName);
+  }
+
+  if (topic === "monitoring") {
+    return buildMonitoringHelpText(botName);
+  }
+
+  if (topic === "email") {
+    return buildEmailHelpText(botName);
   }
 
   if (topic === "config") {
@@ -36,32 +44,32 @@ function buildHelpText(botName, topic) {
 function buildOverviewHelpText(botName) {
   return [
     `*${botName}*`,
-    "Slack deployment gatekeeper.",
+    "Deployment gatekeeper with optional review, monitoring, and support modules.",
     "",
-    "*Quick Start*",
-    "`/calypso help` Show this message.",
-    "`/calypso sync` Run PR sync now (review state + merged untested).",
-    "`/calypso status` Show deploy blockers since last prod deploy.",
-    "`/calypso errors` Show unresolved tracked errors.",
-    "`/calypso emails` Show pending customer support emails.",
-    "`/calypso deploy staging` Trigger staging deploy.",
-    "`/calypso deploy prod` Attempt prod deploy after gate check.",
+    "*Start Here*",
+    "`/calypso status` Show deploy blockers.",
+    "`/calypso deploy prod` Attempt a production deploy.",
+    "`/calypso reviews` Show PRs waiting on review.",
+    "`/calypso errors` Show tracked unresolved errors.",
+    "`/calypso emails` Show pending support emails.",
     "",
-    "*Help Topics*",
-    "`/calypso help testing` PR testing and deploy-gate commands.",
-    "`/calypso help reviewing` Review queues and recap commands.",
-    "`/calypso help config` Runtime config and recap schedule setup.",
+    "*Modules*",
+    "`/calypso help deploy` Deploy gate, testing, and whitelist commands.",
+    "`/calypso help reviews` Review queue, sync, and recap commands.",
+    "`/calypso help monitoring` Environment status and Sentry commands.",
+    "`/calypso help email` Support mailbox queue and on-call commands.",
+    "`/calypso help config` Shared settings and provider switches.",
   ].join("\n");
 }
 
-function buildTestingHelpText(botName) {
+function buildDeployHelpText(botName) {
   return [
-    `*${botName} Testing Help*`,
+    `*${botName} Deploy Help*`,
     "",
+    "`/calypso status` Show blockers since last prod deploy.",
     "`/calypso tested <PR_NUMBER>` Mark one PR as tested.",
     "`/calypso tested all` Mark all untested PRs as tested.",
     "`/calypso tested recent <day|week|month>` List recently tested PRs.",
-    "`/calypso status` Show blockers since last prod deploy.",
     "`/calypso deploy staging` Trigger staging deploy.",
     "`/calypso deploy prod` Attempt prod deploy after gate check.",
     "`/calypso deploy prod force` Force deploy and bypass blockers.",
@@ -69,26 +77,59 @@ function buildTestingHelpText(botName) {
   ].join("\n");
 }
 
-function buildReviewingHelpText(botName) {
+function buildReviewsHelpText(botName) {
   return [
-    `*${botName} Reviewing Help*`,
+    `*${botName} Reviews Help*`,
     "",
     "`/calypso reviews` List open PRs waiting on review.",
     "`/calypso reviews <GITHUB_USER>` Filter by PR author.",
     "`/calypso reviews <day|week|month>` Filter by recency window.",
     "`/calypso reviews recent <day|week|month>` Explicit recent-window form.",
     "`/calypso sync` Run immediate sync with code host.",
-    "`/calypso errors` List unresolved tracked errors.",
-    "`/calypso emails` List pending customer support emails.",
     "",
-    "*Review Recap*",
+    "*Recap Config*",
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
     "`/calypso config review-recap-recency:<Nd|Nw>`",
     "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
     "`/calypso config review-recap-send-weekends:<on|off>`",
     "`/calypso config review-recap-send-holidays:<on|off>`",
-    "`/calypso config timezone:America/New_York` (shared timezone setting)",
-    "Defaults: `1w`, `mon@09:00`, weekend sends `off`, holiday sends `off`, `America/New_York`.",
+    "`/calypso config timezone:America/New_York` Shared timezone setting.",
+  ].join("\n");
+}
+
+function buildMonitoringHelpText(botName) {
+  return [
+    `*${botName} Monitoring Help*`,
+    "",
+    "`/calypso errors` List tracked unresolved Sentry issue groups.",
+    "",
+    "*Environment Status*",
+    "`/calypso config environment-status:on|off`",
+    "`/calypso config environment-status-url:https://example.com/healthz`",
+    "`/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID>`",
+    "",
+    "*Error Tracking*",
+    "`/calypso config error-tracking:on|off`",
+    "`/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID>`",
+    "`/calypso config error-tracking-project:<PROJECT_SLUG>`",
+    "`/calypso config error-tracking-environment:<ENVIRONMENT|any>`",
+    "Alerts post once for new issues and once again for regressions.",
+  ].join("\n");
+}
+
+function buildEmailHelpText(botName) {
+  return [
+    `*${botName} Email Help*`,
+    "",
+    "`/calypso emails` List pending customer support emails.",
+    "`/calypso emails responded <EMAIL_ID>` Mark one queue item responded.",
+    "",
+    "*Support Email Config*",
+    "`/calypso config email-monitor:on|off`",
+    "`/calypso config email-channel:<#CHANNEL|CHANNEL_ID>`",
+    "`/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`",
+    "`/calypso config email-on-call off`",
+    "Notifications mention the on-call user when one is active.",
   ].join("\n");
 }
 
@@ -99,30 +140,16 @@ function buildConfigHelpText(botName) {
     "`/calypso config time-format:human|long` Configure timestamp display format.",
     "`/calypso config timezone:America/New_York` Configure timezone for human timestamps.",
     "",
-    "*Platform Providers*",
+    "*Provider Switches*",
     "`/calypso config communication-provider:slack|microsoft_teams`",
     "`/calypso config code-host-provider:github|bitbucket`",
     "`/calypso config deploy-provider:digitalocean|aws`",
     "Provider changes apply to command handling immediately.",
     "",
-    "*Review Recap Config*",
-    "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`",
-    "`/calypso config review-recap-recency:<Nd|Nw>`",
-    "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
-    "`/calypso config review-recap-send-weekends:<on|off>`",
-    "`/calypso config review-recap-send-holidays:<on|off>`",
-    "`/calypso config environment-status:on|off`",
-    "`/calypso config environment-status-url:https://example.com/healthz`",
-    "`/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID>`",
-    "`/calypso config error-tracking:on|off`",
-    "`/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID>`",
-    "`/calypso config error-tracking-project:<PROJECT_SLUG>`",
-    "`/calypso config error-tracking-environment:<ENVIRONMENT|any>`",
-    "`/calypso config email-monitor:on|off`",
-    "`/calypso config email-channel:<#CHANNEL|CHANNEL_ID>`",
-    "`/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`",
-    "`/calypso config email-on-call off`",
-    "`/calypso config timezone:America/New_York` Sets recap timezone too.",
+    "*Module Config*",
+    "`/calypso help reviews` Review recap settings.",
+    "`/calypso help monitoring` Environment status and Sentry settings.",
+    "`/calypso help email` Support email settings.",
   ].join("\n");
 }
 
@@ -130,8 +157,10 @@ function buildHelpTopicUsageMessage() {
   return [
     "Usage:",
     "`/calypso help`",
-    "`/calypso help testing`",
-    "`/calypso help reviewing`",
+    "`/calypso help deploy`",
+    "`/calypso help reviews`",
+    "`/calypso help monitoring`",
+    "`/calypso help email`",
     "`/calypso help config`",
   ].join("\n");
 }
@@ -142,15 +171,36 @@ function normalizeHelpTopic(rawTopic) {
   }
 
   const normalizedTopic = String(rawTopic || "").toLowerCase().trim();
-  if (normalizedTopic === "testing" || normalizedTopic === "tested") {
-    return "testing";
+  if (
+    normalizedTopic === "deploy" ||
+    normalizedTopic === "deployment" ||
+    normalizedTopic === "testing" ||
+    normalizedTopic === "tested"
+  ) {
+    return "deploy";
   }
   if (
+    normalizedTopic === "reviews" ||
     normalizedTopic === "reviewing" ||
     normalizedTopic === "review" ||
-    normalizedTopic === "reviews"
+    normalizedTopic === "sync"
   ) {
-    return "reviewing";
+    return "reviews";
+  }
+  if (
+    normalizedTopic === "monitoring" ||
+    normalizedTopic === "monitor" ||
+    normalizedTopic === "monitors" ||
+    normalizedTopic === "errors"
+  ) {
+    return "monitoring";
+  }
+  if (
+    normalizedTopic === "email" ||
+    normalizedTopic === "emails" ||
+    normalizedTopic === "support"
+  ) {
+    return "email";
   }
   if (normalizedTopic === "config" || normalizedTopic === "configuration") {
     return "config";
