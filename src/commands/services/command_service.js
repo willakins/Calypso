@@ -1,31 +1,46 @@
 const {
   addUserToDeployWhitelist,
+  clearSupportEmailOnCall,
   DEFAULT_TIME_FORMAT,
   DEFAULT_TIME_ZONE,
+  getEnvironmentStatusConfig,
   getConfiguredTimeFormat,
   getConfiguredTimeZone,
   getLastProdDeployAt,
   getReviewRecapConfig,
+  getSupportEmailConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
+  listPendingSupportEmailThreads,
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   listBlockingPullRequests,
+  markEnvironmentStatusNotificationSent,
   markReviewRecapSent,
   markAllUntestedPullRequestsTested,
   markPullRequestTested,
   markPullRequestsDeployedSince,
+  markSupportEmailThreadNotificationSent,
+  markSupportEmailThreadResponded,
+  recordEnvironmentStatusObservation,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,
   setConfiguredCommunicationProvider,
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
+  setEnvironmentStatusChannel,
+  setEnvironmentStatusEnabled,
+  setEnvironmentStatusUrl,
   setReviewRecapChannel,
   setReviewRecapRecency,
   setReviewRecapSchedule,
   setReviewRecapSendHolidays,
   setReviewRecapSendWeekends,
   setReviewRecapTimeZone,
+  setSupportEmailChannel,
+  setSupportEmailMonitorEnabled,
+  setSupportEmailOnCall,
+  updateSupportEmailRuntimeState,
 } = require("../../db");
 const { DEFAULT_BOT_NAME } = require("../../config");
 const { formatStatusResponse, isValidTimeZone } = require("../../util/format");
@@ -78,6 +93,8 @@ function createDefaultDependencies() {
     defaultBotName: DEFAULT_BOT_NAME,
     formatStatusResponseFn: formatStatusResponse,
     addUserToDeployWhitelistFn: addUserToDeployWhitelist,
+    clearSupportEmailOnCallFn: clearSupportEmailOnCall,
+    getEnvironmentStatusConfigFn: getEnvironmentStatusConfig,
     getLastProdDeployAtFn: getLastProdDeployAt,
     getConfiguredTimeFormatFn: getConfiguredTimeFormat,
     getConfiguredTimeZoneFn: getConfiguredTimeZone,
@@ -86,13 +103,19 @@ function createDefaultDependencies() {
     isWorkspaceAdminFn: isWorkspaceAdmin,
     insertDeploymentFn: insertDeployment,
     getReviewRecapConfigFn: getReviewRecapConfig,
+    getSupportEmailConfigFn: getSupportEmailConfig,
+    listPendingSupportEmailThreadsFn: listPendingSupportEmailThreads,
     listOpenPullRequestsWaitingOnReviewSinceFn: listOpenPullRequestsWaitingOnReviewSince,
     markReviewRecapSentFn: markReviewRecapSent,
     listRecentlyTestedPullRequestsFn: listRecentlyTestedPullRequests,
     listBlockingPullRequestsFn: listBlockingPullRequests,
     markAllUntestedPullRequestsTestedFn: markAllUntestedPullRequestsTested,
+    markEnvironmentStatusNotificationSentFn: markEnvironmentStatusNotificationSent,
     markPullRequestTestedFn: markPullRequestTested,
     markPullRequestsDeployedSinceFn: markPullRequestsDeployedSince,
+    markSupportEmailThreadNotificationSentFn: markSupportEmailThreadNotificationSent,
+    markSupportEmailThreadRespondedFn: markSupportEmailThreadResponded,
+    recordEnvironmentStatusObservationFn: recordEnvironmentStatusObservation,
     readTimeFormatPreferenceFn: readTimeFormatPreference,
     readTimeZonePreferenceFn: readTimeZonePreference,
     resolveUserDisplayNameFn: resolveUserDisplayNameFromCommunicationClient,
@@ -104,13 +127,20 @@ function createDefaultDependencies() {
     setConfiguredCommunicationProviderFn: setConfiguredCommunicationProvider,
     setConfiguredCodeHostProviderFn: setConfiguredCodeHostProvider,
     setConfiguredDeployProviderFn: setConfiguredDeployProvider,
+    setEnvironmentStatusChannelFn: setEnvironmentStatusChannel,
+    setEnvironmentStatusEnabledFn: setEnvironmentStatusEnabled,
+    setEnvironmentStatusUrlFn: setEnvironmentStatusUrl,
     setReviewRecapChannelFn: setReviewRecapChannel,
     setReviewRecapRecencyFn: setReviewRecapRecency,
     setReviewRecapScheduleFn: setReviewRecapSchedule,
     setReviewRecapSendWeekendsFn: setReviewRecapSendWeekends,
     setReviewRecapSendHolidaysFn: setReviewRecapSendHolidays,
     setReviewRecapTimeZoneFn: setReviewRecapTimeZone,
+    setSupportEmailChannelFn: setSupportEmailChannel,
+    setSupportEmailMonitorEnabledFn: setSupportEmailMonitorEnabled,
+    setSupportEmailOnCallFn: setSupportEmailOnCall,
     triggerProdDeployFn: triggerProductionDeploymentUnavailable,
+    updateSupportEmailRuntimeStateFn: updateSupportEmailRuntimeState,
     waitForProdDeployCompletionFn: waitForProductionDeploymentCompletionUnavailable,
   };
 }
@@ -135,9 +165,13 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     botName: String(mergedOptions.botName || defaultDependencies.defaultBotName),
     addUserToDeployWhitelistFn:
       mergedOptions.addUserToDeployWhitelistFn || defaultDependencies.addUserToDeployWhitelistFn,
+    clearSupportEmailOnCallFn:
+      mergedOptions.clearSupportEmailOnCallFn || defaultDependencies.clearSupportEmailOnCallFn,
     deployConfig,
     formatStatusResponseFn:
       mergedOptions.formatStatusResponseFn || defaultDependencies.formatStatusResponseFn,
+    getEnvironmentStatusConfigFn:
+      mergedOptions.getEnvironmentStatusConfigFn || defaultDependencies.getEnvironmentStatusConfigFn,
     getLastProdDeployAtFn:
       mergedOptions.getLastProdDeployAtFn || defaultDependencies.getLastProdDeployAtFn,
     getConfiguredTimeFormatFn:
@@ -146,11 +180,16 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.getConfiguredTimeZoneFn || defaultDependencies.getConfiguredTimeZoneFn,
     getReviewRecapConfigFn:
       mergedOptions.getReviewRecapConfigFn || defaultDependencies.getReviewRecapConfigFn,
+    getSupportEmailConfigFn:
+      mergedOptions.getSupportEmailConfigFn || defaultDependencies.getSupportEmailConfigFn,
     isUserWhitelistedForDeployFn:
       mergedOptions.isUserWhitelistedForDeployFn || defaultDependencies.isUserWhitelistedForDeployFn,
     isValidTimeZoneFn: mergedOptions.isValidTimeZoneFn || defaultDependencies.isValidTimeZoneFn,
     isWorkspaceAdminFn: mergedOptions.isWorkspaceAdminFn || defaultDependencies.isWorkspaceAdminFn,
     insertDeploymentFn: mergedOptions.insertDeploymentFn || defaultDependencies.insertDeploymentFn,
+    listPendingSupportEmailThreadsFn:
+      mergedOptions.listPendingSupportEmailThreadsFn ||
+      defaultDependencies.listPendingSupportEmailThreadsFn,
     listRecentlyTestedPullRequestsFn:
       mergedOptions.listRecentlyTestedPullRequestsFn ||
       defaultDependencies.listRecentlyTestedPullRequestsFn,
@@ -162,6 +201,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     markAllUntestedPullRequestsTestedFn:
       mergedOptions.markAllUntestedPullRequestsTestedFn ||
       defaultDependencies.markAllUntestedPullRequestsTestedFn,
+    markEnvironmentStatusNotificationSentFn:
+      mergedOptions.markEnvironmentStatusNotificationSentFn ||
+      defaultDependencies.markEnvironmentStatusNotificationSentFn,
     markReviewRecapSentFn:
       mergedOptions.markReviewRecapSentFn || defaultDependencies.markReviewRecapSentFn,
     markPullRequestTestedFn:
@@ -169,7 +211,16 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     markPullRequestsDeployedSinceFn:
       mergedOptions.markPullRequestsDeployedSinceFn ||
       defaultDependencies.markPullRequestsDeployedSinceFn,
+    markSupportEmailThreadNotificationSentFn:
+      mergedOptions.markSupportEmailThreadNotificationSentFn ||
+      defaultDependencies.markSupportEmailThreadNotificationSentFn,
+    markSupportEmailThreadRespondedFn:
+      mergedOptions.markSupportEmailThreadRespondedFn ||
+      defaultDependencies.markSupportEmailThreadRespondedFn,
     pool: mergedOptions.pool,
+    recordEnvironmentStatusObservationFn:
+      mergedOptions.recordEnvironmentStatusObservationFn ||
+      defaultDependencies.recordEnvironmentStatusObservationFn,
     readTimeFormatPreferenceFn:
       mergedOptions.readTimeFormatPreferenceFn || defaultDependencies.readTimeFormatPreferenceFn,
     readTimeZonePreferenceFn:
@@ -195,6 +246,12 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.setConfiguredCodeHostProviderFn,
     setConfiguredDeployProviderFn:
       mergedOptions.setConfiguredDeployProviderFn || defaultDependencies.setConfiguredDeployProviderFn,
+    setEnvironmentStatusChannelFn:
+      mergedOptions.setEnvironmentStatusChannelFn || defaultDependencies.setEnvironmentStatusChannelFn,
+    setEnvironmentStatusEnabledFn:
+      mergedOptions.setEnvironmentStatusEnabledFn || defaultDependencies.setEnvironmentStatusEnabledFn,
+    setEnvironmentStatusUrlFn:
+      mergedOptions.setEnvironmentStatusUrlFn || defaultDependencies.setEnvironmentStatusUrlFn,
     setReviewRecapChannelFn:
       mergedOptions.setReviewRecapChannelFn || defaultDependencies.setReviewRecapChannelFn,
     setReviewRecapRecencyFn:
@@ -209,6 +266,13 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.setReviewRecapSendHolidaysFn,
     setReviewRecapTimeZoneFn:
       mergedOptions.setReviewRecapTimeZoneFn || defaultDependencies.setReviewRecapTimeZoneFn,
+    setSupportEmailChannelFn:
+      mergedOptions.setSupportEmailChannelFn || defaultDependencies.setSupportEmailChannelFn,
+    setSupportEmailMonitorEnabledFn:
+      mergedOptions.setSupportEmailMonitorEnabledFn ||
+      defaultDependencies.setSupportEmailMonitorEnabledFn,
+    setSupportEmailOnCallFn:
+      mergedOptions.setSupportEmailOnCallFn || defaultDependencies.setSupportEmailOnCallFn,
     communicationClient,
     currentChannelId,
     currentChannelName,
@@ -224,6 +288,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.triggerProdDeployFn ||
       deriveDeployTriggerFunction(deployPlatform) ||
       defaultDependencies.triggerProdDeployFn,
+    updateSupportEmailRuntimeStateFn:
+      mergedOptions.updateSupportEmailRuntimeStateFn ||
+      defaultDependencies.updateSupportEmailRuntimeStateFn,
     waitForProdDeployCompletionFn:
       mergedOptions.waitForProdDeployCompletionFn ||
       deriveDeployCompletionWaitFunction(deployPlatform) ||

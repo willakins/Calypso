@@ -29,6 +29,10 @@ const DEFAULT_CODE_HOST_API_USER_AGENT = "calypso-bot";
 const DEFAULT_CODE_HOST_CODEX_USER_LOGINS = Object.freeze(["codex", "codex[bot]"]);
 const DEFAULT_DEPLOY_REGION = "us-east-1";
 const DEFAULT_CODEX_APPROVAL_POLL_INTERVAL_MINUTES = 5;
+const DEFAULT_ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS = 60;
+const DEFAULT_ENVIRONMENT_STATUS_TIMEOUT_SECONDS = 10;
+const DEFAULT_EMAIL_WATCH_RENEW_INTERVAL_HOURS = 24;
+const DEFAULT_EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES = 5;
 
 function loadConfig() {
   const communicationProvider = readProviderSelection(
@@ -105,6 +109,29 @@ function loadConfig() {
   const deployAccessKeyId = readOptionalEnvironmentValue("DEPLOY_ACCESS_KEY_ID");
   const deploySecretAccessKey = readOptionalEnvironmentValue("DEPLOY_SECRET_ACCESS_KEY");
   const deploySessionToken = readOptionalEnvironmentValue("DEPLOY_SESSION_TOKEN");
+  const environmentStatusPollIntervalSeconds = readPositiveInteger(
+    "ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS",
+    DEFAULT_ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS,
+  );
+  const environmentStatusTimeoutSeconds = readPositiveInteger(
+    "ENVIRONMENT_STATUS_TIMEOUT_SECONDS",
+    DEFAULT_ENVIRONMENT_STATUS_TIMEOUT_SECONDS,
+  );
+  const emailGmailAddress = readOptionalEnvironmentValue("EMAIL_GMAIL_ADDRESS");
+  const emailGmailClientId = readOptionalEnvironmentValue("EMAIL_GMAIL_CLIENT_ID");
+  const emailGmailClientSecret = readOptionalEnvironmentValue("EMAIL_GMAIL_CLIENT_SECRET");
+  const emailGmailRefreshToken = readOptionalEnvironmentValue("EMAIL_GMAIL_REFRESH_TOKEN");
+  const emailGmailPubsubTopic = readOptionalEnvironmentValue("EMAIL_GMAIL_PUBSUB_TOPIC");
+  const emailWebhookAudience = readOptionalEnvironmentValue("EMAIL_WEBHOOK_AUDIENCE");
+  const emailPushServiceAccountEmail = readOptionalEnvironmentValue("EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL");
+  const emailWatchRenewIntervalHours = readPositiveInteger(
+    "EMAIL_WATCH_RENEW_INTERVAL_HOURS",
+    DEFAULT_EMAIL_WATCH_RENEW_INTERVAL_HOURS,
+  );
+  const emailSyncFallbackIntervalMinutes = readPositiveInteger(
+    "EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES",
+    DEFAULT_EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES,
+  );
   const botName = readOptionalEnvironmentValue("BOT_NAME") || DEFAULT_BOT_NAME;
 
   return {
@@ -122,6 +149,8 @@ function loadConfig() {
     deployAccessKeyId,
     deploySecretAccessKey,
     deploySessionToken,
+    environmentStatusPollIntervalSeconds,
+    environmentStatusTimeoutSeconds,
     codeHostOpenPrSyncIntervalHours,
     codexApprovalPollIntervalMinutes,
     codeHostApiBaseUrl: resolveCodeHostApiBaseUrl(codeHostProvider),
@@ -140,6 +169,15 @@ function loadConfig() {
     communicationWebhookUrl,
     communicationCommandPath,
     communicationAdminUserIds,
+    emailGmailAddress,
+    emailGmailClientId,
+    emailGmailClientSecret,
+    emailGmailRefreshToken,
+    emailGmailPubsubTopic,
+    emailWebhookAudience,
+    emailPushServiceAccountEmail,
+    emailWatchRenewIntervalHours,
+    emailSyncFallbackIntervalMinutes,
   };
 }
 

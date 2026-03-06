@@ -5,6 +5,7 @@ const {
   createPool,
   getRuntimeProviderConfig,
   runMigrations,
+  upsertPendingSupportEmailHistoryId,
   verifyConnection,
 } = require("./db");
 const {
@@ -14,9 +15,17 @@ const {
 const {
   startCodexApprovalSyncScheduler,
 } = require("./background_jobs/codex_approval_scheduler");
+const {
+  startEnvironmentStatusScheduler,
+} = require("./background_jobs/environment_status_scheduler");
+const {
+  startSupportEmailScheduler,
+} = require("./background_jobs/support_email_scheduler");
 const { createCodeHostPlatform } = require("./platform/code_host/factory");
 const { createCommunicationPlatform } = require("./platform/communication/factory");
 const { createDeployPlatform } = require("./platform/deploy/factory");
+const { createGmailClient } = require("./platform/email/providers/gmail/client");
+const { registerGmailWebhook } = require("./platform/email/providers/gmail/webhook");
 const { startReviewRecapScheduler } = require("./background_jobs/review_recap_scheduler");
 
 async function start() {
@@ -26,6 +35,7 @@ async function start() {
   wireCommunicationCommands(runtime);
   wireCommunicationRoutes(runtime);
   wireCodeHostWebhook(runtime);
+  wireEmailWebhook(runtime);
 
   await startServices(runtime);
   startBackgroundSchedulers(runtime);
@@ -56,6 +66,7 @@ async function loadRuntime() {
     config,
   });
   const codeHostSyncClient = codeHostPlatform.createSyncClient();
+  const gmailClient = createGmailClient({ config });
 
   return {
     config,
@@ -63,6 +74,7 @@ async function loadRuntime() {
     codeHostPlatform,
     codeHostSyncClient,
     deployPlatform,
+    gmailClient,
     httpApp,
     pool,
   };
@@ -136,6 +148,18 @@ function wireCodeHostWebhook(runtime) {
   });
 }
 
+function wireEmailWebhook(runtime) {
+  if (!runtime.config.emailGmailAddress) {
+    return;
+  }
+
+  registerGmailWebhook(runtime.httpApp, {
+    config: runtime.config,
+    pool: runtime.pool,
+    upsertPendingSupportEmailHistoryIdFn: upsertPendingSupportEmailHistoryId,
+  });
+}
+
 async function startServices(runtime) {
   await startHttpServer(runtime.httpApp, runtime.config.port, {
     codeHostProvider: runtime.config.codeHostProvider,
@@ -163,6 +187,21 @@ function startBackgroundSchedulers(runtime) {
     pool: runtime.pool,
     repository: runtime.config.codeHostRepository,
     syncIntervalMs: runtime.config.codexApprovalPollIntervalMinutes * 60 * 1000,
+  });
+
+  runtime.environmentStatusScheduler = startEnvironmentStatusScheduler({
+    communicationClient: runtime.communicationPlatform,
+    environmentStatusTimeoutMs: runtime.config.environmentStatusTimeoutSeconds * 1000,
+    pool: runtime.pool,
+    tickIntervalMs: runtime.config.environmentStatusPollIntervalSeconds * 1000,
+  });
+
+  runtime.supportEmailScheduler = startSupportEmailScheduler({
+    communicationClient: runtime.communicationPlatform,
+    emailSyncFallbackIntervalMs: runtime.config.emailSyncFallbackIntervalMinutes * 60 * 1000,
+    emailWatchRenewIntervalMs: runtime.config.emailWatchRenewIntervalHours * 60 * 60 * 1000,
+    gmailClient: runtime.gmailClient,
+    pool: runtime.pool,
   });
 }
 

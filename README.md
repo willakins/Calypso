@@ -4,7 +4,9 @@ Calypso is a platform-abstracted deployment gatekeeper for a single repository w
 It currently runs with Slack + GitHub + DigitalOcean by default, while exposing provider
 abstractions for communication, code-host, and deploy integrations.
 It tracks merged pull requests in Postgres, requires explicit testing confirmation,
-blocks production deploys when untested changes exist, and posts scheduled review recap messages.
+blocks production deploys when untested changes exist, posts scheduled review recap messages,
+can poll one environment health endpoint for outage alerts, and can track customer support
+emails from Gmail as an actionable queue.
 
 ## What It Does
 
@@ -24,9 +26,18 @@ blocks production deploys when untested changes exist, and posts scheduled revie
   - `/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`
   - `/calypso config review-recap-send-weekends:<on|off>`
   - `/calypso config review-recap-send-holidays:<on|off>`
+  - `/calypso config environment-status:on|off`
+  - `/calypso config environment-status-url:https://example.com/healthz`
+  - `/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
+  - `/calypso config email-monitor:on|off`
+  - `/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
+  - `/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`
+  - `/calypso config email-on-call off`
   - `/calypso sync`
   - `/calypso status`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
+  - `/calypso emails`
+  - `/calypso emails responded <EMAIL_ID>`
   - `/calypso tested <PR_NUMBER>`
   - `/calypso deploy staging`
   - `/calypso deploy prod`
@@ -34,6 +45,9 @@ blocks production deploys when untested changes exist, and posts scheduled revie
   - A blocker is any PR with `merged_at > last_prod_deploy_at` and `status` not in `tested`, `deployed`.
 - Optionally triggers deploy-platform production deploy when gate is clear.
 - Optionally triggers staging deploy directly when staging app/pipeline is configured.
+- Optionally polls one configured environment URL and posts transition-based outage/recovery alerts.
+- Optionally ingests Gmail support mailbox activity into `support_email_threads`, posts new-email
+  notifications, and lets responders mark queued items handled.
 - Runtime display config is per communication user (defaults: time format `human`, timezone `America/New_York`).
 - Review recap schedule config is workspace-wide (defaults: Monday 9:00 AM `America/New_York`, recency `1w`).
 
@@ -82,6 +96,7 @@ src/
       command_service.js
     types/
       base_command.js
+      emails_command.js
       help_command.js
       config_command.js
       status_command.js
@@ -92,8 +107,10 @@ src/
     index.js
     migrations/001_init.sql
   background_jobs/
+    environment_status_scheduler.js
     scheduler.js
     review_recap_scheduler.js
+    support_email_scheduler.js
     syncer.js
     tasks/
       review_sync_task.js
@@ -104,6 +121,7 @@ src/
     communication/
       base_communication_platform.js
       factory.js
+      resolution.js
       providers/
         slack_communication_platform.js
         microsoft_teams_communication_platform.js
@@ -131,6 +149,13 @@ src/
           client.js
         digitalocean/
           client.js
+    email/
+      providers/
+        gmail/
+          client.js
+          webhook.js
+  shared/
+    durations.js
   util/
     format.js
 test/
@@ -147,6 +172,10 @@ test/
   - Socket Mode enabled.
   - Slash command `/calypso`.
   - Relevant Slack message event subscriptions/history scopes if you want Calypso to nudge users who type `deploying prod`.
+- Optional support-email setup:
+  - A Gmail mailbox for customer support.
+  - Google Cloud Pub/Sub topic + authenticated push subscription pointing at `POST /email/webhook`.
+  - Google OAuth client credentials + refresh token with Gmail API access.
 - Optional:
   - DigitalOcean App Platform app and token for live deploy trigger.
 
@@ -185,6 +214,17 @@ Optional:
 - `CODE_HOST_CODEX_USER_LOGINS` (default: `codex,codex[bot]`)
 - `CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS` (default `24`)
 - `CODEX_APPROVAL_POLL_INTERVAL_MINUTES` (default `5`)
+- `ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS` (default `60`)
+- `ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (default `10`)
+- `EMAIL_GMAIL_ADDRESS`
+- `EMAIL_GMAIL_CLIENT_ID`
+- `EMAIL_GMAIL_CLIENT_SECRET`
+- `EMAIL_GMAIL_REFRESH_TOKEN`
+- `EMAIL_GMAIL_PUBSUB_TOPIC`
+- `EMAIL_WEBHOOK_AUDIENCE`
+- `EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL`
+- `EMAIL_WATCH_RENEW_INTERVAL_HOURS` (default `24`)
+- `EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES` (default `5`)
 
 Provider support matrix:
 
@@ -246,6 +286,7 @@ Provider support matrix:
 - Slack App -> `OAuth & Permissions` -> install/reinstall app -> copy `Bot User OAuth Token` (`xoxb-...`).
 - Add bot scope `users:read` so Calypso can detect workspace admins for deploy authorization.
 - Add the matching Slack history scopes for any surfaces where Calypso should detect `deploying prod` messages.
+- If you want `/calypso config email-on-call @handle ...`, keep `users:read` enabled so Calypso can resolve Slack handles to user IDs.
 
 `COMMUNICATION_APP_TOKEN`
 
@@ -347,6 +388,56 @@ Provider support matrix:
 - Max time Calypso waits for deployment completion follow-up message.
 - Default: `1200` seconds (20 minutes).
 
+`ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS` (optional)
+
+- How often the environment monitor polls the configured URL.
+- Default: `60` seconds.
+
+`ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (optional)
+
+- Request timeout for each environment poll.
+- Default: `10` seconds.
+
+`EMAIL_GMAIL_ADDRESS` (optional, enables support-email integration when paired with the Gmail credentials below)
+
+- Support mailbox address Calypso should monitor, for example `support@example.com`.
+- Also used to ignore messages sent from the support mailbox itself.
+
+`EMAIL_GMAIL_CLIENT_ID` and `EMAIL_GMAIL_CLIENT_SECRET` (optional)
+
+- Google Cloud OAuth client credentials for the Gmail API.
+- Create an OAuth client in Google Cloud Console and enable the Gmail API for the project.
+
+`EMAIL_GMAIL_REFRESH_TOKEN` (optional)
+
+- Long-lived refresh token for the support mailbox OAuth grant.
+- Calypso exchanges this for short-lived Gmail access tokens at runtime.
+
+`EMAIL_GMAIL_PUBSUB_TOPIC` (optional)
+
+- Full Pub/Sub topic name used by Gmail `users.watch`.
+- Example: `projects/<gcp-project>/topics/calypso-support-email`.
+
+`EMAIL_WEBHOOK_AUDIENCE` (optional, recommended when using the Gmail webhook)
+
+- Expected audience claim for the authenticated Pub/Sub push JWT.
+- Set this to the exact public webhook URL, for example `https://calypso.example.com/email/webhook`.
+
+`EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL` (optional)
+
+- Extra verification for the Pub/Sub authenticated push token.
+- Set this to the service account email used by the push subscription if you want Calypso to reject tokens from other service accounts.
+
+`EMAIL_WATCH_RENEW_INTERVAL_HOURS` (optional)
+
+- How often Calypso attempts to renew the Gmail watch before expiration.
+- Default: `24` hours.
+
+`EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES` (optional)
+
+- Fallback Gmail history sync cadence when no push notification arrives.
+- Default: `5` minutes.
+
 ## Hosting
 
 ### Pricing Snapshot (DigitalOcean)
@@ -393,6 +484,10 @@ This local command starts:
 
 - `https://<ngrok-domain>/codehost/webhook`
 
+If you enable support-email monitoring locally, also configure your Pub/Sub push subscription to:
+
+- `https://<ngrok-domain>/email/webhook`
+
 5. Stop local runtime:
 
 ```bash
@@ -412,6 +507,7 @@ Calypso is already set up for this:
 - Dockerized runtime (`Dockerfile`).
 - HTTP health endpoint (`GET /healthz`).
 - Public webhook route (`/codehost/webhook`).
+- Public Gmail push route (`/email/webhook`).
 - Startup migrations run automatically.
 
 Steps:
@@ -441,7 +537,8 @@ Steps:
 6. Configure App health check path to `/healthz`.
 7. Deploy the app.
 8. Set webhook URL to `https://<your-app-domain>/codehost/webhook`.
-9. Smoke test:
+9. If using support email monitoring, set Pub/Sub push endpoint to `https://<your-app-domain>/email/webhook`.
+10. Smoke test:
    - `/calypso help`
    - `/calypso status`
    - merge a PR and confirm webhook delivery `200`.
@@ -483,11 +580,14 @@ curl https://<your-domain>/healthz
 
 10. Configure webhook:
    - `https://<your-domain>/codehost/webhook`
+11. If using support email monitoring, configure Pub/Sub push endpoint:
+   - `https://<your-domain>/email/webhook`
 
 Operational notes:
 
 - Slack Socket Mode means slash commands do not require a public Slack request URL.
 - Slack `deploying prod` tips require the app to receive the relevant Slack message events for the channels or conversations you want monitored.
+- Support-email monitoring requires a public `POST /email/webhook` endpoint plus a valid Gmail watch configuration.
 - Keep one primary Calypso runtime for stable webhook ingestion and schedulers.
 - If you use the Droplet Compose DB service, do not expose `5432` publicly.
 
@@ -510,6 +610,19 @@ Rules:
 - Only processes events for configured `CODE_HOST_MAIN_BRANCH` and configured `CODE_HOST_REPOSITORY`.
 - Merged PR close events upsert to deploy-gating table as `untested`.
 - Open PR lifecycle and review submissions update `open_pr_review_state`.
+
+## Gmail Email Webhook
+
+Endpoint:
+
+- `POST /email/webhook`
+
+Rules:
+
+- Expects Google Pub/Sub authenticated push with a bearer JWT.
+- Verifies issuer, signature, token expiry, and optional audience/service-account constraints.
+- Ignores Gmail notifications for mailboxes other than configured `EMAIL_GMAIL_ADDRESS`.
+- Stores the greatest pending Gmail history id so the background scheduler can sync mailbox changes.
 
 ## Daily Open PR Sync
 
@@ -557,6 +670,36 @@ Rules:
 - Controls whether recap posts are sent on observed US federal holidays.
 - Default is `off`.
 
+`/calypso config environment-status:on|off`
+
+- Enables or disables environment polling.
+
+`/calypso config environment-status-url:https://example.com/healthz`
+
+- Sets the single environment endpoint Calypso should poll.
+- Health is exact HTTP `200`; all other responses, timeouts, and network errors are unhealthy.
+
+`/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
+
+- Sets the channel that receives environment down and recovery alerts.
+
+`/calypso config email-monitor:on|off`
+
+- Enables or disables Gmail support-email ingestion.
+
+`/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
+
+- Sets the channel for automatic support-email notifications.
+
+`/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`
+
+- Sets the support-email on-call recipient until the provided duration expires.
+- Slack mention form is used automatically in notifications when Calypso is running on Slack.
+
+`/calypso config email-on-call off`
+
+- Clears the configured support-email on-call user and expiration.
+
 `/calypso config timezone:America/New_York`
 
 - Sets timezone (IANA), used by human timestamps and recap schedule rendering.
@@ -595,6 +738,16 @@ Rules:
 - Optional GitHub user filter (author login).
 - Optional recency filter (`day`, `week`, `month`).
 - Supports `recent` keyword variant: `/calypso reviews recent <day|week|month>`.
+
+`/calypso emails`
+
+- Lists pending customer support email items oldest-first.
+- Each line includes Calypso's email queue id, first sender, and subject.
+
+`/calypso emails responded <EMAIL_ID>`
+
+- Marks one pending support-email item as responded.
+- Does not talk back to Gmail in v1; this is a manual queue-management action.
 
 `/calypso tested <PR_NUMBER>`
 
@@ -659,6 +812,32 @@ Rules:
   - `is_draft = false`
   - `review_state in (waiting, changes_requested)`
   - `opened_for_review_at` within configured recency.
+
+## Environment Status Monitoring
+
+- Runs as a background scheduler in the app runtime.
+- Polls one configured URL every `ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS` (default `60`).
+- Uses `GET` with timeout `ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (default `10`).
+- Posts only on state transitions:
+  - first unhealthy observation posts a down alert
+  - repeated unhealthy checks stay quiet
+  - recovery posts once when the endpoint returns HTTP `200` again
+- First healthy observation only establishes baseline state; it does not post a recovery message.
+
+## Support Email Monitoring
+
+- Runs as a background scheduler in the app runtime.
+- Requires Gmail OAuth refresh-token credentials and a Pub/Sub topic for `users.watch`.
+- First enablement performs a one-time 7-day inbox backfill.
+- Gmail push notifications update pending history, and Calypso also runs fallback history sync every `EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES` (default `5`).
+- New inbox threads create rows in `support_email_threads` with:
+  - subject
+  - first sender
+  - received timestamp
+  - manual response state
+- New queue items trigger an automatic notification in the configured email channel.
+- If an unexpired on-call user is configured, Calypso appends `On call: <@USER>` on Slack notifications.
+- Notification delivery is separate from ingestion, so a temporary post failure is retried without losing the email record.
 
 ## Testing
 

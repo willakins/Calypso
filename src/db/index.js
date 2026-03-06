@@ -39,6 +39,38 @@ const RUNTIME_PROVIDER_DEFAULTS = Object.freeze({
   codeHostProvider: "github",
   deployProvider: "digitalocean",
 });
+const ENVIRONMENT_STATUS_STATES = Object.freeze({
+  unknown: "unknown",
+  healthy: "healthy",
+  unhealthy: "unhealthy",
+});
+const ENVIRONMENT_STATUS_DEFAULTS = Object.freeze({
+  enabled: false,
+  targetChannelId: null,
+  targetUrl: null,
+  lastObservedState: ENVIRONMENT_STATUS_STATES.unknown,
+  lastStateChangedAt: null,
+  lastCheckedAt: null,
+  lastHttpStatus: null,
+  lastErrorMessage: null,
+  lastNotifiedState: null,
+  lastNotifiedAt: null,
+});
+const SUPPORT_EMAIL_THREAD_STATUSES = Object.freeze({
+  pending: "pending",
+  responded: "responded",
+});
+const SUPPORT_EMAIL_DEFAULTS = Object.freeze({
+  enabled: false,
+  targetChannelId: null,
+  onCallUserId: null,
+  onCallExpiresAt: null,
+  lastProcessedHistoryId: null,
+  pendingHistoryId: null,
+  watchExpirationAt: null,
+  backfillCompletedAt: null,
+  lastSyncAt: null,
+});
 const COMMUNICATION_PROVIDERS = Object.freeze({
   slack: "slack",
   microsoftTeams: "microsoft_teams",
@@ -559,6 +591,51 @@ async function getReviewRecapConfig(pool) {
   };
 }
 
+async function getEnvironmentStatusConfig(pool) {
+  const result = await pool.query(
+    `
+      SELECT
+        enabled,
+        target_url,
+        target_channel_id,
+        last_observed_state,
+        last_state_changed_at,
+        last_checked_at,
+        last_http_status,
+        last_error_message,
+        last_notified_state,
+        last_notified_at
+      FROM environment_status_config
+      WHERE id = 1
+      LIMIT 1
+    `,
+  );
+
+  return mapEnvironmentStatusConfigRow(result.rows[0]) || { ...ENVIRONMENT_STATUS_DEFAULTS };
+}
+
+async function getSupportEmailConfig(pool) {
+  const result = await pool.query(
+    `
+      SELECT
+        enabled,
+        target_channel_id,
+        on_call_user_id,
+        on_call_expires_at,
+        last_processed_history_id,
+        pending_history_id,
+        watch_expiration_at,
+        backfill_completed_at,
+        last_sync_at
+      FROM support_email_config
+      WHERE id = 1
+      LIMIT 1
+    `,
+  );
+
+  return mapSupportEmailConfigRow(result.rows[0]) || { ...SUPPORT_EMAIL_DEFAULTS };
+}
+
 async function getRuntimeProviderConfig(pool) {
   const result = await pool.query(
     `
@@ -692,6 +769,430 @@ async function setReviewRecapSendHolidays(pool, sendOnHolidays, updatedBy) {
     sendOnHolidays: normalizedSendOnHolidays,
     updatedBy: normalizedUserId,
   });
+}
+
+async function setEnvironmentStatusEnabled(pool, enabled, updatedBy) {
+  const normalizedEnabled = normalizeBoolean(enabled, null);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (normalizedEnabled === null) {
+    throw new Error(`Unsupported environment status enabled value: ${enabled}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertEnvironmentStatusConfig(pool, {
+    enabled: normalizedEnabled,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setEnvironmentStatusUrl(pool, targetUrl, updatedBy) {
+  const normalizedTargetUrl = normalizeUrl(targetUrl);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedTargetUrl) {
+    throw new Error(`Unsupported environment status url: ${targetUrl}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertEnvironmentStatusConfig(pool, {
+    targetUrl: normalizedTargetUrl,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setEnvironmentStatusChannel(pool, targetChannelId, updatedBy) {
+  const normalizedChannelId = normalizeOptionalText(targetChannelId);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedChannelId) {
+    throw new Error(`Unsupported environment status channel id: ${targetChannelId}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertEnvironmentStatusConfig(pool, {
+    targetChannelId: normalizedChannelId,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function recordEnvironmentStatusObservation(
+  pool,
+  {
+    lastObservedState,
+    lastStateChangedAt,
+    lastCheckedAt,
+    lastHttpStatus,
+    lastErrorMessage,
+  },
+) {
+  const normalizedObservedState = normalizeEnvironmentStatusState(lastObservedState);
+  const normalizedHttpStatus = normalizeNullableInteger(lastHttpStatus);
+  const normalizedErrorMessage = normalizeOptionalText(lastErrorMessage);
+  if (!normalizedObservedState) {
+    throw new Error(`Unsupported environment status state: ${lastObservedState}`);
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE environment_status_config
+      SET last_observed_state = $1,
+          last_state_changed_at = COALESCE($2::timestamptz, environment_status_config.last_state_changed_at),
+          last_checked_at = COALESCE($3::timestamptz, NOW()),
+          last_http_status = $4,
+          last_error_message = $5,
+          updated_at = NOW()
+      WHERE id = 1
+      RETURNING
+        enabled,
+        target_url,
+        target_channel_id,
+        last_observed_state,
+        last_state_changed_at,
+        last_checked_at,
+        last_http_status,
+        last_error_message,
+        last_notified_state,
+        last_notified_at
+    `,
+    [
+      normalizedObservedState,
+      lastStateChangedAt || null,
+      lastCheckedAt || null,
+      normalizedHttpStatus,
+      normalizedErrorMessage,
+    ],
+  );
+
+  return mapEnvironmentStatusConfigRow(result.rows[0]);
+}
+
+async function markEnvironmentStatusNotificationSent(pool, state, notifiedAt) {
+  const normalizedState = normalizeEnvironmentNotifiedState(state);
+  if (!normalizedState) {
+    throw new Error(`Unsupported environment status notified state: ${state}`);
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE environment_status_config
+      SET last_notified_state = $1,
+          last_notified_at = COALESCE($2::timestamptz, NOW()),
+          updated_at = NOW()
+      WHERE id = 1
+      RETURNING
+        enabled,
+        target_url,
+        target_channel_id,
+        last_observed_state,
+        last_state_changed_at,
+        last_checked_at,
+        last_http_status,
+        last_error_message,
+        last_notified_state,
+        last_notified_at
+    `,
+    [normalizedState, notifiedAt || null],
+  );
+
+  return mapEnvironmentStatusConfigRow(result.rows[0]);
+}
+
+async function setSupportEmailMonitorEnabled(pool, enabled, updatedBy) {
+  const normalizedEnabled = normalizeBoolean(enabled, null);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (normalizedEnabled === null) {
+    throw new Error(`Unsupported support email enabled value: ${enabled}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertSupportEmailConfig(pool, {
+    enabled: normalizedEnabled,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setSupportEmailChannel(pool, targetChannelId, updatedBy) {
+  const normalizedChannelId = normalizeOptionalText(targetChannelId);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedChannelId) {
+    throw new Error(`Unsupported support email channel id: ${targetChannelId}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertSupportEmailConfig(pool, {
+    targetChannelId: normalizedChannelId,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setSupportEmailOnCall(pool, userId, expiresAt, updatedBy) {
+  const normalizedOnCallUserId = normalizeUserId(userId);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedOnCallUserId) {
+    throw new Error(`Unsupported support email on-call user id: ${userId}`);
+  }
+  if (!expiresAt) {
+    throw new Error("support email on-call expiration is required");
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertSupportEmailConfig(pool, {
+    onCallUserId: normalizedOnCallUserId,
+    onCallExpiresAt: expiresAt,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function clearSupportEmailOnCall(pool, updatedBy) {
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertSupportEmailConfig(pool, {
+    clearOnCall: true,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function upsertPendingSupportEmailHistoryId(pool, historyId) {
+  const normalizedHistoryId = normalizeHistoryId(historyId);
+  if (!normalizedHistoryId) {
+    throw new Error(`Unsupported support email history id: ${historyId}`);
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO support_email_config (
+        id,
+        pending_history_id,
+        updated_at
+      )
+      VALUES (1, $1::numeric, NOW())
+      ON CONFLICT (id)
+      DO UPDATE SET
+        pending_history_id = CASE
+          WHEN support_email_config.pending_history_id IS NULL THEN $1::numeric
+          ELSE GREATEST(support_email_config.pending_history_id, $1::numeric)
+        END,
+        updated_at = NOW()
+      RETURNING pending_history_id
+    `,
+    [normalizedHistoryId],
+  );
+
+  return normalizeHistoryId(result.rows[0]?.pending_history_id) || normalizedHistoryId;
+}
+
+async function updateSupportEmailRuntimeState(pool, updates = {}) {
+  return upsertSupportEmailConfig(pool, {
+    lastProcessedHistoryId: updates.lastProcessedHistoryId,
+    pendingHistoryId: updates.pendingHistoryId,
+    watchExpirationAt: updates.watchExpirationAt,
+    backfillCompletedAt: updates.backfillCompletedAt,
+    lastSyncAt: updates.lastSyncAt,
+    clearBackfillCompletedAt: Boolean(updates.clearBackfillCompletedAt),
+    clearPendingHistoryId: Boolean(updates.clearPendingHistoryId),
+  });
+}
+
+async function listPendingSupportEmailThreads(pool) {
+  const result = await pool.query(
+    `
+      SELECT
+        id,
+        gmail_thread_id,
+        gmail_first_message_id,
+        subject,
+        first_sender,
+        status,
+        first_received_at,
+        notification_sent_at,
+        responded_at,
+        responded_by
+      FROM support_email_threads
+      WHERE status = 'pending'
+      ORDER BY first_received_at ASC, id ASC
+    `,
+  );
+
+  return result.rows;
+}
+
+async function listUnnotifiedSupportEmailThreads(pool) {
+  const result = await pool.query(
+    `
+      SELECT
+        id,
+        gmail_thread_id,
+        gmail_first_message_id,
+        subject,
+        first_sender,
+        status,
+        first_received_at,
+        notification_sent_at,
+        responded_at,
+        responded_by
+      FROM support_email_threads
+      WHERE status = 'pending'
+        AND notification_sent_at IS NULL
+      ORDER BY first_received_at ASC, id ASC
+    `,
+  );
+
+  return result.rows;
+}
+
+async function insertSupportEmailThread(pool, thread) {
+  const normalizedThreadId = normalizeOptionalText(thread.gmailThreadId);
+  const normalizedFirstMessageId = normalizeOptionalText(thread.gmailFirstMessageId);
+  const normalizedSubject = normalizeOptionalText(thread.subject);
+  const normalizedFirstSender = normalizeOptionalText(thread.firstSender);
+  const normalizedFirstReceivedAt = thread.firstReceivedAt || null;
+  if (!normalizedThreadId) {
+    throw new Error("support email gmail thread id is required");
+  }
+  if (!normalizedFirstReceivedAt) {
+    throw new Error("support email first received timestamp is required");
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO support_email_threads (
+        gmail_thread_id,
+        gmail_first_message_id,
+        subject,
+        first_sender,
+        status,
+        first_received_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, 'pending', $5::timestamptz, NOW(), NOW())
+      ON CONFLICT (gmail_thread_id) DO NOTHING
+      RETURNING
+        id,
+        gmail_thread_id,
+        gmail_first_message_id,
+        subject,
+        first_sender,
+        status,
+        first_received_at,
+        notification_sent_at,
+        responded_at,
+        responded_by
+    `,
+    [
+      normalizedThreadId,
+      normalizedFirstMessageId,
+      normalizedSubject,
+      normalizedFirstSender,
+      normalizedFirstReceivedAt,
+    ],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function markSupportEmailThreadNotificationSent(pool, emailId, notificationSentAt) {
+  const normalizedEmailId = normalizePositiveInteger(emailId);
+  if (!normalizedEmailId) {
+    throw new Error(`Unsupported support email id: ${emailId}`);
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE support_email_threads
+      SET notification_sent_at = COALESCE($2::timestamptz, NOW()),
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        gmail_thread_id,
+        gmail_first_message_id,
+        subject,
+        first_sender,
+        status,
+        first_received_at,
+        notification_sent_at,
+        responded_at,
+        responded_by
+    `,
+    [normalizedEmailId, notificationSentAt || null],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function markSupportEmailThreadResponded(pool, emailId, respondedBy, respondedAt = null) {
+  const normalizedEmailId = normalizePositiveInteger(emailId);
+  const normalizedRespondedBy = normalizeUserId(respondedBy);
+  if (!normalizedEmailId) {
+    throw new Error(`Unsupported support email id: ${emailId}`);
+  }
+
+  const existingResult = await pool.query(
+    `
+      SELECT
+        id,
+        subject,
+        first_sender,
+        status,
+        responded_at,
+        responded_by
+      FROM support_email_threads
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [normalizedEmailId],
+  );
+  const existingThread = existingResult.rows[0];
+  if (!existingThread) {
+    return { found: false };
+  }
+
+  if (existingThread.status === SUPPORT_EMAIL_THREAD_STATUSES.responded) {
+    return {
+      found: true,
+      alreadyResponded: true,
+      emailThread: existingThread,
+    };
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE support_email_threads
+      SET status = 'responded',
+          responded_at = COALESCE($2::timestamptz, NOW()),
+          responded_by = $3,
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        subject,
+        first_sender,
+        status,
+        responded_at,
+        responded_by
+    `,
+    [normalizedEmailId, respondedAt || null, normalizedRespondedBy],
+  );
+
+  return {
+    found: true,
+    alreadyResponded: false,
+    emailThread: result.rows[0],
+  };
 }
 
 async function markReviewRecapSent(pool, scheduledSlotAt) {
@@ -828,6 +1329,170 @@ async function upsertReviewRecapConfig(pool, updates) {
   );
 
   return result.rows[0];
+}
+
+async function upsertEnvironmentStatusConfig(pool, updates) {
+  const result = await pool.query(
+    `
+      INSERT INTO environment_status_config (
+        id,
+        enabled,
+        target_url,
+        target_channel_id,
+        last_observed_state,
+        last_state_changed_at,
+        last_checked_at,
+        last_http_status,
+        last_error_message,
+        last_notified_state,
+        last_notified_at,
+        updated_by,
+        updated_at
+      )
+      VALUES (
+        1,
+        COALESCE($1, ${ENVIRONMENT_STATUS_DEFAULTS.enabled}),
+        COALESCE($2, NULL),
+        COALESCE($3, NULL),
+        COALESCE($4, '${ENVIRONMENT_STATUS_DEFAULTS.lastObservedState}'),
+        $5::timestamptz,
+        $6::timestamptz,
+        $7,
+        $8,
+        $9,
+        $10::timestamptz,
+        $11,
+        NOW()
+      )
+      ON CONFLICT (id)
+      DO UPDATE SET
+        enabled = COALESCE($1, environment_status_config.enabled),
+        target_url = COALESCE($2, environment_status_config.target_url),
+        target_channel_id = COALESCE($3, environment_status_config.target_channel_id),
+        last_observed_state = COALESCE($4, environment_status_config.last_observed_state),
+        last_state_changed_at = COALESCE($5::timestamptz, environment_status_config.last_state_changed_at),
+        last_checked_at = COALESCE($6::timestamptz, environment_status_config.last_checked_at),
+        last_http_status = COALESCE($7, environment_status_config.last_http_status),
+        last_error_message = COALESCE($8, environment_status_config.last_error_message),
+        last_notified_state = COALESCE($9, environment_status_config.last_notified_state),
+        last_notified_at = COALESCE($10::timestamptz, environment_status_config.last_notified_at),
+        updated_by = COALESCE(EXCLUDED.updated_by, environment_status_config.updated_by),
+        updated_at = NOW()
+      RETURNING
+        enabled,
+        target_url,
+        target_channel_id,
+        last_observed_state,
+        last_state_changed_at,
+        last_checked_at,
+        last_http_status,
+        last_error_message,
+        last_notified_state,
+        last_notified_at
+    `,
+    [
+      updates.enabled ?? null,
+      updates.targetUrl ?? null,
+      updates.targetChannelId ?? null,
+      updates.lastObservedState ?? null,
+      updates.lastStateChangedAt ?? null,
+      updates.lastCheckedAt ?? null,
+      normalizeNullableInteger(updates.lastHttpStatus),
+      updates.lastErrorMessage ?? null,
+      updates.lastNotifiedState ?? null,
+      updates.lastNotifiedAt ?? null,
+      updates.updatedBy ?? null,
+    ],
+  );
+
+  return mapEnvironmentStatusConfigRow(result.rows[0]);
+}
+
+async function upsertSupportEmailConfig(pool, updates) {
+  const result = await pool.query(
+    `
+      INSERT INTO support_email_config (
+        id,
+        enabled,
+        target_channel_id,
+        on_call_user_id,
+        on_call_expires_at,
+        last_processed_history_id,
+        pending_history_id,
+        watch_expiration_at,
+        backfill_completed_at,
+        last_sync_at,
+        updated_by,
+        updated_at
+      )
+      VALUES (
+        1,
+        COALESCE($1, ${SUPPORT_EMAIL_DEFAULTS.enabled}),
+        COALESCE($2, NULL),
+        COALESCE($3, NULL),
+        $4::timestamptz,
+        $5::numeric,
+        $6::numeric,
+        $7::timestamptz,
+        $8::timestamptz,
+        $9::timestamptz,
+        $10,
+        NOW()
+      )
+      ON CONFLICT (id)
+      DO UPDATE SET
+        enabled = COALESCE($1, support_email_config.enabled),
+        target_channel_id = COALESCE($2, support_email_config.target_channel_id),
+        on_call_user_id = CASE
+          WHEN $11 THEN NULL
+          ELSE COALESCE($3, support_email_config.on_call_user_id)
+        END,
+        on_call_expires_at = CASE
+          WHEN $11 THEN NULL
+          ELSE COALESCE($4::timestamptz, support_email_config.on_call_expires_at)
+        END,
+        last_processed_history_id = COALESCE($5::numeric, support_email_config.last_processed_history_id),
+        pending_history_id = CASE
+          WHEN $12 THEN NULL
+          ELSE COALESCE($6::numeric, support_email_config.pending_history_id)
+        END,
+        watch_expiration_at = COALESCE($7::timestamptz, support_email_config.watch_expiration_at),
+        backfill_completed_at = CASE
+          WHEN $13 THEN NULL
+          ELSE COALESCE($8::timestamptz, support_email_config.backfill_completed_at)
+        END,
+        last_sync_at = COALESCE($9::timestamptz, support_email_config.last_sync_at),
+        updated_by = COALESCE(EXCLUDED.updated_by, support_email_config.updated_by),
+        updated_at = NOW()
+      RETURNING
+        enabled,
+        target_channel_id,
+        on_call_user_id,
+        on_call_expires_at,
+        last_processed_history_id,
+        pending_history_id,
+        watch_expiration_at,
+        backfill_completed_at,
+        last_sync_at
+    `,
+    [
+      updates.enabled ?? null,
+      updates.targetChannelId ?? null,
+      updates.onCallUserId ?? null,
+      updates.onCallExpiresAt ?? null,
+      normalizeHistoryId(updates.lastProcessedHistoryId),
+      normalizeHistoryId(updates.pendingHistoryId),
+      updates.watchExpirationAt ?? null,
+      updates.backfillCompletedAt ?? null,
+      updates.lastSyncAt ?? null,
+      updates.updatedBy ?? null,
+      Boolean(updates.clearOnCall),
+      Boolean(updates.clearPendingHistoryId),
+      Boolean(updates.clearBackfillCompletedAt),
+    ],
+  );
+
+  return mapSupportEmailConfigRow(result.rows[0]);
 }
 
 async function upsertRuntimeProviderConfig(pool, updates) {
@@ -1006,6 +1671,11 @@ function normalizeTimeFormat(timeFormat) {
   return TIME_FORMATS[normalizedTimeFormat] || null;
 }
 
+function normalizeOptionalText(value) {
+  const normalizedValue = String(value || "").trim();
+  return normalizedValue === "" ? null : normalizedValue;
+}
+
 function normalizeTimeZone(timeZone) {
   const normalizedTimeZone = String(timeZone || "").trim();
   return normalizedTimeZone === "" ? null : normalizedTimeZone;
@@ -1068,9 +1738,125 @@ function normalizeReviewRecapBoolean(value, fallbackValue = null) {
   return fallbackValue;
 }
 
+function normalizeBoolean(value, fallbackValue = null) {
+  if (value === true || value === false) {
+    return value;
+  }
+
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  if (["true", "1", "yes", "on"].includes(normalizedValue)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(normalizedValue)) {
+    return false;
+  }
+
+  return fallbackValue;
+}
+
 function normalizePositiveInteger(value) {
   const parsedValue = Number(value);
   return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
+}
+
+function normalizeInteger(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsedValue = Number(value);
+  return Number.isInteger(parsedValue) ? parsedValue : null;
+}
+
+function normalizeNullableInteger(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  return normalizeInteger(value);
+}
+
+function normalizeHistoryId(value) {
+  const normalizedValue = String(value || "").trim();
+  return /^\d+$/.test(normalizedValue) ? normalizedValue : null;
+}
+
+function normalizeEnvironmentStatusState(value) {
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  return Object.values(ENVIRONMENT_STATUS_STATES).includes(normalizedValue)
+    ? normalizedValue
+    : null;
+}
+
+function normalizeEnvironmentNotifiedState(value) {
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  return normalizedValue === ENVIRONMENT_STATUS_STATES.healthy ||
+    normalizedValue === ENVIRONMENT_STATUS_STATES.unhealthy
+    ? normalizedValue
+    : null;
+}
+
+function normalizeSupportEmailThreadStatus(value) {
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  return Object.values(SUPPORT_EMAIL_THREAD_STATUSES).includes(normalizedValue)
+    ? normalizedValue
+    : null;
+}
+
+function normalizeUrl(value) {
+  const normalizedValue = String(value || "").trim();
+  if (normalizedValue === "") {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(normalizedValue);
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return null;
+    }
+    return parsedUrl.toString();
+  } catch (_error) {
+    return null;
+  }
+}
+
+function mapEnvironmentStatusConfigRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    enabled: normalizeBoolean(row.enabled, ENVIRONMENT_STATUS_DEFAULTS.enabled),
+    targetUrl: normalizeOptionalText(row.target_url),
+    targetChannelId: normalizeOptionalText(row.target_channel_id),
+    lastObservedState:
+      normalizeEnvironmentStatusState(row.last_observed_state) ||
+      ENVIRONMENT_STATUS_DEFAULTS.lastObservedState,
+    lastStateChangedAt: row.last_state_changed_at || null,
+    lastCheckedAt: row.last_checked_at || null,
+    lastHttpStatus: normalizeInteger(row.last_http_status),
+    lastErrorMessage: normalizeOptionalText(row.last_error_message),
+    lastNotifiedState: normalizeEnvironmentNotifiedState(row.last_notified_state),
+    lastNotifiedAt: row.last_notified_at || null,
+  };
+}
+
+function mapSupportEmailConfigRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    enabled: normalizeBoolean(row.enabled, SUPPORT_EMAIL_DEFAULTS.enabled),
+    targetChannelId: normalizeOptionalText(row.target_channel_id),
+    onCallUserId: normalizeOptionalText(row.on_call_user_id),
+    onCallExpiresAt: row.on_call_expires_at || null,
+    lastProcessedHistoryId: normalizeHistoryId(row.last_processed_history_id),
+    pendingHistoryId: normalizeHistoryId(row.pending_history_id),
+    watchExpirationAt: row.watch_expiration_at || null,
+    backfillCompletedAt: row.backfill_completed_at || null,
+    lastSyncAt: row.last_sync_at || null,
+  };
 }
 
 function normalizeCommunicationProvider(provider) {
@@ -1110,31 +1896,50 @@ function normalizePullRequestReviewState(reviewState) {
 
 module.exports = {
   addUserToDeployWhitelist,
+  clearSupportEmailOnCall,
   createPool,
   DEFAULT_TIME_FORMAT,
   DEFAULT_TIME_ZONE,
+  ENVIRONMENT_STATUS_DEFAULTS,
+  ENVIRONMENT_STATUS_STATES,
   RUNTIME_PROVIDER_DEFAULTS,
   REVIEW_RECAP_DEFAULTS,
   REVIEW_RECAP_RECENCY_UNITS,
   REVIEW_RECAP_WEEKDAYS,
+  SUPPORT_EMAIL_DEFAULTS,
+  SUPPORT_EMAIL_THREAD_STATUSES,
   getRuntimeProviderConfig,
   getConfiguredTimeZone,
+  getEnvironmentStatusConfig,
   getReviewRecapConfig,
   getLastProdDeployAt,
   getConfiguredTimeFormat,
+  getSupportEmailConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
+  insertSupportEmailThread,
+  listPendingSupportEmailThreads,
   listRecentlyTestedPullRequests,
   listOpenPullRequestsWaitingOnReviewSince,
+  listUnnotifiedSupportEmailThreads,
   listTrackedOpenPullRequestsForCodexApproval,
   listBlockingPullRequests,
   markStaleOpenPullRequestsClosed,
   markAllUntestedPullRequestsTested,
+  markEnvironmentStatusNotificationSent,
   markReviewRecapSent,
   markPullRequestsDeployedSince,
+  markSupportEmailThreadNotificationSent,
+  markSupportEmailThreadResponded,
+  recordEnvironmentStatusObservation,
   updatePullRequestCodexApproval,
+  updateSupportEmailRuntimeState,
   markPullRequestTested,
+  upsertPendingSupportEmailHistoryId,
   runMigrations,
+  setEnvironmentStatusChannel,
+  setEnvironmentStatusEnabled,
+  setEnvironmentStatusUrl,
   setReviewRecapChannel,
   setReviewRecapRecency,
   setReviewRecapSchedule,
@@ -1146,6 +1951,9 @@ module.exports = {
   setConfiguredCommunicationProvider,
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
+  setSupportEmailChannel,
+  setSupportEmailMonitorEnabled,
+  setSupportEmailOnCall,
   TIME_FORMATS,
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,

@@ -112,6 +112,17 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.deployAccessKeyId, "AKIA123");
       assert.equal(config.deploySecretAccessKey, "secret-123");
       assert.equal(config.deploySessionToken, "session-123");
+      assert.equal(config.environmentStatusPollIntervalSeconds, 60);
+      assert.equal(config.environmentStatusTimeoutSeconds, 10);
+      assert.equal(config.emailGmailAddress, "");
+      assert.equal(config.emailGmailClientId, "");
+      assert.equal(config.emailGmailClientSecret, "");
+      assert.equal(config.emailGmailRefreshToken, "");
+      assert.equal(config.emailGmailPubsubTopic, "");
+      assert.equal(config.emailWebhookAudience, "");
+      assert.equal(config.emailPushServiceAccountEmail, "");
+      assert.equal(config.emailWatchRenewIntervalHours, 24);
+      assert.equal(config.emailSyncFallbackIntervalMinutes, 5);
       assert.equal(config.port, 4100);
     },
   );
@@ -200,6 +211,17 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       DEPLOY_ACCESS_KEY_ID: undefined,
       DEPLOY_SECRET_ACCESS_KEY: undefined,
       DEPLOY_SESSION_TOKEN: undefined,
+      ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS: undefined,
+      ENVIRONMENT_STATUS_TIMEOUT_SECONDS: undefined,
+      EMAIL_GMAIL_ADDRESS: undefined,
+      EMAIL_GMAIL_CLIENT_ID: undefined,
+      EMAIL_GMAIL_CLIENT_SECRET: undefined,
+      EMAIL_GMAIL_REFRESH_TOKEN: undefined,
+      EMAIL_GMAIL_PUBSUB_TOPIC: undefined,
+      EMAIL_WEBHOOK_AUDIENCE: undefined,
+      EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL: undefined,
+      EMAIL_WATCH_RENEW_INTERVAL_HOURS: undefined,
+      EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES: undefined,
       CODE_HOST_TOKEN: undefined,
       PORT: undefined,
     },
@@ -215,6 +237,17 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.deployAccessKeyId, "");
       assert.equal(config.deploySecretAccessKey, "");
       assert.equal(config.deploySessionToken, "");
+      assert.equal(config.environmentStatusPollIntervalSeconds, 60);
+      assert.equal(config.environmentStatusTimeoutSeconds, 10);
+      assert.equal(config.emailGmailAddress, "");
+      assert.equal(config.emailGmailClientId, "");
+      assert.equal(config.emailGmailClientSecret, "");
+      assert.equal(config.emailGmailRefreshToken, "");
+      assert.equal(config.emailGmailPubsubTopic, "");
+      assert.equal(config.emailWebhookAudience, "");
+      assert.equal(config.emailPushServiceAccountEmail, "");
+      assert.equal(config.emailWatchRenewIntervalHours, 24);
+      assert.equal(config.emailSyncFallbackIntervalMinutes, 5);
       assert.equal(config.codeHostToken, "");
       assert.deepEqual(config.codeHostCodexUserLogins, ["codex", "codex[bot]"]);
       assert.equal(config.communicationWebhookUrl, "");
@@ -321,6 +354,42 @@ test("loadConfig reads microsoft teams optional communication values", { concurr
       assert.equal(config.communicationWebhookUrl, "https://example.test/hook");
       assert.equal(config.communicationCommandPath, "teams/calypso");
       assert.deepEqual(config.communicationAdminUserIds, ["U1", "U2", "U3"]);
+    },
+  );
+});
+
+test("loadConfig reads optional environment status and email polling values", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS: "30",
+      ENVIRONMENT_STATUS_TIMEOUT_SECONDS: "8",
+      EMAIL_GMAIL_ADDRESS: " support@example.com ",
+      EMAIL_GMAIL_CLIENT_ID: " gmail-client-id ",
+      EMAIL_GMAIL_CLIENT_SECRET: " gmail-client-secret ",
+      EMAIL_GMAIL_REFRESH_TOKEN: " gmail-refresh-token ",
+      EMAIL_GMAIL_PUBSUB_TOPIC: " projects/test/topics/calypso-support ",
+      EMAIL_WEBHOOK_AUDIENCE: " https://example.com/email/webhook ",
+      EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL: " pubsub@example.iam.gserviceaccount.com ",
+      EMAIL_WATCH_RENEW_INTERVAL_HOURS: "12",
+      EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES: "9",
+    },
+    () => {
+      const config = loadConfig();
+      assert.equal(config.environmentStatusPollIntervalSeconds, 30);
+      assert.equal(config.environmentStatusTimeoutSeconds, 8);
+      assert.equal(config.emailGmailAddress, "support@example.com");
+      assert.equal(config.emailGmailClientId, "gmail-client-id");
+      assert.equal(config.emailGmailClientSecret, "gmail-client-secret");
+      assert.equal(config.emailGmailRefreshToken, "gmail-refresh-token");
+      assert.equal(config.emailGmailPubsubTopic, "projects/test/topics/calypso-support");
+      assert.equal(config.emailWebhookAudience, "https://example.com/email/webhook");
+      assert.equal(
+        config.emailPushServiceAccountEmail,
+        "pubsub@example.iam.gserviceaccount.com",
+      );
+      assert.equal(config.emailWatchRenewIntervalHours, 12);
+      assert.equal(config.emailSyncFallbackIntervalMinutes, 9);
     },
   );
 });

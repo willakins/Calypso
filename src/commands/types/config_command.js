@@ -4,6 +4,13 @@ const {
   COMMUNICATION_PROVIDERS,
   DEPLOY_PROVIDERS,
 } = require("../../config");
+const { parseDurationToken } = require("../../shared/durations");
+const {
+  readCommunicationUserReferenceFromArgument,
+  resolveCommunicationChannelId,
+  resolveCommunicationUserId,
+  verifyCommunicationChannelAccess,
+} = require("../../platform/communication/resolution");
 
 const TIME_FORMAT_ARGUMENT_PATTERN = /^time-format:(human|long)$/i;
 const TIME_ZONE_ARGUMENT_PATTERN = /^timezone:(.+)$/i;
@@ -13,7 +20,13 @@ const REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN =
   /^review-recap-schedule:(daily|mon|tue|wed|thu|fri|sat|sun)@(.+)$/i;
 const REVIEW_RECAP_SEND_WEEKENDS_ARGUMENT_PATTERN = /^review-recap-send-weekends:(on|off)$/i;
 const REVIEW_RECAP_SEND_HOLIDAYS_ARGUMENT_PATTERN = /^review-recap-send-holidays:(on|off)$/i;
+const ENVIRONMENT_STATUS_ARGUMENT_PATTERN = /^environment-status:(on|off)$/i;
+const ENVIRONMENT_STATUS_URL_ARGUMENT_PATTERN = /^environment-status-url:(.+)$/i;
+const ENVIRONMENT_STATUS_CHANNEL_ARGUMENT_PATTERN = /^environment-status-channel:(.+)$/i;
+const EMAIL_MONITOR_ARGUMENT_PATTERN = /^email-monitor:(on|off)$/i;
+const EMAIL_CHANNEL_ARGUMENT_PATTERN = /^email-channel:(.+)$/i;
 const REVIEW_RECAP_SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const EMAIL_ON_CALL_COMMAND_NAME = "email-on-call";
 const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "communication-provider",
   Object.values(COMMUNICATION_PROVIDERS),
@@ -34,10 +47,17 @@ class ConfigCommand extends BaseCalypsoCommand {
   }
 
   parse({ commandWords }) {
+    if (commandWords.length < 2) {
+      return this.buildRespondParsedCommand(buildConfigUsageMessage());
+    }
+
+    const secondWord = String(commandWords[1] || "").toLowerCase();
+    if (secondWord === EMAIL_ON_CALL_COMMAND_NAME) {
+      return parseEmailOnCallCommand(this, commandWords);
+    }
+
     if (commandWords.length !== 2) {
-      return this.buildRespondParsedCommand(
-        buildConfigUsageMessage(),
-      );
+      return this.buildRespondParsedCommand(buildConfigUsageMessage());
     }
 
     const argument = commandWords[1];
@@ -108,6 +128,56 @@ class ConfigCommand extends BaseCalypsoCommand {
       });
     }
 
+    const environmentStatusMatch = argument.match(ENVIRONMENT_STATUS_ARGUMENT_PATTERN);
+    if (environmentStatusMatch) {
+      return this.buildParsedCommand({
+        action: "config_environment_status",
+        enabled: environmentStatusMatch[1].toLowerCase() === "on",
+      });
+    }
+
+    const environmentStatusUrlMatch = argument.match(ENVIRONMENT_STATUS_URL_ARGUMENT_PATTERN);
+    if (environmentStatusUrlMatch) {
+      return this.buildParsedCommand({
+        action: "config_environment_status_url",
+        targetUrl: String(environmentStatusUrlMatch[1] || "").trim(),
+      });
+    }
+
+    const environmentStatusChannelMatch = argument.match(ENVIRONMENT_STATUS_CHANNEL_ARGUMENT_PATTERN);
+    if (environmentStatusChannelMatch) {
+      const targetChannelReference = String(environmentStatusChannelMatch[1] || "").trim();
+      if (targetChannelReference === "") {
+        return this.buildRespondParsedCommand(buildConfigUsageMessage());
+      }
+
+      return this.buildParsedCommand({
+        action: "config_environment_status_channel",
+        targetChannelReference,
+      });
+    }
+
+    const emailMonitorMatch = argument.match(EMAIL_MONITOR_ARGUMENT_PATTERN);
+    if (emailMonitorMatch) {
+      return this.buildParsedCommand({
+        action: "config_email_monitor",
+        enabled: emailMonitorMatch[1].toLowerCase() === "on",
+      });
+    }
+
+    const emailChannelMatch = argument.match(EMAIL_CHANNEL_ARGUMENT_PATTERN);
+    if (emailChannelMatch) {
+      const targetChannelReference = String(emailChannelMatch[1] || "").trim();
+      if (targetChannelReference === "") {
+        return this.buildRespondParsedCommand(buildConfigUsageMessage());
+      }
+
+      return this.buildParsedCommand({
+        action: "config_email_channel",
+        targetChannelReference,
+      });
+    }
+
     const communicationProviderMatch = argument.match(COMMUNICATION_PROVIDER_ARGUMENT_PATTERN);
     if (communicationProviderMatch) {
       return this.buildParsedCommand({
@@ -172,48 +242,14 @@ class ConfigCommand extends BaseCalypsoCommand {
     }
 
     if (parsedCommand.action === "config_review_recap_channel") {
-      const channelResolution = await resolveReviewRecapChannelId(
+      return updateChannelScopedConfig.call(this, {
+        actionLabel: "review recap",
         runtime,
-        parsedCommand.targetChannelReference,
-      );
-      if (!channelResolution.isResolvable) {
-        return this.buildExecutionResult(
-          buildReviewRecapChannelResolutionError({
-            targetChannelReference: parsedCommand.targetChannelReference,
-            reason: channelResolution.reason,
-            botName: runtime.botName,
-          }),
-          { responseType: "ephemeral" },
-        );
-      }
-
-      const channelAccess = await verifyReviewRecapChannelAccess(
-        runtime,
-        channelResolution.targetChannelId,
-      );
-      if (!channelAccess.isAccessible) {
-        return this.buildExecutionResult(
-          buildReviewRecapChannelAccessError({
-            targetChannelId: channelResolution.targetChannelId,
-            reason: channelAccess.reason,
-            platformErrorCode: channelAccess.platformErrorCode,
-            neededScopes: channelAccess.neededScopes,
-            providedScopes: channelAccess.providedScopes,
-            botName: runtime.botName,
-          }),
-          { responseType: "ephemeral" },
-        );
-      }
-
-      await runtime.setReviewRecapChannelFn(
-        runtime.pool,
-        channelResolution.targetChannelId,
-        runtime.userId,
-      );
-
-      return this.buildExecutionResult(
-        `Updated review recap channel to <#${channelResolution.targetChannelId}>.`,
-      );
+        retryCommand: "/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>",
+        setChannelFn: runtime.setReviewRecapChannelFn,
+        successText: "Updated review recap channel",
+        targetChannelReference: parsedCommand.targetChannelReference,
+      });
     }
 
     if (parsedCommand.action === "config_review_recap_recency") {
@@ -266,6 +302,106 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildExecutionResult(
         `Updated review recap holiday sending to \`${holidayStatus}\` (US federal holidays).`,
       );
+    }
+
+    if (parsedCommand.action === "config_environment_status") {
+      await runtime.setEnvironmentStatusEnabledFn(
+        runtime.pool,
+        parsedCommand.enabled,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated environment status monitoring to \`${parsedCommand.enabled ? "on" : "off"}\`.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_environment_status_url") {
+      const normalizedTargetUrl = normalizeHttpUrl(parsedCommand.targetUrl);
+      if (!normalizedTargetUrl) {
+        return this.buildExecutionResult(
+          [
+            `Environment status URL \`${parsedCommand.targetUrl}\` is invalid.`,
+            "Use an HTTP or HTTPS URL such as `https://example.com/healthz`.",
+          ].join("\n"),
+          { responseType: "ephemeral" },
+        );
+      }
+
+      await runtime.setEnvironmentStatusUrlFn(
+        runtime.pool,
+        normalizedTargetUrl,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated environment status URL to \`${normalizedTargetUrl}\`.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_environment_status_channel") {
+      return updateChannelScopedConfig.call(this, {
+        actionLabel: "environment status",
+        runtime,
+        retryCommand: "/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID>",
+        setChannelFn: runtime.setEnvironmentStatusChannelFn,
+        successText: "Updated environment status channel",
+        targetChannelReference: parsedCommand.targetChannelReference,
+      });
+    }
+
+    if (parsedCommand.action === "config_email_monitor") {
+      await runtime.setSupportEmailMonitorEnabledFn(
+        runtime.pool,
+        parsedCommand.enabled,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated support email monitoring to \`${parsedCommand.enabled ? "on" : "off"}\`.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_email_channel") {
+      return updateChannelScopedConfig.call(this, {
+        actionLabel: "support email",
+        runtime,
+        retryCommand: "/calypso config email-channel:<#CHANNEL|CHANNEL_ID>",
+        setChannelFn: runtime.setSupportEmailChannelFn,
+        successText: "Updated support email channel",
+        targetChannelReference: parsedCommand.targetChannelReference,
+      });
+    }
+
+    if (parsedCommand.action === "config_email_on_call") {
+      const userResolution = await resolveCommunicationUserId(runtime, parsedCommand);
+      if (!userResolution.isResolvable) {
+        return this.buildExecutionResult(
+          buildUserResolutionError({
+            resolution: userResolution,
+            targetUserHandle: userResolution.targetUserHandle || parsedCommand.targetUserHandle,
+            usageCommand: "/calypso config email-on-call <@USER> 1d",
+          }),
+          { responseType: "ephemeral" },
+        );
+      }
+
+      const expiresAt = new Date(Date.now() + parsedCommand.onCallDurationMs).toISOString();
+      await runtime.setSupportEmailOnCallFn(
+        runtime.pool,
+        userResolution.targetUserId,
+        expiresAt,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated support email on-call to <@${userResolution.targetUserId}> for \`${parsedCommand.onCallDurationToken}\`.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_email_on_call_off") {
+      await runtime.clearSupportEmailOnCallFn(runtime.pool, runtime.userId);
+      return this.buildExecutionResult("Cleared support email on-call assignment.");
     }
 
     if (parsedCommand.action === "config_communication_provider") {
@@ -362,6 +498,13 @@ function isWorkspaceScopedConfigAction(action) {
     action === "config_review_recap_schedule" ||
     action === "config_review_recap_send_weekends" ||
     action === "config_review_recap_send_holidays" ||
+    action === "config_environment_status" ||
+    action === "config_environment_status_url" ||
+    action === "config_environment_status_channel" ||
+    action === "config_email_monitor" ||
+    action === "config_email_channel" ||
+    action === "config_email_on_call" ||
+    action === "config_email_on_call_off" ||
     action === "config_communication_provider" ||
     action === "config_code_host_provider" ||
     action === "config_deploy_provider"
@@ -382,12 +525,48 @@ function buildConfigUsageMessage() {
     "`/calypso config review-recap-send-weekends:<on|off>`",
     "`/calypso config review-recap-send-holidays:<on|off>`",
     "",
+    "Environment status setup:",
+    "`/calypso config environment-status:on|off`",
+    "`/calypso config environment-status-url:https://example.com/healthz`",
+    "`/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
+    "",
+    "Support email setup:",
+    "`/calypso config email-monitor:on|off`",
+    "`/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
+    "`/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`",
+    "`/calypso config email-on-call off`",
+    "",
     "Platform provider setup:",
     "`/calypso config communication-provider:slack|microsoft_teams`",
     "`/calypso config code-host-provider:github|bitbucket`",
     "`/calypso config deploy-provider:digitalocean|aws`",
     "Defaults: `1w`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/calypso config timezone`.",
   ].join("\n");
+}
+
+function parseEmailOnCallCommand(commandDefinition, commandWords) {
+  if (commandWords.length === 3 && String(commandWords[2] || "").toLowerCase() === "off") {
+    return commandDefinition.buildParsedCommand({
+      action: "config_email_on_call_off",
+    });
+  }
+
+  if (commandWords.length !== 4) {
+    return commandDefinition.buildRespondParsedCommand(buildConfigUsageMessage());
+  }
+
+  const targetUserReference = readCommunicationUserReferenceFromArgument(commandWords[2]);
+  const parsedDuration = parseDurationToken(commandWords[3]);
+  if (!targetUserReference || !parsedDuration) {
+    return commandDefinition.buildRespondParsedCommand(buildConfigUsageMessage());
+  }
+
+  return commandDefinition.buildParsedCommand({
+    action: "config_email_on_call",
+    ...targetUserReference,
+    onCallDurationMs: parsedDuration.durationMs,
+    onCallDurationToken: parsedDuration.normalizedToken,
+  });
 }
 
 function normalizeReviewRecapScheduleTimes(rawScheduleTimes) {
@@ -407,6 +586,45 @@ function normalizeReviewRecapScheduleTimes(rawScheduleTimes) {
   }
 
   return uniqueScheduleTimes.sort().join(",");
+}
+
+async function updateChannelScopedConfig({
+  actionLabel,
+  runtime,
+  retryCommand,
+  setChannelFn,
+  successText,
+  targetChannelReference,
+}) {
+  const channelResolution = await resolveCommunicationChannelId(runtime, targetChannelReference);
+  if (!channelResolution.isResolvable) {
+    return this.buildExecutionResult(
+      buildChannelResolutionError({
+        actionLabel,
+        botName: runtime.botName,
+        reason: channelResolution.reason,
+        targetChannelReference,
+      }),
+      { responseType: "ephemeral" },
+    );
+  }
+
+  const channelAccess = await verifyCommunicationChannelAccess(runtime, channelResolution.targetChannelId);
+  if (!channelAccess.isAccessible) {
+    return this.buildExecutionResult(
+      buildChannelAccessError({
+        actionLabel,
+        botName: runtime.botName,
+        targetChannelId: channelResolution.targetChannelId,
+        retryCommand,
+        ...channelAccess,
+      }),
+      { responseType: "ephemeral" },
+    );
+  }
+
+  await setChannelFn(runtime.pool, channelResolution.targetChannelId, runtime.userId);
+  return this.buildExecutionResult(`${successText} to <#${channelResolution.targetChannelId}>.`);
 }
 
 function buildProviderArgumentPattern(prefix, providers) {
@@ -429,216 +647,27 @@ function buildProviderUnavailableMessage(provider) {
   ].join(" ");
 }
 
-async function verifyReviewRecapChannelAccess(runtime, targetChannelId) {
-  if (typeof runtime.verifyReviewRecapChannelAccessFn === "function") {
-    return runtime.verifyReviewRecapChannelAccessFn(runtime, targetChannelId);
-  }
-
-  const conversationsApi = runtime.communicationClient?.conversations;
-  if (!conversationsApi || typeof conversationsApi.list !== "function") {
-    return { isAccessible: true };
-  }
-
-  try {
-    const matchedChannel = await findPublicOrPrivateChannel(conversationsApi, (channel) => {
-      return normalizeChannelId(channel?.id) === normalizeChannelId(targetChannelId);
-    });
-    if (!matchedChannel) {
-      return {
-        isAccessible: false,
-        reason: "not_in_channel",
-      };
-    }
-
-    const isMember = matchedChannel?.is_member;
-    if (isMember === false) {
-      return {
-        isAccessible: false,
-        reason: "not_in_channel",
-      };
-    }
-
-    return { isAccessible: true };
-  } catch (error) {
-    const errorCode = readPlatformErrorCode(error);
-    if (errorCode === "not_in_channel" || errorCode === "channel_not_found") {
-      return {
-        isAccessible: false,
-        reason: errorCode,
-        platformErrorCode: errorCode,
-      };
-    }
-
-    return {
-      isAccessible: false,
-      reason: "verification_failed",
-      platformErrorCode: errorCode || "unknown_error",
-      neededScopes: readPlatformNeededScopes(error),
-      providedScopes: readPlatformProvidedScopes(error),
-    };
-  }
-}
-
-async function resolveReviewRecapChannelId(runtime, targetChannelReference) {
-  const reference = String(targetChannelReference || "").trim();
-  if (reference === "") {
-    return {
-      isResolvable: false,
-      reason: "invalid_reference",
-    };
-  }
-
-  const mentionMatch = reference.match(/^<#([A-Z0-9]+)(?:\|[^>]+)?>$/i);
-  if (mentionMatch) {
-    return {
-      isResolvable: true,
-      targetChannelId: mentionMatch[1].toUpperCase(),
-    };
-  }
-
-  const channelIdMatch = reference.match(/^[CG][A-Z0-9]+$/i);
-  if (channelIdMatch) {
-    return {
-      isResolvable: true,
-      targetChannelId: reference.toUpperCase(),
-    };
-  }
-
-  const channelNameMatch = reference.match(/^#?([a-z0-9][a-z0-9._-]*)$/i);
-  if (!channelNameMatch) {
-    return {
-      isResolvable: false,
-      reason: "invalid_reference",
-    };
-  }
-
-  const channelName = channelNameMatch[1].toLowerCase();
-  const currentChannelId = String(runtime.currentChannelId || "").trim();
-  const currentChannelName = String(runtime.currentChannelName || "").trim().toLowerCase();
-  if (currentChannelId !== "" && currentChannelName !== "" && currentChannelName === channelName) {
-    return {
-      isResolvable: true,
-      targetChannelId: currentChannelId.toUpperCase(),
-    };
-  }
-
-  const conversationsApi = runtime.communicationClient?.conversations;
-  if (!conversationsApi || typeof conversationsApi.list !== "function") {
-    return {
-      isResolvable: false,
-      reason: "channel_name_resolution_unavailable",
-    };
-  }
-
-  try {
-    const matchedChannel = await findPublicOrPrivateChannel(conversationsApi, (channel) => {
-      const normalizedName = String(channel?.name_normalized || "").toLowerCase();
-      const name = String(channel?.name || "").toLowerCase();
-      return normalizedName === channelName || name === channelName;
-    });
-    if (matchedChannel?.id) {
-      return {
-        isResolvable: true,
-        targetChannelId: String(matchedChannel.id).toUpperCase(),
-      };
-    }
-  } catch (_error) {
-    return {
-      isResolvable: false,
-      reason: "channel_name_resolution_failed",
-    };
-  }
-
-  return {
-    isResolvable: false,
-    reason: "channel_not_found",
-  };
-}
-
-async function findPublicOrPrivateChannel(conversationsApi, matcher) {
-  let cursor = null;
-  while (true) {
-    const response = await conversationsApi.list({
-      exclude_archived: true,
-      limit: 200,
-      types: "public_channel,private_channel",
-      ...(cursor ? { cursor } : {}),
-    });
-
-    const channels = Array.isArray(response?.channels) ? response.channels : [];
-    const matchedChannel = channels.find(matcher);
-    if (matchedChannel) {
-      return matchedChannel;
-    }
-
-    cursor = String(response?.response_metadata?.next_cursor || "").trim();
-    if (cursor === "") {
-      return null;
-    }
-  }
-}
-
-function normalizeChannelId(channelId) {
-  return String(channelId || "").trim().toUpperCase();
-}
-
-function readPlatformErrorCode(error) {
-  const payloadErrorCode = String(error?.data?.error || "").trim().toLowerCase();
-  if (payloadErrorCode !== "") {
-    return payloadErrorCode;
-  }
-
-  const errorMessage = String(error?.message || "").trim().toLowerCase();
-  if (errorMessage.includes("not_in_channel")) {
-    return "not_in_channel";
-  }
-  if (errorMessage.includes("channel_not_found")) {
-    return "channel_not_found";
-  }
-
-  return "";
-}
-
-function readPlatformNeededScopes(error) {
-  return normalizeScopeList(error?.data?.needed);
-}
-
-function readPlatformProvidedScopes(error) {
-  return normalizeScopeList(error?.data?.provided);
-}
-
-function normalizeScopeList(rawScopes) {
-  const rawValue = String(rawScopes || "").trim();
-  if (rawValue === "") {
-    return null;
-  }
-
-  return rawValue
-    .split(",")
-    .map((scope) => scope.trim())
-    .filter(Boolean)
-    .join(", ");
-}
-
-function buildReviewRecapChannelAccessError({
+function buildChannelAccessError({
+  actionLabel = "review recap",
   targetChannelId,
   reason,
   platformErrorCode,
   neededScopes,
   providedScopes,
   botName,
+  retryCommand = "/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>",
 }) {
   const resolvedBotName = String(botName || "Calypso").trim() || "Calypso";
   if (reason === "not_in_channel") {
     return [
-      `Cannot set review recap channel to <#${targetChannelId}> because ${resolvedBotName} is not in that channel.`,
-      `Invite ${resolvedBotName} to the channel, then run \`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>\` again.`,
+      `Cannot set ${actionLabel} channel to <#${targetChannelId}> because ${resolvedBotName} is not in that channel.`,
+      `Invite ${resolvedBotName} to the channel, then run \`${retryCommand}\` again.`,
     ].join(" ");
   }
 
   if (reason === "channel_not_found") {
     return [
-      `Cannot set review recap channel to <#${targetChannelId}> because that channel is not accessible.`,
+      `Cannot set ${actionLabel} channel to <#${targetChannelId}> because that channel is not accessible.`,
       `Make sure the channel exists and ${resolvedBotName} has access.`,
     ].join(" ");
   }
@@ -647,7 +676,7 @@ function buildReviewRecapChannelAccessError({
     const neededText = neededScopes ? ` Needed scopes: \`${neededScopes}\`.` : "";
     const providedText = providedScopes ? ` Current scopes: \`${providedScopes}\`.` : "";
     return [
-      `Cannot set review recap channel to <#${targetChannelId}> because Slack denied channel verification (\`missing_scope\`).`,
+      `Cannot set ${actionLabel} channel to <#${targetChannelId}> because Slack denied channel verification (\`missing_scope\`).`,
       `${resolvedBotName} needs channel read scopes to verify membership.${neededText}${providedText}`,
       "Reinstall/update the app scopes, then retry.",
     ].join(" ");
@@ -655,30 +684,35 @@ function buildReviewRecapChannelAccessError({
 
   if (platformErrorCode === "not_allowed_token_type") {
     return [
-      `Cannot set review recap channel to <#${targetChannelId}> because Slack rejected the token type (\`not_allowed_token_type\`).`,
+      `Cannot set ${actionLabel} channel to <#${targetChannelId}> because Slack rejected the token type (\`not_allowed_token_type\`).`,
       `Verify ${resolvedBotName} is using a bot token for Slack Web API calls, then retry.`,
     ].join(" ");
   }
 
   if (platformErrorCode === "invalid_auth" || platformErrorCode === "account_inactive") {
     return [
-      `Cannot set review recap channel to <#${targetChannelId}> because Slack authentication failed (\`${platformErrorCode}\`).`,
+      `Cannot set ${actionLabel} channel to <#${targetChannelId}> because Slack authentication failed (\`${platformErrorCode}\`).`,
       `Rotate/update ${resolvedBotName} communication credentials and retry.`,
     ].join(" ");
   }
 
   return [
-    `Cannot set review recap channel to <#${targetChannelId}> right now.`,
+    `Cannot set ${actionLabel} channel to <#${targetChannelId}> right now.`,
     `Slack could not verify access for ${resolvedBotName} (error: \`${platformErrorCode || "unknown_error"}\`).`,
     "Check channel ID, bot membership, and Slack app scopes, then try again.",
   ].join(" ");
 }
 
-function buildReviewRecapChannelResolutionError({ targetChannelReference, reason, botName }) {
+function buildChannelResolutionError({
+  actionLabel = "review recap",
+  targetChannelReference,
+  reason = "invalid_reference",
+  botName,
+}) {
   const resolvedBotName = String(botName || "Calypso").trim() || "Calypso";
   if (reason === "channel_not_found") {
     return [
-      `Cannot set review recap channel because \`${targetChannelReference}\` was not found.`,
+      `Cannot set ${actionLabel} channel because \`${targetChannelReference}\` was not found.`,
       `Use a valid channel name, channel mention, or channel ID.`,
     ].join(" ");
   }
@@ -698,9 +732,62 @@ function buildReviewRecapChannelResolutionError({ targetChannelReference, reason
   }
 
   return [
-    `Invalid review recap channel value \`${targetChannelReference}\`.`,
+    `Invalid ${actionLabel} channel value \`${targetChannelReference}\`.`,
     "Use a channel mention like `<#C123ABC|channel-name>`, a channel ID, or a channel name such as `#deploys`.",
   ].join(" ");
+}
+
+function buildUserResolutionError({ resolution, targetUserHandle, usageCommand }) {
+  const normalizedUserHandle = String(targetUserHandle || "").trim().toLowerCase();
+  if (!normalizedUserHandle) {
+    return `Usage: \`${usageCommand}\``;
+  }
+
+  if (resolution.reason === "user_lookup_unavailable") {
+    return [
+      `Cannot resolve \`@${normalizedUserHandle}\` with current Slack permissions.`,
+      `Use \`${usageCommand}\` or a direct Slack user ID.`,
+    ].join(" ");
+  }
+
+  if (resolution.platformErrorCode === "missing_scope") {
+    const neededText = resolution.neededScopes ? ` Needed scopes: \`${resolution.neededScopes}\`.` : "";
+    const providedText = resolution.providedScopes ? ` Current scopes: \`${resolution.providedScopes}\`.` : "";
+    return [
+      `Cannot resolve \`@${normalizedUserHandle}\` because Slack denied user lookup (\`missing_scope\`).`,
+      `Grant the bot token user-read scope and reinstall the app.${neededText}${providedText}`,
+      `Or use \`${usageCommand.replace("<@USER>", "U123ABC")}\`.`,
+    ].join(" ");
+  }
+
+  if (resolution.reason === "user_not_found") {
+    return [
+      `Could not resolve \`@${normalizedUserHandle}\` to a Slack user.`,
+      `Use \`${usageCommand}\` or a direct Slack user ID.`,
+    ].join(" ");
+  }
+
+  return [
+    `Cannot resolve \`@${normalizedUserHandle}\` right now (Slack error: \`${resolution.platformErrorCode || "unknown_error"}\`).`,
+    `Use \`${usageCommand}\` or a direct Slack user ID.`,
+  ].join(" ");
+}
+
+function normalizeHttpUrl(rawValue) {
+  const normalizedValue = String(rawValue || "").trim();
+  if (normalizedValue === "") {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(normalizedValue);
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return null;
+    }
+    return parsedUrl.toString();
+  } catch (_error) {
+    return null;
+  }
 }
 
 module.exports = {

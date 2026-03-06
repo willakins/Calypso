@@ -1,4 +1,8 @@
 const { BaseCalypsoCommand } = require("./base_command");
+const {
+  readCommunicationUserReferenceFromArgument,
+  resolveCommunicationUserId,
+} = require("../../platform/communication/resolution");
 
 class WhitelistCommand extends BaseCalypsoCommand {
   constructor() {
@@ -7,7 +11,7 @@ class WhitelistCommand extends BaseCalypsoCommand {
 
   parse({ commandWords }) {
     const targetArgument = commandWords.slice(1).join(" ").trim();
-    const targetUserReference = readSlackUserReferenceFromArgument(targetArgument);
+    const targetUserReference = readCommunicationUserReferenceFromArgument(targetArgument);
 
     if (!targetUserReference) {
       return this.buildRespondParsedCommand("Usage: `/calypso whitelist <@USER>`");
@@ -66,54 +70,24 @@ class WhitelistCommand extends BaseCalypsoCommand {
   }
 }
 
-function readSlackUserReferenceFromArgument(argument) {
-  if (!argument) {
-    return null;
-  }
-
-  const mentionMatch = argument.match(/<@([A-Z0-9]+)(?:\|[^>]+)?>/i);
-  if (mentionMatch) {
-    return {
-      targetUserId: mentionMatch[1].toUpperCase(),
-    };
-  }
-
-  const directIdMatch = argument.match(/^([UW][A-Z0-9]+)$/i);
-  if (directIdMatch) {
-    return {
-      targetUserId: directIdMatch[1].toUpperCase(),
-    };
-  }
-
-  const handleMatch = argument.match(/^@([a-z0-9][a-z0-9._-]*)$/i);
-  if (handleMatch) {
-    return {
-      targetUserHandle: handleMatch[1].toLowerCase(),
-    };
-  }
-
-  return null;
-}
-
 async function resolveTargetUserId(runtime, parsedCommand) {
-  const targetUserId = String(parsedCommand.targetUserId || "").trim().toUpperCase();
-  if (targetUserId !== "") {
-    return {
-      isResolvable: true,
-      targetUserId,
-    };
-  }
-
-  const targetUserHandle = String(parsedCommand.targetUserHandle || "").trim().toLowerCase();
-  if (targetUserHandle === "") {
+  if (!parsedCommand.targetUserId && !parsedCommand.targetUserHandle) {
     return {
       isResolvable: false,
       reasonText: "Usage: `/calypso whitelist <@USER>`",
     };
   }
 
-  const usersApi = runtime.communicationClient?.users;
-  if (!usersApi || typeof usersApi.list !== "function") {
+  const resolution = await resolveCommunicationUserId(runtime, parsedCommand);
+  if (resolution.isResolvable) {
+    return {
+      isResolvable: true,
+      targetUserId: resolution.targetUserId,
+    };
+  }
+
+  const targetUserHandle = resolution.targetUserHandle || parsedCommand.targetUserHandle;
+  if (resolution.reason === "user_lookup_unavailable") {
     return {
       isResolvable: false,
       reasonText: [
@@ -123,36 +97,22 @@ async function resolveTargetUserId(runtime, parsedCommand) {
     };
   }
 
-  let resolvedUserId = null;
-  try {
-    resolvedUserId = await findSlackUserIdByHandle(usersApi, targetUserHandle);
-  } catch (error) {
-    const errorCode = readSlackApiErrorCode(error);
-    if (errorCode === "missing_scope") {
-      const neededScopes = normalizeScopeList(error?.data?.needed);
-      const providedScopes = normalizeScopeList(error?.data?.provided);
-      const neededText = neededScopes ? ` Needed scopes: \`${neededScopes}\`.` : "";
-      const providedText = providedScopes ? ` Current scopes: \`${providedScopes}\`.` : "";
-      return {
-        isResolvable: false,
-        reasonText: [
-          `Cannot resolve \`@${targetUserHandle}\` because Slack denied user lookup (\`missing_scope\`).`,
-          `Grant the bot token user-read scope and reinstall the app.${neededText}${providedText}`,
-          "Or whitelist using a direct Slack user ID: `/calypso whitelist U123ABC`.",
-        ].join(" "),
-      };
-    }
-
+  if (resolution.platformErrorCode === "missing_scope") {
+    const neededText = resolution.neededScopes ? ` Needed scopes: \`${resolution.neededScopes}\`.` : "";
+    const providedText = resolution.providedScopes
+      ? ` Current scopes: \`${resolution.providedScopes}\`.`
+      : "";
     return {
       isResolvable: false,
       reasonText: [
-        `Cannot resolve \`@${targetUserHandle}\` right now (Slack error: \`${errorCode || "unknown_error"}\`).`,
-        "Use `/calypso whitelist <@USER>` or `/calypso whitelist U123ABC`.",
+        `Cannot resolve \`@${targetUserHandle}\` because Slack denied user lookup (\`missing_scope\`).`,
+        `Grant the bot token user-read scope and reinstall the app.${neededText}${providedText}`,
+        "Or whitelist using a direct Slack user ID: `/calypso whitelist U123ABC`.",
       ].join(" "),
     };
   }
 
-  if (!resolvedUserId) {
+  if (resolution.reason === "user_not_found") {
     return {
       isResolvable: false,
       reasonText: [
@@ -163,68 +123,12 @@ async function resolveTargetUserId(runtime, parsedCommand) {
   }
 
   return {
-    isResolvable: true,
-    targetUserId: resolvedUserId,
+    isResolvable: false,
+    reasonText: [
+      `Cannot resolve \`@${targetUserHandle}\` right now (Slack error: \`${resolution.platformErrorCode || "unknown_error"}\`).`,
+      "Use `/calypso whitelist <@USER>` or `/calypso whitelist U123ABC`.",
+    ].join(" "),
   };
-}
-
-async function findSlackUserIdByHandle(usersApi, targetUserHandle) {
-  let cursor = null;
-
-  while (true) {
-    const response = await usersApi.list({
-      limit: 200,
-      ...(cursor ? { cursor } : {}),
-    });
-    const members = Array.isArray(response?.members) ? response.members : [];
-
-    const matchedMember = members.find((member) => {
-      if (member?.deleted) {
-        return false;
-      }
-
-      const normalizedUserName = String(member?.name || "").trim().toLowerCase();
-      return normalizedUserName !== "" && normalizedUserName === targetUserHandle;
-    });
-    if (matchedMember?.id) {
-      return String(matchedMember.id).trim().toUpperCase();
-    }
-
-    cursor = String(response?.response_metadata?.next_cursor || "").trim();
-    if (cursor === "") {
-      return null;
-    }
-  }
-}
-
-function readSlackApiErrorCode(error) {
-  const payloadErrorCode = String(error?.data?.error || "").trim().toLowerCase();
-  if (payloadErrorCode !== "") {
-    return payloadErrorCode;
-  }
-
-  const errorMessage = String(error?.message || "").trim().toLowerCase();
-  if (errorMessage.includes("missing_scope")) {
-    return "missing_scope";
-  }
-  if (errorMessage.includes("invalid_auth")) {
-    return "invalid_auth";
-  }
-
-  return "";
-}
-
-function normalizeScopeList(rawScopes) {
-  const rawValue = String(rawScopes || "").trim();
-  if (rawValue === "") {
-    return null;
-  }
-
-  return rawValue
-    .split(",")
-    .map((scope) => scope.trim())
-    .filter(Boolean)
-    .join(", ");
 }
 
 module.exports = {

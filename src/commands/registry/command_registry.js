@@ -1,5 +1,6 @@
 const { ConfigCommand } = require("../types/config_command");
 const { DeployCommand } = require("../types/deploy_command");
+const { EmailsCommand } = require("../types/emails_command");
 const { HelpCommand } = require("../types/help_command");
 const { ReviewsCommand } = require("../types/reviews_command");
 const { SyncCommand } = require("../types/sync_command");
@@ -14,6 +15,7 @@ function createCalypsoCommandRegistry(options = {}) {
     commandDefinitions: [
       new HelpCommand({ botName }),
       new ConfigCommand(),
+      new EmailsCommand(),
       new SyncCommand(),
       new StatusCommand(),
       new ReviewsCommand(),
