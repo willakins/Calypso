@@ -7,7 +7,9 @@ const {
   DEFAULT_CODE_HOST_PROVIDER,
   DEFAULT_COMMUNICATION_PROVIDER,
   DEFAULT_DEPLOY_PROVIDER,
+  DEFAULT_ERROR_TRACKING_PROVIDER,
   DEPLOY_PROVIDERS,
+  ERROR_TRACKING_PROVIDERS,
   loadConfig,
 } = require("../../src/config");
 
@@ -54,6 +56,7 @@ test("loadConfig defaults provider selections", { concurrency: false }, () => {
       assert.equal(config.communicationProvider, DEFAULT_COMMUNICATION_PROVIDER);
       assert.equal(config.codeHostProvider, DEFAULT_CODE_HOST_PROVIDER);
       assert.equal(config.deployProvider, DEFAULT_DEPLOY_PROVIDER);
+      assert.equal(config.errorTrackingProvider, DEFAULT_ERROR_TRACKING_PROVIDER);
     },
   );
 });
@@ -85,6 +88,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.communicationProvider, COMMUNICATION_PROVIDERS.slack);
       assert.equal(config.codeHostProvider, CODE_HOST_PROVIDERS.github);
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.digitalocean);
+      assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.sentry);
       assert.equal(config.communicationBotToken, "xoxb-test");
       assert.equal(config.communicationAppToken, "xapp-test");
       assert.equal(config.communicationWebhookUrl, "");
@@ -114,6 +118,11 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.deploySessionToken, "session-123");
       assert.equal(config.environmentStatusPollIntervalSeconds, 60);
       assert.equal(config.environmentStatusTimeoutSeconds, 10);
+      assert.equal(config.errorTrackingPollIntervalSeconds, 300);
+      assert.equal(config.errorTrackingTimeoutSeconds, 15);
+      assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.io");
+      assert.equal(config.errorTrackingSentryAuthToken, "");
+      assert.equal(config.errorTrackingSentryOrganizationSlug, "");
       assert.equal(config.emailGmailAddress, "");
       assert.equal(config.emailGmailClientId, "");
       assert.equal(config.emailGmailClientSecret, "");
@@ -146,6 +155,7 @@ test("loadConfig supports non-default provider selections without requiring unre
       assert.equal(config.communicationProvider, COMMUNICATION_PROVIDERS.microsoftTeams);
       assert.equal(config.codeHostProvider, CODE_HOST_PROVIDERS.bitbucket);
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.aws);
+      assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.sentry);
       assert.equal(config.communicationBotToken, "");
       assert.equal(config.communicationAppToken, "");
       assert.equal(config.communicationWebhookUrl, "");
@@ -198,6 +208,21 @@ test("loadConfig rejects unknown deploy provider", { concurrency: false }, () =>
   );
 });
 
+test("loadConfig rejects unknown error tracking provider", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      ERROR_TRACKING_PROVIDER: "rollbar",
+    },
+    () => {
+      assert.throws(
+        () => loadConfig(),
+        /ERROR_TRACKING_PROVIDER must be one of: sentry/,
+      );
+    },
+  );
+});
+
 test("loadConfig uses defaults for optional values", { concurrency: false }, () => {
   withEnvironment(
     {
@@ -239,6 +264,11 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.deploySessionToken, "");
       assert.equal(config.environmentStatusPollIntervalSeconds, 60);
       assert.equal(config.environmentStatusTimeoutSeconds, 10);
+      assert.equal(config.errorTrackingPollIntervalSeconds, 300);
+      assert.equal(config.errorTrackingTimeoutSeconds, 15);
+      assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.io");
+      assert.equal(config.errorTrackingSentryAuthToken, "");
+      assert.equal(config.errorTrackingSentryOrganizationSlug, "");
       assert.equal(config.emailGmailAddress, "");
       assert.equal(config.emailGmailClientId, "");
       assert.equal(config.emailGmailClientSecret, "");
@@ -364,6 +394,11 @@ test("loadConfig reads optional environment status and email polling values", { 
       ...REQUIRED_ENV,
       ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS: "30",
       ENVIRONMENT_STATUS_TIMEOUT_SECONDS: "8",
+      ERROR_TRACKING_POLL_INTERVAL_SECONDS: "120",
+      ERROR_TRACKING_TIMEOUT_SECONDS: "11",
+      ERROR_TRACKING_SENTRY_BASE_URL: " https://sentry.example.com ",
+      ERROR_TRACKING_SENTRY_AUTH_TOKEN: " sentry-token ",
+      ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG: " acme ",
       EMAIL_GMAIL_ADDRESS: " support@example.com ",
       EMAIL_GMAIL_CLIENT_ID: " gmail-client-id ",
       EMAIL_GMAIL_CLIENT_SECRET: " gmail-client-secret ",
@@ -378,6 +413,11 @@ test("loadConfig reads optional environment status and email polling values", { 
       const config = loadConfig();
       assert.equal(config.environmentStatusPollIntervalSeconds, 30);
       assert.equal(config.environmentStatusTimeoutSeconds, 8);
+      assert.equal(config.errorTrackingPollIntervalSeconds, 120);
+      assert.equal(config.errorTrackingTimeoutSeconds, 11);
+      assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.example.com");
+      assert.equal(config.errorTrackingSentryAuthToken, "sentry-token");
+      assert.equal(config.errorTrackingSentryOrganizationSlug, "acme");
       assert.equal(config.emailGmailAddress, "support@example.com");
       assert.equal(config.emailGmailClientId, "gmail-client-id");
       assert.equal(config.emailGmailClientSecret, "gmail-client-secret");
@@ -414,6 +454,12 @@ function withEnvironment(overrides, fn) {
     "CODE_HOST_CODEX_USER_LOGINS",
     "CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS",
     "CODEX_APPROVAL_POLL_INTERVAL_MINUTES",
+    "ERROR_TRACKING_PROVIDER",
+    "ERROR_TRACKING_POLL_INTERVAL_SECONDS",
+    "ERROR_TRACKING_TIMEOUT_SECONDS",
+    "ERROR_TRACKING_SENTRY_BASE_URL",
+    "ERROR_TRACKING_SENTRY_AUTH_TOKEN",
+    "ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG",
     "DEPLOY_POLL_INTERVAL_SECONDS",
     "DEPLOY_TIMEOUT_SECONDS",
     "DEPLOY_TOKEN",

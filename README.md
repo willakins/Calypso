@@ -2,11 +2,12 @@
 
 Calypso is a platform-abstracted deployment gatekeeper for a single repository workflow.
 It currently runs with Slack + GitHub + DigitalOcean by default, while exposing provider
-abstractions for communication, code-host, and deploy integrations.
+abstractions for communication, code-host, deploy, and error-tracking integrations.
 It tracks merged pull requests in Postgres, requires explicit testing confirmation,
 blocks production deploys when untested changes exist, posts scheduled review recap messages,
 can poll one environment health endpoint for outage alerts, and can track customer support
-emails from Gmail as an actionable queue.
+emails from Gmail as an actionable queue, and can poll Sentry for newly tracked unresolved
+error groups.
 
 ## What It Does
 
@@ -29,12 +30,17 @@ emails from Gmail as an actionable queue.
   - `/calypso config environment-status:on|off`
   - `/calypso config environment-status-url:https://example.com/healthz`
   - `/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
+  - `/calypso config error-tracking:on|off`
+  - `/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
+  - `/calypso config error-tracking-project:<PROJECT_SLUG>`
+  - `/calypso config error-tracking-environment:<ENVIRONMENT|any>`
   - `/calypso config email-monitor:on|off`
   - `/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
   - `/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`
   - `/calypso config email-on-call off`
   - `/calypso sync`
   - `/calypso status`
+  - `/calypso errors`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
   - `/calypso emails`
   - `/calypso emails responded <EMAIL_ID>`
@@ -46,6 +52,7 @@ emails from Gmail as an actionable queue.
 - Optionally triggers deploy-platform production deploy when gate is clear.
 - Optionally triggers staging deploy directly when staging app/pipeline is configured.
 - Optionally polls one configured environment URL and posts transition-based outage/recovery alerts.
+- Optionally polls one configured Sentry project/environment scope and posts one alert per new or regressed unresolved issue group.
 - Optionally ingests Gmail support mailbox activity into `support_email_threads`, posts new-email
   notifications, and lets responders mark queued items handled.
 - Runtime display config is per communication user (defaults: time format `human`, timezone `America/New_York`).
@@ -58,6 +65,7 @@ Calypso is a single Node.js service composed of:
 - Communication platform provider (Slack implemented; Microsoft Teams implemented).
 - Code-host platform provider (GitHub implemented; Bitbucket implemented).
 - Deploy platform provider (DigitalOcean implemented; AWS CodePipeline implemented).
+- Error-tracking platform provider (Sentry implemented).
 - Express HTTP server for webhooks.
 - Postgres persistence through `pg`.
 
@@ -97,6 +105,7 @@ src/
     types/
       base_command.js
       emails_command.js
+      errors_command.js
       help_command.js
       config_command.js
       status_command.js
@@ -107,6 +116,7 @@ src/
     index.js
     migrations/001_init.sql
   background_jobs/
+    error_tracking_scheduler.js
     environment_status_scheduler.js
     scheduler.js
     review_recap_scheduler.js
@@ -149,6 +159,13 @@ src/
           client.js
         digitalocean/
           client.js
+    error_tracking/
+      base_error_tracking_platform.js
+      factory.js
+      providers/
+        sentry/
+          client.js
+          error_tracking_platform.js
     email/
       providers/
         gmail/
@@ -188,6 +205,7 @@ Always required:
 - `COMMUNICATION_PROVIDER` (default: `slack`)
 - `CODE_HOST_PROVIDER` (default: `github`)
 - `DEPLOY_PROVIDER` (default: `digitalocean`)
+- `ERROR_TRACKING_PROVIDER` (default: `sentry`)
 
 Required when `COMMUNICATION_PROVIDER=slack`:
 
@@ -216,6 +234,11 @@ Optional:
 - `CODEX_APPROVAL_POLL_INTERVAL_MINUTES` (default `5`)
 - `ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS` (default `60`)
 - `ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (default `10`)
+- `ERROR_TRACKING_POLL_INTERVAL_SECONDS` (default `300`)
+- `ERROR_TRACKING_TIMEOUT_SECONDS` (default `15`)
+- `ERROR_TRACKING_SENTRY_BASE_URL` (default `https://sentry.io`)
+- `ERROR_TRACKING_SENTRY_AUTH_TOKEN`
+- `ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG`
 - `EMAIL_GMAIL_ADDRESS`
 - `EMAIL_GMAIL_CLIENT_ID`
 - `EMAIL_GMAIL_CLIENT_SECRET`
@@ -237,6 +260,8 @@ Provider support matrix:
 - Deploy:
   - `digitalocean`: implemented
   - `aws`: implemented (CodePipeline)
+- Error tracking:
+  - `sentry`: implemented
 
 ### How To Get Each Value
 
@@ -257,6 +282,12 @@ Provider support matrix:
 - Provider selector for deploy integration.
 - Supported values: `digitalocean` (implemented), `aws` (implemented via CodePipeline).
 - Default: `digitalocean`.
+
+`ERROR_TRACKING_PROVIDER`
+
+- Provider selector for error-tracking integration.
+- Supported values: `sentry` (implemented).
+- Default: `sentry`.
 
 `DEPLOY_REGION`
 
@@ -397,6 +428,31 @@ Provider support matrix:
 
 - Request timeout for each environment poll.
 - Default: `10` seconds.
+
+`ERROR_TRACKING_POLL_INTERVAL_SECONDS` (optional)
+
+- How often Calypso polls the configured error-tracking project scope.
+- Default: `300` seconds.
+
+`ERROR_TRACKING_TIMEOUT_SECONDS` (optional)
+
+- Request timeout for each Sentry API poll.
+- Default: `15` seconds.
+
+`ERROR_TRACKING_SENTRY_BASE_URL` (optional)
+
+- Base URL for Sentry API requests.
+- Defaults to `https://sentry.io`.
+- Override this for self-hosted Sentry-compatible installs.
+
+`ERROR_TRACKING_SENTRY_AUTH_TOKEN` (optional, required to enable Sentry polling)
+
+- Sentry auth token used for organization project lookup and unresolved issue polling.
+- Minimum recommended scopes: `event:read` and `org:read`.
+
+`ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG` (optional, required to enable Sentry polling)
+
+- Organization slug used in Sentry API paths, for example `acme`.
 
 `EMAIL_GMAIL_ADDRESS` (optional, enables support-email integration when paired with the Gmail credentials below)
 
@@ -823,6 +879,18 @@ Rules:
   - repeated unhealthy checks stay quiet
   - recovery posts once when the endpoint returns HTTP `200` again
 - First healthy observation only establishes baseline state; it does not post a recovery message.
+
+## Error Tracking Monitoring
+
+- Runs as a background scheduler in the app runtime.
+- Polls one configured Sentry project scope every `ERROR_TRACKING_POLL_INTERVAL_SECONDS` (default `300`).
+- Uses `ERROR_TRACKING_SENTRY_AUTH_TOKEN` and `ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG` to resolve the configured project slug and list unresolved issue groups.
+- First successful sync after enablement or project/environment scope change establishes baseline state and does not back-alert existing unresolved issues.
+- Posts only on transitions:
+  - first observation of a newly tracked unresolved issue posts one alert
+  - repeated unresolved observations stay quiet
+  - a resolved issue that reappears posts one regression alert
+- `/calypso errors` lists unresolved tracked issues from Postgres for the active project/environment scope.
 
 ## Support Email Monitoring
 

@@ -23,6 +23,10 @@ const REVIEW_RECAP_SEND_HOLIDAYS_ARGUMENT_PATTERN = /^review-recap-send-holidays
 const ENVIRONMENT_STATUS_ARGUMENT_PATTERN = /^environment-status:(on|off)$/i;
 const ENVIRONMENT_STATUS_URL_ARGUMENT_PATTERN = /^environment-status-url:(.+)$/i;
 const ENVIRONMENT_STATUS_CHANNEL_ARGUMENT_PATTERN = /^environment-status-channel:(.+)$/i;
+const ERROR_TRACKING_ARGUMENT_PATTERN = /^error-tracking:(on|off)$/i;
+const ERROR_TRACKING_CHANNEL_ARGUMENT_PATTERN = /^error-tracking-channel:(.+)$/i;
+const ERROR_TRACKING_PROJECT_ARGUMENT_PATTERN = /^error-tracking-project:(.+)$/i;
+const ERROR_TRACKING_ENVIRONMENT_ARGUMENT_PATTERN = /^error-tracking-environment:(.+)$/i;
 const EMAIL_MONITOR_ARGUMENT_PATTERN = /^email-monitor:(on|off)$/i;
 const EMAIL_CHANNEL_ARGUMENT_PATTERN = /^email-channel:(.+)$/i;
 const REVIEW_RECAP_SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -154,6 +158,43 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildParsedCommand({
         action: "config_environment_status_channel",
         targetChannelReference,
+      });
+    }
+
+    const errorTrackingMatch = argument.match(ERROR_TRACKING_ARGUMENT_PATTERN);
+    if (errorTrackingMatch) {
+      return this.buildParsedCommand({
+        action: "config_error_tracking",
+        enabled: errorTrackingMatch[1].toLowerCase() === "on",
+      });
+    }
+
+    const errorTrackingChannelMatch = argument.match(ERROR_TRACKING_CHANNEL_ARGUMENT_PATTERN);
+    if (errorTrackingChannelMatch) {
+      const targetChannelReference = String(errorTrackingChannelMatch[1] || "").trim();
+      if (targetChannelReference === "") {
+        return this.buildRespondParsedCommand(buildConfigUsageMessage());
+      }
+
+      return this.buildParsedCommand({
+        action: "config_error_tracking_channel",
+        targetChannelReference,
+      });
+    }
+
+    const errorTrackingProjectMatch = argument.match(ERROR_TRACKING_PROJECT_ARGUMENT_PATTERN);
+    if (errorTrackingProjectMatch) {
+      return this.buildParsedCommand({
+        action: "config_error_tracking_project",
+        projectSlug: String(errorTrackingProjectMatch[1] || "").trim(),
+      });
+    }
+
+    const errorTrackingEnvironmentMatch = argument.match(ERROR_TRACKING_ENVIRONMENT_ARGUMENT_PATTERN);
+    if (errorTrackingEnvironmentMatch) {
+      return this.buildParsedCommand({
+        action: "config_error_tracking_environment",
+        environment: String(errorTrackingEnvironmentMatch[1] || "").trim(),
       });
     }
 
@@ -350,6 +391,75 @@ class ConfigCommand extends BaseCalypsoCommand {
       });
     }
 
+    if (parsedCommand.action === "config_error_tracking") {
+      await runtime.setErrorTrackingEnabledFn(
+        runtime.pool,
+        parsedCommand.enabled,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated error tracking monitoring to \`${parsedCommand.enabled ? "on" : "off"}\`.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_error_tracking_channel") {
+      return updateChannelScopedConfig.call(this, {
+        actionLabel: "error tracking",
+        runtime,
+        retryCommand: "/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID>",
+        setChannelFn: runtime.setErrorTrackingChannelFn,
+        successText: "Updated error tracking channel",
+        targetChannelReference: parsedCommand.targetChannelReference,
+      });
+    }
+
+    if (parsedCommand.action === "config_error_tracking_project") {
+      const normalizedProjectSlug = normalizeProjectSlug(parsedCommand.projectSlug);
+      if (!normalizedProjectSlug) {
+        return this.buildExecutionResult(
+          [
+            `Error tracking project slug \`${parsedCommand.projectSlug}\` is invalid.`,
+            "Use a Sentry project slug such as `api` or `web-app`.",
+          ].join("\n"),
+          { responseType: "ephemeral" },
+        );
+      }
+
+      await runtime.setErrorTrackingProjectFn(
+        runtime.pool,
+        normalizedProjectSlug,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated error tracking project to \`${normalizedProjectSlug}\`.`,
+      );
+    }
+
+    if (parsedCommand.action === "config_error_tracking_environment") {
+      const normalizedEnvironment = normalizeErrorTrackingEnvironmentValue(parsedCommand.environment);
+      if (normalizedEnvironment === undefined) {
+        return this.buildExecutionResult(
+          [
+            `Error tracking environment \`${parsedCommand.environment}\` is invalid.`,
+            "Use a non-empty environment name such as `production`, or `any`.",
+          ].join("\n"),
+          { responseType: "ephemeral" },
+        );
+      }
+
+      await runtime.setErrorTrackingEnvironmentFn(
+        runtime.pool,
+        normalizedEnvironment,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated error tracking environment to \`${normalizedEnvironment || "any"}\`.`,
+      );
+    }
+
     if (parsedCommand.action === "config_email_monitor") {
       await runtime.setSupportEmailMonitorEnabledFn(
         runtime.pool,
@@ -501,6 +611,10 @@ function isWorkspaceScopedConfigAction(action) {
     action === "config_environment_status" ||
     action === "config_environment_status_url" ||
     action === "config_environment_status_channel" ||
+    action === "config_error_tracking" ||
+    action === "config_error_tracking_channel" ||
+    action === "config_error_tracking_project" ||
+    action === "config_error_tracking_environment" ||
     action === "config_email_monitor" ||
     action === "config_email_channel" ||
     action === "config_email_on_call" ||
@@ -529,6 +643,12 @@ function buildConfigUsageMessage() {
     "`/calypso config environment-status:on|off`",
     "`/calypso config environment-status-url:https://example.com/healthz`",
     "`/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
+    "",
+    "Error tracking setup:",
+    "`/calypso config error-tracking:on|off`",
+    "`/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
+    "`/calypso config error-tracking-project:<PROJECT_SLUG>`",
+    "`/calypso config error-tracking-environment:<ENVIRONMENT|any>`",
     "",
     "Support email setup:",
     "`/calypso config email-monitor:on|off`",
@@ -788,6 +908,27 @@ function normalizeHttpUrl(rawValue) {
   } catch (_error) {
     return null;
   }
+}
+
+function normalizeProjectSlug(rawValue) {
+  const normalizedValue = String(rawValue || "").trim();
+  if (normalizedValue === "") {
+    return null;
+  }
+
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalizedValue) ? normalizedValue : null;
+}
+
+function normalizeErrorTrackingEnvironmentValue(rawValue) {
+  const normalizedValue = String(rawValue || "").trim();
+  if (normalizedValue === "") {
+    return undefined;
+  }
+  if (normalizedValue.toLowerCase() === "any") {
+    return null;
+  }
+
+  return normalizedValue;
 }
 
 module.exports = {

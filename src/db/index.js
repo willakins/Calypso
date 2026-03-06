@@ -71,6 +71,19 @@ const SUPPORT_EMAIL_DEFAULTS = Object.freeze({
   backfillCompletedAt: null,
   lastSyncAt: null,
 });
+const ERROR_TRACKING_DEFAULTS = Object.freeze({
+  enabled: false,
+  targetChannelId: null,
+  projectSlug: null,
+  environment: null,
+  baselineCompletedAt: null,
+  lastSyncAt: null,
+  lastSyncError: null,
+});
+const ERROR_TRACKING_ISSUE_STATUSES = Object.freeze({
+  unresolved: "unresolved",
+  resolved: "resolved",
+});
 const COMMUNICATION_PROVIDERS = Object.freeze({
   slack: "slack",
   microsoftTeams: "microsoft_teams",
@@ -636,6 +649,26 @@ async function getSupportEmailConfig(pool) {
   return mapSupportEmailConfigRow(result.rows[0]) || { ...SUPPORT_EMAIL_DEFAULTS };
 }
 
+async function getErrorTrackingConfig(pool) {
+  const result = await pool.query(
+    `
+      SELECT
+        enabled,
+        target_channel_id,
+        project_slug,
+        environment,
+        baseline_completed_at,
+        last_sync_at,
+        last_sync_error
+      FROM error_tracking_config
+      WHERE id = 1
+      LIMIT 1
+    `,
+  );
+
+  return mapErrorTrackingConfigRow(result.rows[0]) || { ...ERROR_TRACKING_DEFAULTS };
+}
+
 async function getRuntimeProviderConfig(pool) {
   const result = await pool.query(
     `
@@ -963,6 +996,371 @@ async function clearSupportEmailOnCall(pool, updatedBy) {
     clearOnCall: true,
     updatedBy: normalizedUserId,
   });
+}
+
+async function setErrorTrackingEnabled(pool, enabled, updatedBy) {
+  const normalizedEnabled = normalizeBoolean(enabled, null);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (normalizedEnabled === null) {
+    throw new Error(`Unsupported error tracking enabled value: ${enabled}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertErrorTrackingConfig(pool, {
+    enabled: normalizedEnabled,
+    updatedBy: normalizedUserId,
+    clearBaselineCompletedAt: true,
+    clearLastSyncAt: true,
+    clearLastSyncError: true,
+  });
+}
+
+async function setErrorTrackingChannel(pool, targetChannelId, updatedBy) {
+  const normalizedChannelId = normalizeOptionalText(targetChannelId);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedChannelId) {
+    throw new Error(`Unsupported error tracking channel id: ${targetChannelId}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertErrorTrackingConfig(pool, {
+    targetChannelId: normalizedChannelId,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setErrorTrackingProject(pool, projectSlug, updatedBy) {
+  const normalizedProjectSlug = normalizeErrorTrackingProjectSlug(projectSlug);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedProjectSlug) {
+    throw new Error(`Unsupported error tracking project slug: ${projectSlug}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertErrorTrackingConfig(pool, {
+    projectSlug: normalizedProjectSlug,
+    updatedBy: normalizedUserId,
+    clearBaselineCompletedAt: true,
+    clearLastSyncAt: true,
+    clearLastSyncError: true,
+  });
+}
+
+async function setErrorTrackingEnvironment(pool, environment, updatedBy) {
+  const normalizedEnvironment = normalizeErrorTrackingEnvironment(environment);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (normalizedEnvironment === undefined) {
+    throw new Error(`Unsupported error tracking environment: ${environment}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertErrorTrackingConfig(pool, {
+    environment: normalizedEnvironment,
+    updatedBy: normalizedUserId,
+    clearEnvironment: normalizedEnvironment === null,
+    clearBaselineCompletedAt: true,
+    clearLastSyncAt: true,
+    clearLastSyncError: true,
+  });
+}
+
+async function updateErrorTrackingRuntimeState(pool, updates) {
+  return upsertErrorTrackingConfig(pool, updates);
+}
+
+async function listOpenErrorTrackingIssues(pool, { environment, projectSlug, provider }) {
+  const scope = normalizeErrorTrackingScope({ environment, projectSlug, provider });
+  const result = await pool.query(
+    `
+      SELECT
+        id,
+        provider,
+        project_slug,
+        environment_key,
+        external_issue_id,
+        short_id,
+        title,
+        culprit,
+        level,
+        permalink,
+        event_count,
+        status,
+        opened_at,
+        last_seen_at,
+        resolved_at,
+        regression_count,
+        notification_sent_at
+      FROM error_tracking_issues
+      WHERE provider = $1
+        AND project_slug = $2
+        AND environment_key = $3
+        AND status = '${ERROR_TRACKING_ISSUE_STATUSES.unresolved}'
+      ORDER BY last_seen_at DESC, opened_at DESC, id DESC
+    `,
+    [scope.provider, scope.projectSlug, scope.environmentKey],
+  );
+
+  return result.rows.map(mapErrorTrackingIssueRow);
+}
+
+async function listUnnotifiedErrorTrackingIssues(pool, { environment, projectSlug, provider }) {
+  const scope = normalizeErrorTrackingScope({ environment, projectSlug, provider });
+  const result = await pool.query(
+    `
+      SELECT
+        id,
+        provider,
+        project_slug,
+        environment_key,
+        external_issue_id,
+        short_id,
+        title,
+        culprit,
+        level,
+        permalink,
+        event_count,
+        status,
+        opened_at,
+        last_seen_at,
+        resolved_at,
+        regression_count,
+        notification_sent_at
+      FROM error_tracking_issues
+      WHERE provider = $1
+        AND project_slug = $2
+        AND environment_key = $3
+        AND status = '${ERROR_TRACKING_ISSUE_STATUSES.unresolved}'
+        AND notification_sent_at IS NULL
+      ORDER BY last_seen_at DESC, opened_at DESC, id DESC
+    `,
+    [scope.provider, scope.projectSlug, scope.environmentKey],
+  );
+
+  return result.rows.map(mapErrorTrackingIssueRow);
+}
+
+async function markErrorTrackingIssueNotificationSent(pool, issueId, notificationSentAt) {
+  const normalizedIssueId = normalizePositiveInteger(issueId);
+  if (!normalizedIssueId) {
+    throw new Error(`Unsupported error tracking issue id: ${issueId}`);
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE error_tracking_issues
+      SET notification_sent_at = COALESCE($2::timestamptz, NOW()),
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        provider,
+        project_slug,
+        environment_key,
+        external_issue_id,
+        short_id,
+        title,
+        culprit,
+        level,
+        permalink,
+        event_count,
+        status,
+        opened_at,
+        last_seen_at,
+        resolved_at,
+        regression_count,
+        notification_sent_at
+    `,
+    [normalizedIssueId, notificationSentAt || null],
+  );
+
+  return mapErrorTrackingIssueRow(result.rows[0]);
+}
+
+async function syncErrorTrackingIssueSnapshot(
+  pool,
+  {
+    environment,
+    issues,
+    observedAt,
+    projectSlug,
+    provider,
+    suppressNotifications = false,
+  },
+) {
+  const scope = normalizeErrorTrackingScope({ environment, projectSlug, provider });
+  const normalizedObservedAt = normalizeRequiredTimestamp(
+    observedAt,
+    "error tracking observation timestamp is required",
+  );
+  const normalizedIssues = dedupeErrorTrackingIssues(issues, scope);
+  const result = await pool.query(
+    `
+      SELECT
+        id,
+        external_issue_id,
+        status,
+        regression_count
+      FROM error_tracking_issues
+      WHERE provider = $1
+        AND project_slug = $2
+        AND environment_key = $3
+    `,
+    [scope.provider, scope.projectSlug, scope.environmentKey],
+  );
+
+  const existingIssuesByExternalId = new Map(
+    result.rows.map((row) => [String(row.external_issue_id), row]),
+  );
+  const seenExternalIssueIds = new Set();
+  const summary = {
+    baselineApplied: Boolean(suppressNotifications),
+    insertedCount: 0,
+    regressionCount: 0,
+    resolvedCount: 0,
+    touchedCount: 0,
+  };
+
+  for (const issue of normalizedIssues) {
+    seenExternalIssueIds.add(issue.externalIssueId);
+    const existingIssue = existingIssuesByExternalId.get(issue.externalIssueId);
+
+    if (!existingIssue) {
+      await pool.query(
+        `
+          INSERT INTO error_tracking_issues (
+            provider,
+            project_slug,
+            environment_key,
+            external_issue_id,
+            short_id,
+            title,
+            culprit,
+            level,
+            permalink,
+            event_count,
+            status,
+            opened_at,
+            last_seen_at,
+            resolved_at,
+            regression_count,
+            notification_sent_at,
+            updated_at
+          )
+          VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+            '${ERROR_TRACKING_ISSUE_STATUSES.unresolved}',
+            $11::timestamptz,
+            $12::timestamptz,
+            NULL,
+            0,
+            $13::timestamptz,
+            NOW()
+          )
+        `,
+        [
+          scope.provider,
+          scope.projectSlug,
+          scope.environmentKey,
+          issue.externalIssueId,
+          issue.shortId,
+          issue.title,
+          issue.culprit,
+          issue.level,
+          issue.permalink,
+          issue.eventCount,
+          issue.openedAt,
+          issue.lastSeenAt,
+          suppressNotifications ? normalizedObservedAt : null,
+        ],
+      );
+      summary.insertedCount += 1;
+      summary.touchedCount += 1;
+      continue;
+    }
+
+    const existingStatus = normalizeErrorTrackingIssueStatus(existingIssue.status);
+    const existingRegressionCount = normalizeInteger(existingIssue.regression_count) || 0;
+    const nextRegressionCount =
+      existingStatus === ERROR_TRACKING_ISSUE_STATUSES.resolved
+        ? existingRegressionCount + 1
+        : existingRegressionCount;
+
+    await pool.query(
+      `
+        UPDATE error_tracking_issues
+        SET short_id = $2,
+            title = $3,
+            culprit = $4,
+            level = $5,
+            permalink = $6,
+            event_count = $7,
+            status = '${ERROR_TRACKING_ISSUE_STATUSES.unresolved}',
+            opened_at = $8::timestamptz,
+            last_seen_at = $9::timestamptz,
+            resolved_at = NULL,
+            regression_count = $10,
+            notification_sent_at = CASE
+              WHEN $11 THEN $12::timestamptz
+              WHEN $13 THEN NULL
+              ELSE notification_sent_at
+            END,
+            updated_at = NOW()
+        WHERE id = $1
+      `,
+      [
+        existingIssue.id,
+        issue.shortId,
+        issue.title,
+        issue.culprit,
+        issue.level,
+        issue.permalink,
+        issue.eventCount,
+        issue.openedAt,
+        issue.lastSeenAt,
+        nextRegressionCount,
+        suppressNotifications,
+        normalizedObservedAt,
+        existingStatus === ERROR_TRACKING_ISSUE_STATUSES.resolved,
+      ],
+    );
+
+    if (existingStatus === ERROR_TRACKING_ISSUE_STATUSES.resolved) {
+      summary.regressionCount += 1;
+    }
+    summary.touchedCount += 1;
+  }
+
+  for (const existingIssue of result.rows) {
+    if (seenExternalIssueIds.has(String(existingIssue.external_issue_id))) {
+      continue;
+    }
+
+    if (normalizeErrorTrackingIssueStatus(existingIssue.status) !== ERROR_TRACKING_ISSUE_STATUSES.unresolved) {
+      continue;
+    }
+
+    await pool.query(
+      `
+        UPDATE error_tracking_issues
+        SET status = '${ERROR_TRACKING_ISSUE_STATUSES.resolved}',
+            resolved_at = $2::timestamptz,
+            updated_at = NOW()
+        WHERE id = $1
+      `,
+      [existingIssue.id, normalizedObservedAt],
+    );
+    summary.resolvedCount += 1;
+  }
+
+  return summary;
 }
 
 async function upsertPendingSupportEmailHistoryId(pool, historyId) {
@@ -1495,6 +1893,84 @@ async function upsertSupportEmailConfig(pool, updates) {
   return mapSupportEmailConfigRow(result.rows[0]);
 }
 
+async function upsertErrorTrackingConfig(pool, updates) {
+  const result = await pool.query(
+    `
+      INSERT INTO error_tracking_config (
+        id,
+        enabled,
+        target_channel_id,
+        project_slug,
+        environment,
+        baseline_completed_at,
+        last_sync_at,
+        last_sync_error,
+        updated_by,
+        updated_at
+      )
+      VALUES (
+        1,
+        COALESCE($1, ${ERROR_TRACKING_DEFAULTS.enabled}),
+        COALESCE($2, NULL),
+        COALESCE($3, NULL),
+        $4,
+        $5::timestamptz,
+        $6::timestamptz,
+        $7,
+        $8,
+        NOW()
+      )
+      ON CONFLICT (id)
+      DO UPDATE SET
+        enabled = COALESCE($1, error_tracking_config.enabled),
+        target_channel_id = COALESCE($2, error_tracking_config.target_channel_id),
+        project_slug = COALESCE($3, error_tracking_config.project_slug),
+        environment = CASE
+          WHEN $9 THEN NULL
+          ELSE COALESCE($4, error_tracking_config.environment)
+        END,
+        baseline_completed_at = CASE
+          WHEN $10 THEN NULL
+          ELSE COALESCE($5::timestamptz, error_tracking_config.baseline_completed_at)
+        END,
+        last_sync_at = CASE
+          WHEN $11 THEN NULL
+          ELSE COALESCE($6::timestamptz, error_tracking_config.last_sync_at)
+        END,
+        last_sync_error = CASE
+          WHEN $12 THEN NULL
+          ELSE COALESCE($7, error_tracking_config.last_sync_error)
+        END,
+        updated_by = COALESCE(EXCLUDED.updated_by, error_tracking_config.updated_by),
+        updated_at = NOW()
+      RETURNING
+        enabled,
+        target_channel_id,
+        project_slug,
+        environment,
+        baseline_completed_at,
+        last_sync_at,
+        last_sync_error
+    `,
+    [
+      updates.enabled ?? null,
+      updates.targetChannelId ?? null,
+      updates.projectSlug ?? null,
+      updates.environment ?? null,
+      updates.baselineCompletedAt ?? null,
+      updates.lastSyncAt ?? null,
+      updates.lastSyncError ?? null,
+      updates.updatedBy ?? null,
+      Boolean(updates.clearEnvironment),
+      Boolean(updates.clearBaselineCompletedAt),
+      Boolean(updates.clearLastSyncAt),
+      Boolean(updates.clearLastSyncError),
+    ],
+  );
+
+  return mapErrorTrackingConfigRow(result.rows[0]);
+}
+
 async function upsertRuntimeProviderConfig(pool, updates) {
   const result = await pool.query(
     `
@@ -1820,6 +2296,127 @@ function normalizeUrl(value) {
   }
 }
 
+function normalizeErrorTrackingProjectSlug(value) {
+  const normalizedValue = normalizeOptionalText(value);
+  if (!normalizedValue) {
+    return null;
+  }
+
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalizedValue) ? normalizedValue : null;
+}
+
+function normalizeErrorTrackingEnvironment(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalizedValue = String(value).trim();
+  if (normalizedValue === "") {
+    return undefined;
+  }
+  if (normalizedValue.toLowerCase() === "any") {
+    return null;
+  }
+
+  return normalizedValue;
+}
+
+function normalizeErrorTrackingEnvironmentKey(value) {
+  const normalizedEnvironment = normalizeErrorTrackingEnvironment(value);
+  if (normalizedEnvironment === undefined) {
+    return null;
+  }
+
+  return normalizedEnvironment || "";
+}
+
+function normalizeErrorTrackingProvider(value) {
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  return normalizedValue === "" ? null : normalizedValue;
+}
+
+function normalizeErrorTrackingIssueStatus(value) {
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  return Object.values(ERROR_TRACKING_ISSUE_STATUSES).includes(normalizedValue)
+    ? normalizedValue
+    : null;
+}
+
+function normalizeRequiredTimestamp(value, message) {
+  const normalizedValue = normalizeOptionalText(value);
+  if (!normalizedValue) {
+    throw new Error(message);
+  }
+
+  const parsedDate = new Date(normalizedValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    throw new Error(message);
+  }
+
+  return parsedDate.toISOString();
+}
+
+function normalizeErrorTrackingScope({ environment, projectSlug, provider }) {
+  const normalizedProvider = normalizeErrorTrackingProvider(provider);
+  const normalizedProjectSlug = normalizeErrorTrackingProjectSlug(projectSlug);
+  const normalizedEnvironmentKey = normalizeErrorTrackingEnvironmentKey(environment);
+  if (!normalizedProvider) {
+    throw new Error(`Unsupported error tracking provider: ${provider}`);
+  }
+  if (!normalizedProjectSlug) {
+    throw new Error(`Unsupported error tracking project slug: ${projectSlug}`);
+  }
+  if (normalizedEnvironmentKey === null) {
+    throw new Error(`Unsupported error tracking environment: ${environment}`);
+  }
+
+  return {
+    environment: normalizedEnvironmentKey || null,
+    environmentKey: normalizedEnvironmentKey,
+    projectSlug: normalizedProjectSlug,
+    provider: normalizedProvider,
+  };
+}
+
+function normalizeErrorTrackingIssue(issue, scope) {
+  const externalIssueId = normalizeOptionalText(issue?.externalIssueId);
+  const openedAt = normalizeRequiredTimestamp(
+    issue?.openedAt || issue?.firstSeenAt,
+    "error tracking issue first seen timestamp is required",
+  );
+  const lastSeenAt = normalizeRequiredTimestamp(
+    issue?.lastSeenAt,
+    "error tracking issue last seen timestamp is required",
+  );
+  if (!externalIssueId) {
+    throw new Error("error tracking external issue id is required");
+  }
+
+  return {
+    culprit: normalizeOptionalText(issue?.culprit),
+    environment: scope.environment,
+    eventCount: normalizeInteger(issue?.eventCount) || 0,
+    externalIssueId,
+    lastSeenAt,
+    level: normalizeOptionalText(issue?.level) || "error",
+    openedAt,
+    permalink: normalizeOptionalText(issue?.permalink),
+    projectSlug: scope.projectSlug,
+    shortId: normalizeOptionalText(issue?.shortId),
+    title: normalizeOptionalText(issue?.title) || "(untitled)",
+  };
+}
+
+function dedupeErrorTrackingIssues(issues, scope) {
+  const issuesByExternalId = new Map();
+  for (const issue of Array.isArray(issues) ? issues : []) {
+    const normalizedIssue = normalizeErrorTrackingIssue(issue, scope);
+    issuesByExternalId.set(normalizedIssue.externalIssueId, normalizedIssue);
+  }
+
+  return [...issuesByExternalId.values()];
+}
+
 function mapEnvironmentStatusConfigRow(row) {
   if (!row) {
     return null;
@@ -1856,6 +2453,49 @@ function mapSupportEmailConfigRow(row) {
     watchExpirationAt: row.watch_expiration_at || null,
     backfillCompletedAt: row.backfill_completed_at || null,
     lastSyncAt: row.last_sync_at || null,
+  };
+}
+
+function mapErrorTrackingConfigRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  const normalizedEnvironment = normalizeErrorTrackingEnvironment(row.environment);
+  return {
+    enabled: normalizeBoolean(row.enabled, ERROR_TRACKING_DEFAULTS.enabled),
+    targetChannelId: normalizeOptionalText(row.target_channel_id),
+    projectSlug: normalizeErrorTrackingProjectSlug(row.project_slug),
+    environment: normalizedEnvironment === undefined ? null : normalizedEnvironment,
+    baselineCompletedAt: row.baseline_completed_at || null,
+    lastSyncAt: row.last_sync_at || null,
+    lastSyncError: normalizeOptionalText(row.last_sync_error),
+  };
+}
+
+function mapErrorTrackingIssueRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: normalizePositiveInteger(row.id),
+    provider: normalizeErrorTrackingProvider(row.provider),
+    projectSlug: normalizeErrorTrackingProjectSlug(row.project_slug),
+    environment: row.environment_key === "" ? null : normalizeErrorTrackingEnvironment(row.environment_key),
+    externalIssueId: normalizeOptionalText(row.external_issue_id),
+    shortId: normalizeOptionalText(row.short_id),
+    title: normalizeOptionalText(row.title),
+    culprit: normalizeOptionalText(row.culprit),
+    level: normalizeOptionalText(row.level),
+    permalink: normalizeOptionalText(row.permalink),
+    eventCount: normalizeInteger(row.event_count) || 0,
+    status: normalizeErrorTrackingIssueStatus(row.status),
+    openedAt: row.opened_at || null,
+    lastSeenAt: row.last_seen_at || null,
+    resolvedAt: row.resolved_at || null,
+    regressionCount: normalizeInteger(row.regression_count) || 0,
+    notificationSentAt: row.notification_sent_at || null,
   };
 }
 
@@ -1900,6 +2540,8 @@ module.exports = {
   createPool,
   DEFAULT_TIME_FORMAT,
   DEFAULT_TIME_ZONE,
+  ERROR_TRACKING_DEFAULTS,
+  ERROR_TRACKING_ISSUE_STATUSES,
   ENVIRONMENT_STATUS_DEFAULTS,
   ENVIRONMENT_STATUS_STATES,
   RUNTIME_PROVIDER_DEFAULTS,
@@ -1908,6 +2550,7 @@ module.exports = {
   REVIEW_RECAP_WEEKDAYS,
   SUPPORT_EMAIL_DEFAULTS,
   SUPPORT_EMAIL_THREAD_STATUSES,
+  getErrorTrackingConfig,
   getRuntimeProviderConfig,
   getConfiguredTimeZone,
   getEnvironmentStatusConfig,
@@ -1918,12 +2561,15 @@ module.exports = {
   isUserWhitelistedForDeploy,
   insertDeployment,
   insertSupportEmailThread,
+  listOpenErrorTrackingIssues,
   listPendingSupportEmailThreads,
   listRecentlyTestedPullRequests,
   listOpenPullRequestsWaitingOnReviewSince,
+  listUnnotifiedErrorTrackingIssues,
   listUnnotifiedSupportEmailThreads,
   listTrackedOpenPullRequestsForCodexApproval,
   listBlockingPullRequests,
+  markErrorTrackingIssueNotificationSent,
   markStaleOpenPullRequestsClosed,
   markAllUntestedPullRequestsTested,
   markEnvironmentStatusNotificationSent,
@@ -1933,10 +2579,15 @@ module.exports = {
   markSupportEmailThreadResponded,
   recordEnvironmentStatusObservation,
   updatePullRequestCodexApproval,
+  updateErrorTrackingRuntimeState,
   updateSupportEmailRuntimeState,
   markPullRequestTested,
   upsertPendingSupportEmailHistoryId,
   runMigrations,
+  setErrorTrackingChannel,
+  setErrorTrackingEnabled,
+  setErrorTrackingEnvironment,
+  setErrorTrackingProject,
   setEnvironmentStatusChannel,
   setEnvironmentStatusEnabled,
   setEnvironmentStatusUrl,
@@ -1958,6 +2609,7 @@ module.exports = {
   updatePullRequestReviewSubmission,
   upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntested,
+  syncErrorTrackingIssueSnapshot,
   upsertPullRequestAsUntestedFromSync,
   verifyConnection,
 };

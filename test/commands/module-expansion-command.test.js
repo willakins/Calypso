@@ -33,6 +33,29 @@ test("handleCalypsoCommand routes environment status url config input", () => {
   assert.equal(result.targetUrl, "https://example.com/healthz");
 });
 
+test("handleCalypsoCommand routes error tracking config input", () => {
+  const result = handleCalypsoCommand({ text: "config error-tracking:on", user_id: "UADMIN" });
+
+  assert.equal(result.action, "config_error_tracking");
+  assert.equal(result.enabled, true);
+});
+
+test("handleCalypsoCommand routes error tracking project config input", () => {
+  const result = handleCalypsoCommand({
+    text: "config error-tracking-project:api",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_error_tracking_project");
+  assert.equal(result.projectSlug, "api");
+});
+
+test("handleCalypsoCommand routes errors command input", () => {
+  const result = handleCalypsoCommand({ text: "errors", user_id: "U123" });
+
+  assert.equal(result.action, "errors_list");
+});
+
 test("handleCalypsoCommand routes email monitor config input", () => {
   const result = handleCalypsoCommand({ text: "config email-monitor:on", user_id: "UADMIN" });
 
@@ -177,6 +200,117 @@ test("registerCalypsoCommand config command updates environment status monitorin
   assert.deepEqual(calls, [{ enabled: true, updatedBy: "UADMIN" }]);
   assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Updated environment status monitoring to `on`/);
+});
+
+test("registerCalypsoCommand config command updates error tracking project", async () => {
+  let commandHandler;
+  const calls = [];
+  registerCalypsoCommand(
+    {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    },
+    {
+      pool: {},
+      resolveDeployAccessFn: async () => ({ canDeploy: true }),
+      setErrorTrackingProjectFn: async (_pool, projectSlug, updatedBy) => {
+        calls.push({ projectSlug, updatedBy });
+        return {};
+      },
+    },
+  );
+
+  let payload;
+  await commandHandler({
+    ack: async () => {},
+    command: { text: "config error-tracking-project:api", user_id: "UADMIN" },
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.deepEqual(calls, [{ projectSlug: "api", updatedBy: "UADMIN" }]);
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated error tracking project to `api`/);
+});
+
+test("registerCalypsoCommand config command rejects invalid error tracking project ephemerally", async () => {
+  let commandHandler;
+  let setCalled = false;
+  registerCalypsoCommand(
+    {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    },
+    {
+      pool: {},
+      resolveDeployAccessFn: async () => ({ canDeploy: true }),
+      setErrorTrackingProjectFn: async () => {
+        setCalled = true;
+      },
+    },
+  );
+
+  let payload;
+  await commandHandler({
+    ack: async () => {},
+    command: { text: "config error-tracking-project:bad/slug", user_id: "UADMIN" },
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(setCalled, false);
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Error tracking project slug `bad\/slug` is invalid/);
+});
+
+test("registerCalypsoCommand errors command lists unresolved tracked issues", async () => {
+  let commandHandler;
+  registerCalypsoCommand(
+    {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    },
+    {
+      errorTrackingProvider: "sentry",
+      getErrorTrackingConfigFn: async () => ({
+        enabled: true,
+        projectSlug: "api",
+        environment: "production",
+        lastSyncAt: "2026-03-06T12:00:00.000Z",
+        lastSyncError: null,
+        targetChannelId: "COPS",
+      }),
+      listOpenErrorTrackingIssuesFn: async () => [
+        {
+          shortId: "API-7",
+          title: "Database unavailable",
+          level: "error",
+          lastSeenAt: "2026-03-06T12:02:00.000Z",
+          regressionCount: 1,
+        },
+      ],
+      pool: {},
+    },
+  );
+
+  let payload;
+  await commandHandler({
+    ack: async () => {},
+    command: { text: "errors", user_id: "U123" },
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Tracked unresolved errors for project `api` in environment `production`/);
+  assert.match(payload.text, /\[API-7\] Database unavailable/);
+  assert.match(payload.text, /regressions:1/);
 });
 
 test("registerCalypsoCommand config command rejects invalid environment status url ephemerally", async () => {

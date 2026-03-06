@@ -19,11 +19,15 @@ const {
   startEnvironmentStatusScheduler,
 } = require("./background_jobs/environment_status_scheduler");
 const {
+  startErrorTrackingScheduler,
+} = require("./background_jobs/error_tracking_scheduler");
+const {
   startSupportEmailScheduler,
 } = require("./background_jobs/support_email_scheduler");
 const { createCodeHostPlatform } = require("./platform/code_host/factory");
 const { createCommunicationPlatform } = require("./platform/communication/factory");
 const { createDeployPlatform } = require("./platform/deploy/factory");
+const { createErrorTrackingPlatform } = require("./platform/error_tracking/factory");
 const { createGmailClient } = require("./platform/email/providers/gmail/client");
 const { registerGmailWebhook } = require("./platform/email/providers/gmail/webhook");
 const { startReviewRecapScheduler } = require("./background_jobs/review_recap_scheduler");
@@ -65,7 +69,12 @@ async function loadRuntime() {
     provider: config.deployProvider,
     config,
   });
+  const errorTrackingPlatform = createErrorTrackingPlatform({
+    provider: config.errorTrackingProvider,
+    config,
+  });
   const codeHostSyncClient = codeHostPlatform.createSyncClient();
+  const errorTrackingClient = errorTrackingPlatform.createIssueClient();
   const gmailClient = createGmailClient({ config });
 
   return {
@@ -74,6 +83,8 @@ async function loadRuntime() {
     codeHostPlatform,
     codeHostSyncClient,
     deployPlatform,
+    errorTrackingPlatform,
+    errorTrackingClient,
     gmailClient,
     httpApp,
     pool,
@@ -102,6 +113,7 @@ function wireCommunicationCommands(runtime) {
   runtime.communicationPlatform.registerCalypsoCommand({
     botName: runtime.config.botName,
     enableDeploymentCompletionNotifications: true,
+    errorTrackingProvider: runtime.config.errorTrackingProvider,
     pool: runtime.pool,
     deployPlatform: runtime.deployPlatform,
     isWorkspaceAdminFn: async (_communicationClient, userId) =>
@@ -194,6 +206,15 @@ function startBackgroundSchedulers(runtime) {
     environmentStatusTimeoutMs: runtime.config.environmentStatusTimeoutSeconds * 1000,
     pool: runtime.pool,
     tickIntervalMs: runtime.config.environmentStatusPollIntervalSeconds * 1000,
+  });
+
+  runtime.errorTrackingScheduler = startErrorTrackingScheduler({
+    communicationClient: runtime.communicationPlatform,
+    errorTrackingClient: runtime.errorTrackingClient,
+    errorTrackingProvider: runtime.config.errorTrackingProvider,
+    errorTrackingTimeoutMs: runtime.config.errorTrackingTimeoutSeconds * 1000,
+    pool: runtime.pool,
+    tickIntervalMs: runtime.config.errorTrackingPollIntervalSeconds * 1000,
   });
 
   runtime.supportEmailScheduler = startSupportEmailScheduler({

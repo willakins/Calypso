@@ -3,6 +3,7 @@ const {
   clearSupportEmailOnCall,
   DEFAULT_TIME_FORMAT,
   DEFAULT_TIME_ZONE,
+  getErrorTrackingConfig,
   getEnvironmentStatusConfig,
   getConfiguredTimeFormat,
   getConfiguredTimeZone,
@@ -12,6 +13,7 @@ const {
   isUserWhitelistedForDeploy,
   insertDeployment,
   listPendingSupportEmailThreads,
+  listOpenErrorTrackingIssues,
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   listBlockingPullRequests,
@@ -28,6 +30,10 @@ const {
   setConfiguredCommunicationProvider,
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
+  setErrorTrackingChannel,
+  setErrorTrackingEnabled,
+  setErrorTrackingEnvironment,
+  setErrorTrackingProject,
   setEnvironmentStatusChannel,
   setEnvironmentStatusEnabled,
   setEnvironmentStatusUrl,
@@ -91,6 +97,7 @@ function createCalypsoCommandService(serviceOptions = {}) {
 function createDefaultDependencies() {
   return {
     defaultBotName: DEFAULT_BOT_NAME,
+    getErrorTrackingConfigFn: getErrorTrackingConfig,
     formatStatusResponseFn: formatStatusResponse,
     addUserToDeployWhitelistFn: addUserToDeployWhitelist,
     clearSupportEmailOnCallFn: clearSupportEmailOnCall,
@@ -105,6 +112,7 @@ function createDefaultDependencies() {
     getReviewRecapConfigFn: getReviewRecapConfig,
     getSupportEmailConfigFn: getSupportEmailConfig,
     listPendingSupportEmailThreadsFn: listPendingSupportEmailThreads,
+    listOpenErrorTrackingIssuesFn: listOpenErrorTrackingIssues,
     listOpenPullRequestsWaitingOnReviewSinceFn: listOpenPullRequestsWaitingOnReviewSince,
     markReviewRecapSentFn: markReviewRecapSent,
     listRecentlyTestedPullRequestsFn: listRecentlyTestedPullRequests,
@@ -127,6 +135,10 @@ function createDefaultDependencies() {
     setConfiguredCommunicationProviderFn: setConfiguredCommunicationProvider,
     setConfiguredCodeHostProviderFn: setConfiguredCodeHostProvider,
     setConfiguredDeployProviderFn: setConfiguredDeployProvider,
+    setErrorTrackingChannelFn: setErrorTrackingChannel,
+    setErrorTrackingEnabledFn: setErrorTrackingEnabled,
+    setErrorTrackingEnvironmentFn: setErrorTrackingEnvironment,
+    setErrorTrackingProjectFn: setErrorTrackingProject,
     setEnvironmentStatusChannelFn: setEnvironmentStatusChannel,
     setEnvironmentStatusEnabledFn: setEnvironmentStatusEnabled,
     setEnvironmentStatusUrlFn: setEnvironmentStatusUrl,
@@ -163,6 +175,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
 
   return {
     botName: String(mergedOptions.botName || defaultDependencies.defaultBotName),
+    errorTrackingProvider:
+      mergedOptions.errorTrackingProvider || serviceOptions.errorTrackingProvider || "sentry",
     addUserToDeployWhitelistFn:
       mergedOptions.addUserToDeployWhitelistFn || defaultDependencies.addUserToDeployWhitelistFn,
     clearSupportEmailOnCallFn:
@@ -170,6 +184,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     deployConfig,
     formatStatusResponseFn:
       mergedOptions.formatStatusResponseFn || defaultDependencies.formatStatusResponseFn,
+    getErrorTrackingConfigFn:
+      mergedOptions.getErrorTrackingConfigFn || defaultDependencies.getErrorTrackingConfigFn,
     getEnvironmentStatusConfigFn:
       mergedOptions.getEnvironmentStatusConfigFn || defaultDependencies.getEnvironmentStatusConfigFn,
     getLastProdDeployAtFn:
@@ -190,6 +206,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     listPendingSupportEmailThreadsFn:
       mergedOptions.listPendingSupportEmailThreadsFn ||
       defaultDependencies.listPendingSupportEmailThreadsFn,
+    listOpenErrorTrackingIssuesFn:
+      mergedOptions.listOpenErrorTrackingIssuesFn ||
+      defaultDependencies.listOpenErrorTrackingIssuesFn,
     listRecentlyTestedPullRequestsFn:
       mergedOptions.listRecentlyTestedPullRequestsFn ||
       defaultDependencies.listRecentlyTestedPullRequestsFn,
@@ -246,6 +265,15 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.setConfiguredCodeHostProviderFn,
     setConfiguredDeployProviderFn:
       mergedOptions.setConfiguredDeployProviderFn || defaultDependencies.setConfiguredDeployProviderFn,
+    setErrorTrackingChannelFn:
+      mergedOptions.setErrorTrackingChannelFn || defaultDependencies.setErrorTrackingChannelFn,
+    setErrorTrackingEnabledFn:
+      mergedOptions.setErrorTrackingEnabledFn || defaultDependencies.setErrorTrackingEnabledFn,
+    setErrorTrackingEnvironmentFn:
+      mergedOptions.setErrorTrackingEnvironmentFn ||
+      defaultDependencies.setErrorTrackingEnvironmentFn,
+    setErrorTrackingProjectFn:
+      mergedOptions.setErrorTrackingProjectFn || defaultDependencies.setErrorTrackingProjectFn,
     setEnvironmentStatusChannelFn:
       mergedOptions.setEnvironmentStatusChannelFn || defaultDependencies.setEnvironmentStatusChannelFn,
     setEnvironmentStatusEnabledFn:
