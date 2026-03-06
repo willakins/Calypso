@@ -60,12 +60,14 @@ test("runSupportEmailSchedulerTick performs initial backfill and posts a notific
     getSupportEmailConfigFn: async () => state.config,
     gmailClient: {
       gmailAddress: "support@example.com",
-      async getMessageMetadata(messageId) {
+      provider: "gmail",
+      async getMessageDetail(messageId) {
         assert.equal(messageId, "m1");
-        return buildGmailMessage({
-          from: "Alice <alice@example.com>",
+        return buildMessageDetail({
+          fromAddress: "alice@example.com",
           id: "m1",
-          internalDate: "1741262400000",
+          plainTextBody: "Hello, I need help with billing.",
+          receivedAt: "2025-03-06T12:00:00.000Z",
           subject: "Billing question",
           threadId: "thread-1",
         });
@@ -87,9 +89,11 @@ test("runSupportEmailSchedulerTick performs initial backfill and posts a notific
         state.threads.push({
           id: state.nextId++,
           first_sender: thread.firstSender,
+          first_message_text: thread.firstMessageText,
           first_received_at: thread.firstReceivedAt,
           gmail_thread_id: thread.gmailThreadId,
           notification_sent_at: null,
+          source_provider: thread.sourceProvider,
           subject: thread.subject,
           status: "pending",
         });
@@ -124,6 +128,8 @@ test("runSupportEmailSchedulerTick performs initial backfill and posts a notific
   assert.equal(calls.posts.length, 1);
   assert.match(calls.posts[0].text, /New customer support email: alice@example.com \| Billing question/);
   assert.match(calls.posts[0].text, /On call: <@UONCALL>/);
+  assert.equal(state.threads[0].source_provider, "gmail");
+  assert.equal(state.threads[0].first_message_text, "Hello, I need help with billing.");
   assert.ok(state.threads[0].notification_sent_at);
 });
 
@@ -146,21 +152,27 @@ test("runSupportEmailSchedulerTick syncs Gmail history and dedupes by thread whi
     getSupportEmailConfigFn: async () => state.config,
     gmailClient: {
       gmailAddress: "support@example.com",
-      async getMessageMetadata(messageId) {
+      provider: "gmail",
+      async getMessageDetail(messageId) {
         if (messageId === "m-support") {
-          return buildGmailMessage({
-            from: "Support <support@example.com>",
+          return buildMessageDetail({
+            fromAddress: "support@example.com",
             id: "m-support",
-            internalDate: "1741262400000",
+            plainTextBody: "Internal follow-up.",
+            receivedAt: "2025-03-06T12:00:00.000Z",
             subject: "Ignored",
             threadId: "thread-support",
           });
         }
 
-        return buildGmailMessage({
-          from: "Alice <alice@example.com>",
+        return buildMessageDetail({
+          fromAddress: "alice@example.com",
           id: messageId,
-          internalDate: messageId === "m1" ? "1741262400000" : "1741262460000",
+          plainTextBody: messageId === "m1" ? "First customer message." : "Second customer message.",
+          receivedAt:
+            messageId === "m1"
+              ? "2025-03-06T12:00:00.000Z"
+              : "2025-03-06T12:01:00.000Z",
           subject: "Billing question",
           threadId: "thread-1",
         });
@@ -187,9 +199,11 @@ test("runSupportEmailSchedulerTick syncs Gmail history and dedupes by thread whi
         state.threads.push({
           id: state.nextId++,
           first_sender: thread.firstSender,
+          first_message_text: thread.firstMessageText,
           first_received_at: thread.firstReceivedAt,
           gmail_thread_id: thread.gmailThreadId,
           notification_sent_at: null,
+          source_provider: thread.sourceProvider,
           subject: thread.subject,
           status: "pending",
         });
@@ -213,6 +227,8 @@ test("runSupportEmailSchedulerTick syncs Gmail history and dedupes by thread whi
 
   assert.equal(state.threads.length, 1);
   assert.equal(state.threads[0].gmail_thread_id, "thread-1");
+  assert.equal(state.threads[0].source_provider, "gmail");
+  assert.equal(state.threads[0].first_message_text, "First customer message.");
   assert.equal(state.config.lastProcessedHistoryId, "150");
 });
 
@@ -236,11 +252,13 @@ test("runSupportEmailSchedulerTick re-establishes watch and reruns backfill when
     getSupportEmailConfigFn: async () => state.config,
     gmailClient: {
       gmailAddress: "support@example.com",
-      async getMessageMetadata() {
-        return buildGmailMessage({
-          from: "Alice <alice@example.com>",
+      provider: "gmail",
+      async getMessageDetail() {
+        return buildMessageDetail({
+          fromAddress: "alice@example.com",
           id: "m-backfill",
-          internalDate: "1741262400000",
+          plainTextBody: "Reset flow body.",
+          receivedAt: "2025-03-06T12:00:00.000Z",
           subject: "Reset flow",
           threadId: "thread-reset",
         });
@@ -266,9 +284,11 @@ test("runSupportEmailSchedulerTick re-establishes watch and reruns backfill when
         state.threads.push({
           id: state.nextId++,
           first_sender: thread.firstSender,
+          first_message_text: thread.firstMessageText,
           first_received_at: thread.firstReceivedAt,
           gmail_thread_id: thread.gmailThreadId,
           notification_sent_at: null,
+          source_provider: thread.sourceProvider,
           subject: thread.subject,
           status: "pending",
         });
@@ -295,6 +315,8 @@ test("runSupportEmailSchedulerTick re-establishes watch and reruns backfill when
   assert.equal(state.config.watchExpirationAt, "2026-03-12T00:00:00.000Z");
   assert.ok(state.config.backfillCompletedAt);
   assert.equal(state.threads.length, 1);
+  assert.equal(state.threads[0].source_provider, "gmail");
+  assert.equal(state.threads[0].first_message_text, "Reset flow body.");
 });
 
 test("runSupportEmailSchedulerTick polls recent messages for providers without history sync", async () => {
@@ -313,19 +335,16 @@ test("runSupportEmailSchedulerTick polls recent messages for providers without h
     emailClient: {
       mailboxAddress: "support@example.com",
       provider: "outlook",
-      async getMessageMetadata(messageId) {
+      async getMessageDetail(messageId) {
         assert.equal(messageId, "m-outlook-1");
-        return {
-          conversationId: "conversation-1",
-          from: {
-            emailAddress: {
-              address: "alice@example.com",
-            },
-          },
+        return buildMessageDetail({
+          fromAddress: "alice@example.com",
           id: "m-outlook-1",
-          receivedDateTime: "2026-03-06T11:55:00.000Z",
+          plainTextBody: "I need help with my account.",
+          receivedAt: "2026-03-06T11:55:00.000Z",
           subject: "Need help",
-        };
+          threadId: "conversation-1",
+        });
       },
       async listRecentInboxMessages({ afterTimestamp }) {
         recentMessageCalls += 1;
@@ -341,9 +360,11 @@ test("runSupportEmailSchedulerTick polls recent messages for providers without h
         state.threads.push({
           id: state.nextId++,
           first_sender: thread.firstSender,
+          first_message_text: thread.firstMessageText,
           first_received_at: thread.firstReceivedAt,
           gmail_thread_id: thread.gmailThreadId,
           notification_sent_at: null,
+          source_provider: thread.sourceProvider,
           subject: thread.subject,
           status: "pending",
         });
@@ -369,19 +390,18 @@ test("runSupportEmailSchedulerTick polls recent messages for providers without h
   assert.equal(state.threads.length, 1);
   assert.equal(state.threads[0].gmail_thread_id, "conversation-1");
   assert.equal(state.threads[0].first_sender, "alice@example.com");
+  assert.equal(state.threads[0].source_provider, "outlook");
+  assert.equal(state.threads[0].first_message_text, "I need help with my account.");
   assert.equal(state.config.lastSyncAt, "2026-03-06T12:00:00.000Z");
 });
 
-function buildGmailMessage({ from, id, internalDate, subject, threadId }) {
+function buildMessageDetail({ fromAddress, id, plainTextBody, receivedAt, subject, threadId }) {
   return {
+    fromAddress,
     id,
-    internalDate,
-    payload: {
-      headers: [
-        { name: "From", value: from },
-        { name: "Subject", value: subject },
-      ],
-    },
+    plainTextBody,
+    receivedAt,
+    subject,
     threadId,
   };
 }

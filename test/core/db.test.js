@@ -16,6 +16,7 @@ const {
   setConfiguredCommunicationProvider,
   setConfiguredDeployProvider,
   setConfiguredEmailProvider,
+  setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
   markStaleOpenPullRequestsClosed,
   markReviewRecapSent,
@@ -661,6 +662,7 @@ test("getRuntimeProviderConfig returns defaults when singleton row is missing", 
     codeHostProvider: "github",
     deployProvider: "digitalocean",
     emailProvider: "gmail",
+    aiProvider: "openai",
     errorTrackingProvider: "sentry",
   });
 });
@@ -675,6 +677,7 @@ test("getRuntimeProviderConfig returns configured providers", async () => {
             code_host_provider: "bitbucket",
             deploy_provider: "aws",
             email_provider: "outlook",
+            ai_provider: "anthropic",
             error_tracking_provider: "rollbar",
           },
         ],
@@ -689,6 +692,7 @@ test("getRuntimeProviderConfig returns configured providers", async () => {
     codeHostProvider: "bitbucket",
     deployProvider: "aws",
     emailProvider: "outlook",
+    aiProvider: "anthropic",
     errorTrackingProvider: "rollbar",
   });
 });
@@ -1015,7 +1019,7 @@ test("setConfiguredEmailProvider updates runtime config and clears email sync st
   assert.deepEqual(result, { emailProvider: "outlook" });
   assert.equal(calls[0].sql, "BEGIN");
   assert.equal(calls[1].params[3], "outlook");
-  assert.equal(calls[1].params[5], "UADMIN");
+  assert.equal(calls[1].params[6], "UADMIN");
   assert.equal(calls[2].params[9], "UADMIN");
   assert.equal(calls[2].params[11], true);
   assert.equal(calls[2].params[12], true);
@@ -1023,6 +1027,25 @@ test("setConfiguredEmailProvider updates runtime config and clears email sync st
   assert.equal(calls[2].params[14], true);
   assert.equal(calls[2].params[15], true);
   assert.equal(calls[3].sql, "COMMIT");
+});
+
+test("setConfiguredAiProvider upserts provider", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ ai_provider: "anthropic", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setConfiguredAiProvider(pool, "anthropic", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO runtime_config/);
+  assert.equal(captured.params[4], "anthropic");
+  assert.equal(result.ai_provider, "anthropic");
 });
 
 test("setConfiguredErrorTrackingProvider updates runtime config and clears error tracking state", async () => {
@@ -1052,8 +1075,8 @@ test("setConfiguredErrorTrackingProvider updates runtime config and clears error
 
   assert.deepEqual(result, { errorTrackingProvider: "rollbar" });
   assert.equal(calls[0].sql, "BEGIN");
-  assert.equal(calls[1].params[4], "rollbar");
-  assert.equal(calls[1].params[5], "UADMIN");
+  assert.equal(calls[1].params[5], "rollbar");
+  assert.equal(calls[1].params[6], "UADMIN");
   assert.equal(calls[2].params[7], "UADMIN");
   assert.equal(calls[2].params[9], true);
   assert.equal(calls[2].params[10], true);

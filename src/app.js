@@ -29,6 +29,7 @@ const { createCommunicationPlatform } = require("./platform/communication/factor
 const { createDeployPlatform } = require("./platform/deploy/factory");
 const { createEmailPlatform } = require("./platform/email/factory");
 const { createErrorTrackingPlatform } = require("./platform/error_tracking/factory");
+const { createAiPlatform } = require("./platform/ai/factory");
 const { startReviewRecapScheduler } = require("./background_jobs/review_recap_scheduler");
 
 async function start() {
@@ -90,6 +91,7 @@ async function applyRuntimeProviderSelection({ baseConfig, pool }) {
     codeHostProvider: runtimeProviderConfig.codeHostProvider || baseConfig.codeHostProvider,
     deployProvider: runtimeProviderConfig.deployProvider || baseConfig.deployProvider,
     emailProvider: runtimeProviderConfig.emailProvider || baseConfig.emailProvider,
+    aiProvider: runtimeProviderConfig.aiProvider || baseConfig.aiProvider,
     errorTrackingProvider:
       runtimeProviderConfig.errorTrackingProvider || baseConfig.errorTrackingProvider,
   };
@@ -108,11 +110,15 @@ function wireCommunicationCommands(runtime) {
     enableDeploymentCompletionNotifications: true,
     getRuntimeProviderConfigFn: getRuntimeProviderConfig,
     errorTrackingProvider: runtime.config.errorTrackingProvider,
+    aiProvider: runtime.config.aiProvider,
+    aiSupportEmailSystemPrompt: runtime.config.aiSupportEmailSystemPrompt,
     pool: runtime.pool,
     deployPlatform: runtime.deployPlatform,
     isWorkspaceAdminFn: async (_communicationClient, userId) =>
       runtime.communicationPlatform.isWorkspaceAdmin(userId),
     deployConfig: buildDeployConfig(runtime.config),
+    resolveAiClientFn: buildResolveAiClientFn(runtime),
+    resolveEmailClientByProviderFn: buildResolveEmailClientByProviderFn(runtime),
     triggerProdDeployFn: dynamicDeployFunctions.triggerProdDeployFn,
     waitForProdDeployCompletionFn: dynamicDeployFunctions.waitForProdDeployCompletionFn,
     resolveUserDisplayNameFn: async (_communicationClient, userId) =>
@@ -326,6 +332,41 @@ async function resolveErrorTrackingProvider(runtime) {
   return runtimeProviderConfig.errorTrackingProvider || runtime.config.errorTrackingProvider;
 }
 
+async function resolveAiProvider(runtime) {
+  const runtimeProviderConfig = await readRuntimeProviderConfigSafe(runtime);
+  return runtimeProviderConfig.aiProvider || runtime.config.aiProvider;
+}
+
+function buildResolveAiClientFn(runtime) {
+  return async () => {
+    const aiProvider = await resolveAiProvider(runtime);
+    const aiPlatform = createAiPlatform({
+      provider: aiProvider,
+      config: runtime.config,
+    });
+
+    return {
+      aiClient: aiPlatform.createAiClient(),
+      aiProvider,
+    };
+  };
+}
+
+function buildResolveEmailClientByProviderFn(runtime) {
+  return async (provider = null) => {
+    const emailProvider = provider || await resolveEmailProvider(runtime);
+    const emailPlatform = createEmailPlatform({
+      provider: emailProvider,
+      config: runtime.config,
+    });
+
+    return {
+      emailClient: emailPlatform.createEmailClient(),
+      emailProvider,
+    };
+  };
+}
+
 function buildRuntimeCodeHostConfig(runtime, codeHostProvider) {
   return {
     ...runtime.config,
@@ -341,6 +382,7 @@ async function readRuntimeProviderConfigSafe(runtime) {
       codeHostProvider: runtime.config.codeHostProvider,
       deployProvider: runtime.config.deployProvider,
       emailProvider: runtime.config.emailProvider,
+      aiProvider: runtime.config.aiProvider,
       errorTrackingProvider: runtime.config.errorTrackingProvider,
     };
   }
@@ -353,6 +395,7 @@ async function readRuntimeProviderConfigSafe(runtime) {
       codeHostProvider: runtime.config.codeHostProvider,
       deployProvider: runtime.config.deployProvider,
       emailProvider: runtime.config.emailProvider,
+      aiProvider: runtime.config.aiProvider,
       errorTrackingProvider: runtime.config.errorTrackingProvider,
     };
   }

@@ -67,6 +67,7 @@ test("handleCalypsoCommand returns email topic help", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\*Calypso Email Help\*/);
+  assert.match(result.responseText, /\/calypso emails draft <EMAIL_ID> \[ADDITIONAL_INSTRUCTIONS\.\.\.\]/);
   assert.match(result.responseText, /\/calypso emails responded <EMAIL_ID>/);
   assert.match(result.responseText, /\/calypso config email-on-call <@USER\|USER_ID> <Nh\|Nd\|Nw>/);
 });
@@ -79,6 +80,7 @@ test("handleCalypsoCommand returns config topic help", () => {
   assert.match(result.responseText, /\/calypso config time-format:human\|long/);
   assert.match(result.responseText, /\/calypso config communication-provider:slack\|microsoft_teams/);
   assert.match(result.responseText, /\/calypso config email-provider:gmail\|outlook/);
+  assert.match(result.responseText, /\/calypso config ai-provider:openai\|anthropic/);
   assert.match(result.responseText, /\/calypso config error-tracking-provider:sentry\|rollbar/);
   assert.match(result.responseText, /\/calypso help reviews/);
   assert.match(result.responseText, /\/calypso help monitoring/);
@@ -357,6 +359,16 @@ test("handleCalypsoCommand routes config email provider input", () => {
 
   assert.equal(result.action, "config_email_provider");
   assert.equal(result.emailProvider, "outlook");
+});
+
+test("handleCalypsoCommand routes config ai provider input", () => {
+  const result = handleCalypsoCommand({
+    text: "config ai-provider:anthropic",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_ai_provider");
+  assert.equal(result.aiProvider, "anthropic");
 });
 
 test("handleCalypsoCommand routes config error tracking provider input", () => {
@@ -2666,6 +2678,41 @@ test("registerCalypsoCommand config command updates email provider", async () =>
   assert.match(payload.text, /Updated email provider to `outlook`/);
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "outlook");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates ai provider", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredAiProviderFn: async (pool, provider, updatedBy) => {
+      capturedCalls.push({ pool, provider, updatedBy });
+      return { ai_provider: provider, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config ai-provider:anthropic", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated ai provider to `anthropic`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].provider, "anthropic");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 

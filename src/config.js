@@ -18,6 +18,10 @@ const EMAIL_PROVIDERS = Object.freeze({
   gmail: "gmail",
   outlook: "outlook",
 });
+const AI_PROVIDERS = Object.freeze({
+  openai: "openai",
+  anthropic: "anthropic",
+});
 const ERROR_TRACKING_PROVIDERS = Object.freeze({
   sentry: "sentry",
   rollbar: "rollbar",
@@ -26,6 +30,7 @@ const DEFAULT_COMMUNICATION_PROVIDER = COMMUNICATION_PROVIDERS.slack;
 const DEFAULT_CODE_HOST_PROVIDER = CODE_HOST_PROVIDERS.github;
 const DEFAULT_DEPLOY_PROVIDER = DEPLOY_PROVIDERS.digitalocean;
 const DEFAULT_EMAIL_PROVIDER = EMAIL_PROVIDERS.gmail;
+const DEFAULT_AI_PROVIDER = AI_PROVIDERS.openai;
 const DEFAULT_ERROR_TRACKING_PROVIDER = ERROR_TRACKING_PROVIDERS.sentry;
 const DEFAULT_BOT_NAME = "Calypso";
 const DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS = 24;
@@ -43,6 +48,9 @@ const DEFAULT_ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS = 60;
 const DEFAULT_ENVIRONMENT_STATUS_TIMEOUT_SECONDS = 10;
 const DEFAULT_EMAIL_WATCH_RENEW_INTERVAL_HOURS = 24;
 const DEFAULT_EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES = 5;
+const DEFAULT_AI_TIMEOUT_SECONDS = 30;
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 const DEFAULT_ERROR_TRACKING_POLL_INTERVAL_SECONDS = 300;
 const DEFAULT_ERROR_TRACKING_TIMEOUT_SECONDS = 15;
 const DEFAULT_SENTRY_BASE_URL = "https://sentry.io";
@@ -68,6 +76,11 @@ function loadConfig() {
     "EMAIL_PROVIDER",
     DEFAULT_EMAIL_PROVIDER,
     Object.values(EMAIL_PROVIDERS),
+  );
+  const aiProvider = readProviderSelection(
+    "AI_PROVIDER",
+    DEFAULT_AI_PROVIDER,
+    Object.values(AI_PROVIDERS),
   );
   const errorTrackingProvider = readProviderSelection(
     "ERROR_TRACKING_PROVIDER",
@@ -160,6 +173,19 @@ function loadConfig() {
     "EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES",
     DEFAULT_EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES,
   );
+  const aiTimeoutSeconds = readPositiveInteger(
+    "AI_TIMEOUT_SECONDS",
+    DEFAULT_AI_TIMEOUT_SECONDS,
+  );
+  const aiOpenAiApiKey = readOptionalEnvironmentValue("AI_OPENAI_API_KEY");
+  const aiOpenAiModel = readOptionalEnvironmentValue("AI_OPENAI_MODEL");
+  const aiOpenAiBaseUrl =
+    readOptionalEnvironmentValue("AI_OPENAI_BASE_URL") || DEFAULT_OPENAI_BASE_URL;
+  const aiAnthropicApiKey = readOptionalEnvironmentValue("AI_ANTHROPIC_API_KEY");
+  const aiAnthropicModel = readOptionalEnvironmentValue("AI_ANTHROPIC_MODEL");
+  const aiAnthropicBaseUrl =
+    readOptionalEnvironmentValue("AI_ANTHROPIC_BASE_URL") || DEFAULT_ANTHROPIC_BASE_URL;
+  const aiSupportEmailSystemPrompt = readOptionalEnvironmentValue("AI_SUPPORT_EMAIL_SYSTEM_PROMPT");
   const errorTrackingPollIntervalSeconds = readPositiveInteger(
     "ERROR_TRACKING_POLL_INTERVAL_SECONDS",
     DEFAULT_ERROR_TRACKING_POLL_INTERVAL_SECONDS,
@@ -187,6 +213,7 @@ function loadConfig() {
     codeHostProvider,
     deployProvider,
     emailProvider,
+    aiProvider,
     errorTrackingProvider,
     databaseUrl: readRequiredEnvironmentVariable("DATABASE_URL"),
     deployPollIntervalSeconds,
@@ -231,6 +258,14 @@ function loadConfig() {
     emailOutlookClientSecret,
     emailWatchRenewIntervalHours,
     emailSyncFallbackIntervalMinutes,
+    aiTimeoutSeconds,
+    aiOpenAiApiKey,
+    aiOpenAiModel,
+    aiOpenAiBaseUrl,
+    aiAnthropicApiKey,
+    aiAnthropicModel,
+    aiAnthropicBaseUrl,
+    aiSupportEmailSystemPrompt,
     errorTrackingPollIntervalSeconds,
     errorTrackingTimeoutSeconds,
     errorTrackingSentryBaseUrl,
@@ -371,8 +406,10 @@ function resolveCodeHostApiBaseUrl(codeHostProvider) {
 }
 
 module.exports = {
+  AI_PROVIDERS,
   CODE_HOST_PROVIDERS,
   COMMUNICATION_PROVIDERS,
+  DEFAULT_AI_PROVIDER,
   DEFAULT_CODE_HOST_PROVIDER,
   DEFAULT_COMMUNICATION_PROVIDER,
   DEFAULT_DEPLOY_PROVIDER,
@@ -390,12 +427,15 @@ module.exports = {
   DEFAULT_CODE_HOST_CODEX_USER_LOGINS,
   DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS,
   DEFAULT_CODEX_APPROVAL_POLL_INTERVAL_MINUTES,
+  DEFAULT_ANTHROPIC_BASE_URL,
+  DEFAULT_AI_TIMEOUT_SECONDS,
   DEFAULT_COMMUNICATION_COMMAND_PATH,
   DEFAULT_BOT_NAME,
   DEFAULT_ERROR_TRACKING_POLL_INTERVAL_SECONDS,
   DEFAULT_ERROR_TRACKING_TIMEOUT_SECONDS,
   DEFAULT_ROLLBAR_BASE_URL,
   DEFAULT_SENTRY_BASE_URL,
+  DEFAULT_OPENAI_BASE_URL,
   resolveCodeHostApiBaseUrl,
   DEFAULT_DEPLOY_REGION,
   loadConfig,

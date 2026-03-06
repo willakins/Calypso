@@ -18,7 +18,7 @@ test("createOutlookClient returns null when required config is missing", () => {
   );
 });
 
-test("createOutlookClient authenticates once and uses Graph to list messages and fetch metadata", async () => {
+test("createOutlookClient authenticates once and uses Graph to list messages and fetch detail", async () => {
   const requests = [];
   const client = createOutlookClient({
     config: {
@@ -54,6 +54,10 @@ test("createOutlookClient authenticates once and uses Graph to list messages and
       if (url.includes("/messages/m1")) {
         return buildResponse({
           body: {
+            body: {
+              content: "Hello there.",
+            },
+            bodyPreview: "Hello there.",
             conversationId: "conversation-1",
             from: {
               emailAddress: {
@@ -74,11 +78,12 @@ test("createOutlookClient authenticates once and uses Graph to list messages and
   const messageRefs = await client.listRecentInboxMessages({
     afterTimestamp: "2026-03-06T00:00:00Z",
   });
-  const metadata = await client.getMessageMetadata("m1");
+  const detail = await client.getMessageDetail("m1");
 
   assert.deepEqual(messageRefs, [{ id: "m1" }, { id: "m2" }]);
-  assert.equal(metadata.conversationId, "conversation-1");
-  assert.equal(metadata.subject, "Billing question");
+  assert.equal(detail.threadId, "conversation-1");
+  assert.equal(detail.subject, "Billing question");
+  assert.equal(detail.plainTextBody, "Hello there.");
   assert.equal(requests.filter((request) => request.url.includes("/oauth2/v2.0/token")).length, 1);
 
   const inboxRequest = requests.find((request) => request.url.includes("/mailFolders/inbox/messages"));
@@ -95,6 +100,9 @@ test("createOutlookClient authenticates once and uses Graph to list messages and
   for (const request of graphRequests) {
     assert.equal(request.options.headers.Authorization, "Bearer graph-token");
   }
+
+  const detailRequest = requests.find((request) => request.url.includes("/messages/m1"));
+  assert.equal(detailRequest.options.headers.Prefer, 'outlook.body-content-type="text"');
 });
 
 function buildResponse({ body, headers = {}, ok = true, status = 200 }) {

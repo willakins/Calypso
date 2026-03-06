@@ -1,5 +1,6 @@
 const { BaseCalypsoCommand } = require("./base_command");
 const {
+  AI_PROVIDERS,
   CODE_HOST_PROVIDERS,
   COMMUNICATION_PROVIDERS,
   DEPLOY_PROVIDERS,
@@ -48,6 +49,10 @@ const DEPLOY_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
 const EMAIL_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "email-provider",
   Object.values(EMAIL_PROVIDERS),
+);
+const AI_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
+  "ai-provider",
+  Object.values(AI_PROVIDERS),
 );
 const ERROR_TRACKING_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "error-tracking-provider",
@@ -258,6 +263,14 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildParsedCommand({
         action: "config_email_provider",
         emailProvider: emailProviderMatch[1].toLowerCase(),
+      });
+    }
+
+    const aiProviderMatch = argument.match(AI_PROVIDER_ARGUMENT_PATTERN);
+    if (aiProviderMatch) {
+      return this.buildParsedCommand({
+        action: "config_ai_provider",
+        aiProvider: aiProviderMatch[1].toLowerCase(),
       });
     }
 
@@ -612,6 +625,24 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
+    if (parsedCommand.action === "config_ai_provider") {
+      const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.aiProvider);
+      if (unavailableMessage) {
+        return this.buildExecutionResult(unavailableMessage);
+      }
+      await runtime.setConfiguredAiProviderFn(
+        runtime.pool,
+        parsedCommand.aiProvider,
+        runtime.userId,
+      );
+      return this.buildExecutionResult(
+        buildProviderUpdateMessage({
+          baseText: `Updated ai provider to \`${parsedCommand.aiProvider}\`.`,
+          provider: parsedCommand.aiProvider,
+        }),
+      );
+    }
+
     if (parsedCommand.action === "config_error_tracking_provider") {
       const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.errorTrackingProvider);
       if (unavailableMessage) {
@@ -685,6 +716,7 @@ function isWorkspaceScopedConfigAction(action) {
     action === "config_code_host_provider" ||
     action === "config_deploy_provider" ||
     action === "config_email_provider" ||
+    action === "config_ai_provider" ||
     action === "config_error_tracking_provider"
   );
 }
@@ -725,6 +757,7 @@ function buildConfigUsageMessage() {
     "`/calypso config code-host-provider:github|bitbucket`",
     "`/calypso config deploy-provider:digitalocean|aws`",
     "`/calypso config email-provider:gmail|outlook`",
+    "`/calypso config ai-provider:openai|anthropic`",
     "`/calypso config error-tracking-provider:sentry|rollbar`",
     "Defaults: `1w`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/calypso config timezone`.",
   ].join("\n");

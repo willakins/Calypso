@@ -16,6 +16,17 @@ test("handleCalypsoCommand routes emails responded input", () => {
   assert.equal(result.emailId, 42);
 });
 
+test("handleCalypsoCommand routes emails draft input", () => {
+  const result = handleCalypsoCommand({
+    text: "emails draft 42 keep it concise",
+    user_id: "U123",
+  });
+
+  assert.equal(result.action, "emails_draft");
+  assert.equal(result.emailId, 42);
+  assert.equal(result.additionalInstructions, "keep it concise");
+});
+
 test("handleCalypsoCommand routes environment status config input", () => {
   const result = handleCalypsoCommand({ text: "config environment-status:on", user_id: "UADMIN" });
 
@@ -167,6 +178,242 @@ test("registerCalypsoCommand emails command marks support email responded", asyn
   assert.deepEqual(calls, [{ emailId: 7, respondedBy: "U123" }]);
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Marked support email \[7\] as responded/);
+});
+
+test("registerCalypsoCommand emails draft generates a reply for the current on-call user", async () => {
+  let commandHandler;
+  let capturedDraftArguments = null;
+  registerCalypsoCommand(
+    {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    },
+    {
+      aiSupportEmailSystemPrompt: "Keep replies brief.",
+      getSupportEmailConfigFn: async () => ({
+        onCallExpiresAt: "2099-03-06T12:00:00.000Z",
+        onCallUserId: "UONCALL",
+      }),
+      getSupportEmailThreadByIdFn: async () => ({
+        first_message_text: "Hi, I need help with a billing issue.",
+        first_sender: "alice@example.com",
+        gmail_first_message_id: "msg-7",
+        id: 7,
+        source_provider: "gmail",
+        subject: "Billing question",
+      }),
+      isWorkspaceAdminFn: async () => false,
+      pool: {},
+      resolveAiClientFn: async () => ({
+        aiClient: {
+          async generateText(argumentsValue) {
+            capturedDraftArguments = argumentsValue;
+            return "Hi Alice,\n\nWe are reviewing the billing issue now and will follow up shortly.";
+          },
+        },
+        aiProvider: "openai",
+      }),
+    },
+  );
+
+  let payload;
+  await commandHandler({
+    ack: async () => {},
+    command: { text: "emails draft 7 keep it concise", user_id: "UONCALL" },
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Draft reply for support email \[7\]/);
+  assert.match(payload.text, /Subject: Re: Billing question/);
+  assert.match(payload.text, /We are reviewing the billing issue now/);
+  assert.match(capturedDraftArguments.systemPrompt, /Keep replies brief/);
+  assert.match(capturedDraftArguments.userPrompt, /Customer email:/);
+  assert.match(capturedDraftArguments.userPrompt, /keep it concise/);
+});
+
+test("registerCalypsoCommand emails draft fetches and caches missing message text", async () => {
+  let commandHandler;
+  const calls = [];
+  registerCalypsoCommand(
+    {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    },
+    {
+      getSupportEmailConfigFn: async () => ({
+        onCallExpiresAt: null,
+        onCallUserId: null,
+      }),
+      getSupportEmailThreadByIdFn: async () => ({
+        first_message_text: null,
+        first_sender: "bob@example.com",
+        gmail_first_message_id: "msg-9",
+        id: 9,
+        source_provider: "outlook",
+        subject: "Need help",
+      }),
+      cacheSupportEmailThreadMessageTextFn: async (_pool, emailId, messageText, provider) => {
+        calls.push({ emailId, messageText, provider });
+        return {};
+      },
+      isWorkspaceAdminFn: async () => true,
+      pool: {},
+      resolveAiClientFn: async () => ({
+        aiClient: {
+          async generateText() {
+            return "Hi Bob,\n\nThanks for reaching out.";
+          },
+        },
+        aiProvider: "openai",
+      }),
+      resolveEmailClientByProviderFn: async (provider) => ({
+        emailClient: {
+          async getMessageDetail(messageId) {
+            calls.push({ messageId, provider });
+            return {
+              plainTextBody: "Hello, I need help with my account access.",
+            };
+          },
+        },
+        emailProvider: provider,
+      }),
+    },
+  );
+
+  let payload;
+  await commandHandler({
+    ack: async () => {},
+    command: { text: "emails draft 9", user_id: "UADMIN" },
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Subject: Re: Need help/);
+  assert.deepEqual(calls, [
+    { messageId: "msg-9", provider: "outlook" },
+    {
+      emailId: 9,
+      messageText: "Hello, I need help with my account access.",
+      provider: "outlook",
+    },
+  ]);
+});
+
+test("registerCalypsoCommand emails draft denies users who are not admin or on-call", async () => {
+  let commandHandler;
+  registerCalypsoCommand(
+    {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    },
+    {
+      getSupportEmailConfigFn: async () => ({
+        onCallExpiresAt: "2099-03-06T12:00:00.000Z",
+        onCallUserId: "UONCALL",
+      }),
+      getSupportEmailThreadByIdFn: async () => {
+        throw new Error("should not be called");
+      },
+      isWorkspaceAdminFn: async () => false,
+      pool: {},
+    },
+  );
+
+  let payload;
+  await commandHandler({
+    ack: async () => {},
+    command: { text: "emails draft 7", user_id: "U123" },
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Email draft denied/);
+});
+
+test("registerCalypsoCommand emails draft reports AI unavailability", async () => {
+  let commandHandler;
+  registerCalypsoCommand(
+    {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    },
+    {
+      getSupportEmailConfigFn: async () => ({
+        onCallExpiresAt: null,
+        onCallUserId: null,
+      }),
+      getSupportEmailThreadByIdFn: async () => ({
+        first_message_text: "Hello from a customer.",
+        first_sender: "alice@example.com",
+        gmail_first_message_id: "msg-10",
+        id: 10,
+        source_provider: "gmail",
+        subject: "Question",
+      }),
+      isWorkspaceAdminFn: async () => true,
+      pool: {},
+      resolveAiClientFn: async () => ({
+        aiClient: null,
+        aiProvider: "anthropic",
+      }),
+    },
+  );
+
+  let payload;
+  await commandHandler({
+    ack: async () => {},
+    command: { text: "emails draft 10", user_id: "UADMIN" },
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /AI drafting unavailable/);
+  assert.match(payload.text, /`anthropic`/);
+});
+
+test("registerCalypsoCommand emails draft reports support email not found", async () => {
+  let commandHandler;
+  registerCalypsoCommand(
+    {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    },
+    {
+      getSupportEmailConfigFn: async () => ({
+        onCallExpiresAt: null,
+        onCallUserId: null,
+      }),
+      getSupportEmailThreadByIdFn: async () => null,
+      isWorkspaceAdminFn: async () => true,
+      pool: {},
+    },
+  );
+
+  let payload;
+  await commandHandler({
+    ack: async () => {},
+    command: { text: "emails draft 404", user_id: "UADMIN" },
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Support email \[404\] not found/);
 });
 
 test("registerCalypsoCommand config command updates environment status monitoring", async () => {

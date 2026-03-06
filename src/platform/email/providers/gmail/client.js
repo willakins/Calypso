@@ -1,5 +1,10 @@
 const DEFAULT_GMAIL_API_BASE_URL = "https://gmail.googleapis.com/gmail/v1/users/me";
 const DEFAULT_GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const {
+  decodeBase64Url,
+  normalizeEmailText,
+  stripHtmlToText,
+} = require("../../../../shared/email_text");
 
 function createGmailClient({ config, fetchFn = fetch } = {}) {
   const gmailAddress = String(config?.emailGmailAddress || "").trim().toLowerCase();
@@ -17,6 +22,7 @@ function createGmailClient({ config, fetchFn = fetch } = {}) {
 
   return {
     gmailAddress,
+    provider: "gmail",
     async getMessageMetadata(messageId) {
       return gmailRequestJson(`/messages/${encodeURIComponent(messageId)}`, {
         query: [
@@ -26,6 +32,23 @@ function createGmailClient({ config, fetchFn = fetch } = {}) {
           ["metadataHeaders", "Date"],
         ],
       });
+    },
+    async getMessageDetail(messageId) {
+      const message = await gmailRequestJson(`/messages/${encodeURIComponent(messageId)}`, {
+        query: [
+          ["format", "full"],
+        ],
+      });
+
+      return {
+        fromAddress: readMessageSender(message),
+        id: String(message?.id || "").trim() || null,
+        plainTextBody: readPlainTextBody(message),
+        provider: "gmail",
+        receivedAt: normalizeTimestampMillis(message?.internalDate),
+        subject: readMessageSubject(message),
+        threadId: String(message?.threadId || "").trim() || null,
+      };
     },
     async listHistory({ startHistoryId }) {
       const history = [];
@@ -199,6 +222,79 @@ function normalizeTimestampMillis(value) {
   }
 
   return new Date(milliseconds).toISOString();
+}
+
+function readMessageSubject(message) {
+  const headers = Array.isArray(message?.payload?.headers) ? message.payload.headers : [];
+  return readHeaderValue(headers, "Subject");
+}
+
+function readMessageSender(message) {
+  const headers = Array.isArray(message?.payload?.headers) ? message.payload.headers : [];
+  const fromHeader = readHeaderValue(headers, "From");
+  return extractEmailAddress(fromHeader) || fromHeader || null;
+}
+
+function readHeaderValue(headers, headerName) {
+  const normalizedHeaderName = String(headerName || "").toLowerCase().trim();
+  const matchingHeader = headers.find((header) => {
+    return String(header?.name || "").toLowerCase().trim() === normalizedHeaderName;
+  });
+  const value = String(matchingHeader?.value || "").trim();
+  return value === "" ? null : value;
+}
+
+function extractEmailAddress(rawFromHeader) {
+  const normalizedHeader = String(rawFromHeader || "").trim();
+  if (!normalizedHeader) {
+    return null;
+  }
+
+  const angleBracketMatch = normalizedHeader.match(/<([^>]+)>/);
+  if (angleBracketMatch) {
+    return String(angleBracketMatch[1] || "").trim().toLowerCase() || null;
+  }
+
+  const emailMatch = normalizedHeader.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return emailMatch ? emailMatch[0].toLowerCase() : normalizedHeader;
+}
+
+function readPlainTextBody(message) {
+  const payload = message?.payload || null;
+  const plainTextBody =
+    findBodyContentByMimeType(payload, "text/plain") ||
+    decodeBase64Url(payload?.body?.data);
+  if (plainTextBody) {
+    return normalizeEmailText(plainTextBody);
+  }
+
+  const htmlBody = findBodyContentByMimeType(payload, "text/html");
+  if (!htmlBody) {
+    return null;
+  }
+
+  return normalizeEmailText(stripHtmlToText(htmlBody));
+}
+
+function findBodyContentByMimeType(payload, mimeType) {
+  const normalizedMimeType = String(mimeType || "").toLowerCase().trim();
+  if (!payload || normalizedMimeType === "") {
+    return null;
+  }
+
+  const payloadMimeType = String(payload?.mimeType || "").toLowerCase().trim();
+  if (payloadMimeType === normalizedMimeType) {
+    return decodeBase64Url(payload?.body?.data);
+  }
+
+  for (const part of payload?.parts || []) {
+    const nestedContent = findBodyContentByMimeType(part, normalizedMimeType);
+    if (nestedContent) {
+      return nestedContent;
+    }
+  }
+
+  return null;
 }
 
 module.exports = {

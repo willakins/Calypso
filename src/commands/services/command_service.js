@@ -1,5 +1,6 @@
 const {
   addUserToDeployWhitelist,
+  cacheSupportEmailThreadMessageText,
   clearSupportEmailOnCall,
   DEFAULT_TIME_FORMAT,
   DEFAULT_TIME_ZONE,
@@ -10,6 +11,7 @@ const {
   getLastProdDeployAt,
   getReviewRecapConfig,
   getRuntimeProviderConfig,
+  getSupportEmailThreadById,
   getSupportEmailConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
@@ -32,6 +34,7 @@ const {
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
   setConfiguredEmailProvider,
+  setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
   setErrorTrackingChannel,
   setErrorTrackingEnabled,
@@ -103,6 +106,7 @@ function createDefaultDependencies() {
     getErrorTrackingConfigFn: getErrorTrackingConfig,
     formatStatusResponseFn: formatStatusResponse,
     addUserToDeployWhitelistFn: addUserToDeployWhitelist,
+    cacheSupportEmailThreadMessageTextFn: cacheSupportEmailThreadMessageText,
     clearSupportEmailOnCallFn: clearSupportEmailOnCall,
     getEnvironmentStatusConfigFn: getEnvironmentStatusConfig,
     getLastProdDeployAtFn: getLastProdDeployAt,
@@ -115,6 +119,7 @@ function createDefaultDependencies() {
     getReviewRecapConfigFn: getReviewRecapConfig,
     getRuntimeProviderConfigFn: getRuntimeProviderConfig,
     getSupportEmailConfigFn: getSupportEmailConfig,
+    getSupportEmailThreadByIdFn: getSupportEmailThreadById,
     listPendingSupportEmailThreadsFn: listPendingSupportEmailThreads,
     listOpenErrorTrackingIssuesFn: listOpenErrorTrackingIssues,
     listOpenPullRequestsWaitingOnReviewSinceFn: listOpenPullRequestsWaitingOnReviewSince,
@@ -133,6 +138,8 @@ function createDefaultDependencies() {
     resolveUserDisplayNameFn: resolveUserDisplayNameFromCommunicationClient,
     resolveCurrentChannelTopicFn: resolveCurrentChannelTopicFromCommunicationClient,
     resolveDeployAccessFn: resolveDeployAccess,
+    resolveAiClientFn: null,
+    resolveEmailClientByProviderFn: null,
     runOpenPullRequestSyncNowFn: null,
     setConfiguredTimeFormatFn: setConfiguredTimeFormat,
     setConfiguredTimeZoneFn: setConfiguredTimeZone,
@@ -140,6 +147,7 @@ function createDefaultDependencies() {
     setConfiguredCodeHostProviderFn: setConfiguredCodeHostProvider,
     setConfiguredDeployProviderFn: setConfiguredDeployProvider,
     setConfiguredEmailProviderFn: setConfiguredEmailProvider,
+    setConfiguredAiProviderFn: setConfiguredAiProvider,
     setConfiguredErrorTrackingProviderFn: setConfiguredErrorTrackingProvider,
     setErrorTrackingChannelFn: setErrorTrackingChannel,
     setErrorTrackingEnabledFn: setErrorTrackingEnabled,
@@ -187,6 +195,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.addUserToDeployWhitelistFn || defaultDependencies.addUserToDeployWhitelistFn,
     clearSupportEmailOnCallFn:
       mergedOptions.clearSupportEmailOnCallFn || defaultDependencies.clearSupportEmailOnCallFn,
+    cacheSupportEmailThreadMessageTextFn:
+      mergedOptions.cacheSupportEmailThreadMessageTextFn ||
+      defaultDependencies.cacheSupportEmailThreadMessageTextFn,
     deployConfig,
     formatStatusResponseFn:
       mergedOptions.formatStatusResponseFn || defaultDependencies.formatStatusResponseFn,
@@ -206,6 +217,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.getRuntimeProviderConfigFn || defaultDependencies.getRuntimeProviderConfigFn,
     getSupportEmailConfigFn:
       mergedOptions.getSupportEmailConfigFn || defaultDependencies.getSupportEmailConfigFn,
+    getSupportEmailThreadByIdFn:
+      mergedOptions.getSupportEmailThreadByIdFn || defaultDependencies.getSupportEmailThreadByIdFn,
     isUserWhitelistedForDeployFn:
       mergedOptions.isUserWhitelistedForDeployFn || defaultDependencies.isUserWhitelistedForDeployFn,
     isValidTimeZoneFn: mergedOptions.isValidTimeZoneFn || defaultDependencies.isValidTimeZoneFn,
@@ -259,6 +272,11 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.resolveCurrentChannelTopicFn,
     resolveDeployAccessFn:
       mergedOptions.resolveDeployAccessFn || defaultDependencies.resolveDeployAccessFn,
+    resolveAiClientFn:
+      mergedOptions.resolveAiClientFn || defaultDependencies.resolveAiClientFn,
+    resolveEmailClientByProviderFn:
+      mergedOptions.resolveEmailClientByProviderFn ||
+      defaultDependencies.resolveEmailClientByProviderFn,
     runOpenPullRequestSyncNowFn:
       mergedOptions.runOpenPullRequestSyncNowFn || defaultDependencies.runOpenPullRequestSyncNowFn,
     setConfiguredTimeFormatFn:
@@ -275,6 +293,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.setConfiguredDeployProviderFn || defaultDependencies.setConfiguredDeployProviderFn,
     setConfiguredEmailProviderFn:
       mergedOptions.setConfiguredEmailProviderFn || defaultDependencies.setConfiguredEmailProviderFn,
+    setConfiguredAiProviderFn:
+      mergedOptions.setConfiguredAiProviderFn || defaultDependencies.setConfiguredAiProviderFn,
     setConfiguredErrorTrackingProviderFn:
       mergedOptions.setConfiguredErrorTrackingProviderFn ||
       defaultDependencies.setConfiguredErrorTrackingProviderFn,
@@ -317,6 +337,10 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     communicationClient,
     currentChannelId,
     currentChannelName,
+    aiProvider: mergedOptions.aiProvider || serviceOptions.aiProvider || "openai",
+    aiSupportEmailSystemPrompt:
+      mergedOptions.aiSupportEmailSystemPrompt || serviceOptions.aiSupportEmailSystemPrompt || "",
+    emailProvider: mergedOptions.emailProvider || serviceOptions.emailProvider || "gmail",
     userId,
     callerUserName,
     // Backward-compatible aliases while commands migrate to neutral naming.

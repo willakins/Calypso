@@ -39,6 +39,7 @@ const RUNTIME_PROVIDER_DEFAULTS = Object.freeze({
   codeHostProvider: "github",
   deployProvider: "digitalocean",
   emailProvider: "gmail",
+  aiProvider: "openai",
   errorTrackingProvider: "sentry",
 });
 const ENVIRONMENT_STATUS_STATES = Object.freeze({
@@ -101,6 +102,10 @@ const DEPLOY_PROVIDERS = Object.freeze({
 const EMAIL_PROVIDERS = Object.freeze({
   gmail: "gmail",
   outlook: "outlook",
+});
+const AI_PROVIDERS = Object.freeze({
+  openai: "openai",
+  anthropic: "anthropic",
 });
 const ERROR_TRACKING_PROVIDERS = Object.freeze({
   sentry: "sentry",
@@ -687,6 +692,7 @@ async function getRuntimeProviderConfig(pool) {
         code_host_provider,
         deploy_provider,
         email_provider,
+        ai_provider,
         error_tracking_provider
       FROM runtime_config
       WHERE id = 1
@@ -708,6 +714,9 @@ async function getRuntimeProviderConfig(pool) {
     emailProvider:
       normalizeEmailProvider(row.email_provider) ||
       RUNTIME_PROVIDER_DEFAULTS.emailProvider,
+    aiProvider:
+      normalizeAiProvider(row.ai_provider) ||
+      RUNTIME_PROVIDER_DEFAULTS.aiProvider,
     errorTrackingProvider:
       normalizeErrorTrackingProvider(row.error_tracking_provider) ||
       RUNTIME_PROVIDER_DEFAULTS.errorTrackingProvider,
@@ -1429,6 +1438,8 @@ async function listPendingSupportEmailThreads(pool) {
         id,
         gmail_thread_id,
         gmail_first_message_id,
+        source_provider,
+        first_message_text,
         subject,
         first_sender,
         status,
@@ -1452,6 +1463,8 @@ async function listUnnotifiedSupportEmailThreads(pool) {
         id,
         gmail_thread_id,
         gmail_first_message_id,
+        source_provider,
+        first_message_text,
         subject,
         first_sender,
         status,
@@ -1472,6 +1485,8 @@ async function listUnnotifiedSupportEmailThreads(pool) {
 async function insertSupportEmailThread(pool, thread) {
   const normalizedThreadId = normalizeOptionalText(thread.gmailThreadId);
   const normalizedFirstMessageId = normalizeOptionalText(thread.gmailFirstMessageId);
+  const normalizedSourceProvider = normalizeEmailProvider(thread.sourceProvider);
+  const normalizedFirstMessageText = normalizeOptionalText(thread.firstMessageText);
   const normalizedSubject = normalizeOptionalText(thread.subject);
   const normalizedFirstSender = normalizeOptionalText(thread.firstSender);
   const normalizedFirstReceivedAt = thread.firstReceivedAt || null;
@@ -1487,6 +1502,8 @@ async function insertSupportEmailThread(pool, thread) {
       INSERT INTO support_email_threads (
         gmail_thread_id,
         gmail_first_message_id,
+        source_provider,
+        first_message_text,
         subject,
         first_sender,
         status,
@@ -1494,12 +1511,14 @@ async function insertSupportEmailThread(pool, thread) {
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, 'pending', $5::timestamptz, NOW(), NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7::timestamptz, NOW(), NOW())
       ON CONFLICT (gmail_thread_id) DO NOTHING
       RETURNING
         id,
         gmail_thread_id,
         gmail_first_message_id,
+        source_provider,
+        first_message_text,
         subject,
         first_sender,
         status,
@@ -1511,10 +1530,87 @@ async function insertSupportEmailThread(pool, thread) {
     [
       normalizedThreadId,
       normalizedFirstMessageId,
+      normalizedSourceProvider,
+      normalizedFirstMessageText,
       normalizedSubject,
       normalizedFirstSender,
       normalizedFirstReceivedAt,
     ],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function getSupportEmailThreadById(pool, emailId) {
+  const normalizedEmailId = normalizePositiveInteger(emailId);
+  if (!normalizedEmailId) {
+    throw new Error(`Unsupported support email id: ${emailId}`);
+  }
+
+  const result = await pool.query(
+    `
+      SELECT
+        id,
+        gmail_thread_id,
+        gmail_first_message_id,
+        source_provider,
+        first_message_text,
+        subject,
+        first_sender,
+        status,
+        first_received_at,
+        notification_sent_at,
+        responded_at,
+        responded_by
+      FROM support_email_threads
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [normalizedEmailId],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function cacheSupportEmailThreadMessageText(pool, emailId, firstMessageText, sourceProvider = null) {
+  const normalizedEmailId = normalizePositiveInteger(emailId);
+  const normalizedFirstMessageText = normalizeOptionalText(firstMessageText);
+  const normalizedSourceProvider =
+    sourceProvider === null || sourceProvider === undefined
+      ? null
+      : normalizeEmailProvider(sourceProvider);
+  if (!normalizedEmailId) {
+    throw new Error(`Unsupported support email id: ${emailId}`);
+  }
+  if (!normalizedFirstMessageText) {
+    throw new Error("support email first message text is required");
+  }
+  if (sourceProvider !== null && sourceProvider !== undefined && !normalizedSourceProvider) {
+    throw new Error(`Unsupported support email source provider: ${sourceProvider}`);
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE support_email_threads
+      SET first_message_text = $2,
+          source_provider = COALESCE($3, source_provider),
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        gmail_thread_id,
+        gmail_first_message_id,
+        source_provider,
+        first_message_text,
+        subject,
+        first_sender,
+        status,
+        first_received_at,
+        notification_sent_at,
+        responded_at,
+        responded_by
+    `,
+    [normalizedEmailId, normalizedFirstMessageText, normalizedSourceProvider],
   );
 
   return result.rows[0] || null;
@@ -1536,6 +1632,8 @@ async function markSupportEmailThreadNotificationSent(pool, emailId, notificatio
         id,
         gmail_thread_id,
         gmail_first_message_id,
+        source_provider,
+        first_message_text,
         subject,
         first_sender,
         status,
@@ -1701,6 +1799,22 @@ async function setConfiguredEmailProvider(pool, emailProvider, updatedBy) {
     return {
       emailProvider: normalizedEmailProvider,
     };
+  });
+}
+
+async function setConfiguredAiProvider(pool, aiProvider, updatedBy) {
+  const normalizedAiProvider = normalizeAiProvider(aiProvider);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedAiProvider) {
+    throw new Error(`Unsupported ai provider: ${aiProvider}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertRuntimeProviderConfig(pool, {
+    aiProvider: normalizedAiProvider,
+    updatedBy: normalizedUserId,
   });
 }
 
@@ -2075,6 +2189,7 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         code_host_provider,
         deploy_provider,
         email_provider,
+        ai_provider,
         error_tracking_provider,
         updated_by,
         updated_at
@@ -2085,8 +2200,9 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         COALESCE($2, '${RUNTIME_PROVIDER_DEFAULTS.codeHostProvider}'),
         COALESCE($3, '${RUNTIME_PROVIDER_DEFAULTS.deployProvider}'),
         COALESCE($4, '${RUNTIME_PROVIDER_DEFAULTS.emailProvider}'),
-        COALESCE($5, '${RUNTIME_PROVIDER_DEFAULTS.errorTrackingProvider}'),
-        $6,
+        COALESCE($5, '${RUNTIME_PROVIDER_DEFAULTS.aiProvider}'),
+        COALESCE($6, '${RUNTIME_PROVIDER_DEFAULTS.errorTrackingProvider}'),
+        $7,
         NOW()
       )
       ON CONFLICT (id)
@@ -2095,7 +2211,8 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         code_host_provider = COALESCE($2, runtime_config.code_host_provider),
         deploy_provider = COALESCE($3, runtime_config.deploy_provider),
         email_provider = COALESCE($4, runtime_config.email_provider),
-        error_tracking_provider = COALESCE($5, runtime_config.error_tracking_provider),
+        ai_provider = COALESCE($5, runtime_config.ai_provider),
+        error_tracking_provider = COALESCE($6, runtime_config.error_tracking_provider),
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
       RETURNING
@@ -2103,6 +2220,7 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         code_host_provider,
         deploy_provider,
         email_provider,
+        ai_provider,
         error_tracking_provider,
         updated_by,
         updated_at
@@ -2112,6 +2230,7 @@ async function upsertRuntimeProviderConfig(pool, updates) {
       updates.codeHostProvider || null,
       updates.deployProvider || null,
       updates.emailProvider || null,
+      updates.aiProvider || null,
       updates.errorTrackingProvider || null,
       updates.updatedBy || null,
     ],
@@ -2467,6 +2586,11 @@ function normalizeEmailProvider(value) {
   return Object.values(EMAIL_PROVIDERS).includes(normalizedValue) ? normalizedValue : null;
 }
 
+function normalizeAiProvider(value) {
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  return Object.values(AI_PROVIDERS).includes(normalizedValue) ? normalizedValue : null;
+}
+
 function normalizeErrorTrackingProvider(value) {
   const normalizedValue = String(value || "").toLowerCase().trim();
   return Object.values(ERROR_TRACKING_PROVIDERS).includes(normalizedValue)
@@ -2697,7 +2821,9 @@ module.exports = {
   getLastProdDeployAt,
   getConfiguredTimeFormat,
   getSupportEmailConfig,
+  getSupportEmailThreadById,
   isUserWhitelistedForDeploy,
+  cacheSupportEmailThreadMessageText,
   insertDeployment,
   insertSupportEmailThread,
   listOpenErrorTrackingIssues,
@@ -2742,6 +2868,7 @@ module.exports = {
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
   setConfiguredEmailProvider,
+  setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
   setSupportEmailChannel,
   setSupportEmailMonitorEnabled,

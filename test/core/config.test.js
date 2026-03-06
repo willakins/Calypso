@@ -2,13 +2,18 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  AI_PROVIDERS,
   CODE_HOST_PROVIDERS,
   COMMUNICATION_PROVIDERS,
+  DEFAULT_AI_PROVIDER,
+  DEFAULT_ANTHROPIC_BASE_URL,
+  DEFAULT_AI_TIMEOUT_SECONDS,
   DEFAULT_CODE_HOST_PROVIDER,
   DEFAULT_COMMUNICATION_PROVIDER,
   DEFAULT_DEPLOY_PROVIDER,
   DEFAULT_EMAIL_PROVIDER,
   DEFAULT_ERROR_TRACKING_PROVIDER,
+  DEFAULT_OPENAI_BASE_URL,
   DEPLOY_PROVIDERS,
   EMAIL_PROVIDERS,
   ERROR_TRACKING_PROVIDERS,
@@ -51,6 +56,7 @@ test("loadConfig defaults provider selections", { concurrency: false }, () => {
       CODE_HOST_PROVIDER: undefined,
       DEPLOY_PROVIDER: undefined,
       EMAIL_PROVIDER: undefined,
+      AI_PROVIDER: undefined,
       BOT_NAME: undefined,
     },
     () => {
@@ -60,6 +66,7 @@ test("loadConfig defaults provider selections", { concurrency: false }, () => {
       assert.equal(config.codeHostProvider, DEFAULT_CODE_HOST_PROVIDER);
       assert.equal(config.deployProvider, DEFAULT_DEPLOY_PROVIDER);
       assert.equal(config.emailProvider, DEFAULT_EMAIL_PROVIDER);
+      assert.equal(config.aiProvider, DEFAULT_AI_PROVIDER);
       assert.equal(config.errorTrackingProvider, DEFAULT_ERROR_TRACKING_PROVIDER);
     },
   );
@@ -73,6 +80,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       CODE_HOST_PROVIDER: "github",
       DEPLOY_PROVIDER: "digitalocean",
       EMAIL_PROVIDER: "gmail",
+      AI_PROVIDER: "openai",
       DEPLOY_POLL_INTERVAL_SECONDS: "15",
       DEPLOY_TIMEOUT_SECONDS: "900",
       DEPLOY_TOKEN: "  do-token  ",
@@ -94,6 +102,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.codeHostProvider, CODE_HOST_PROVIDERS.github);
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.digitalocean);
       assert.equal(config.emailProvider, EMAIL_PROVIDERS.gmail);
+      assert.equal(config.aiProvider, AI_PROVIDERS.openai);
       assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.sentry);
       assert.equal(config.communicationBotToken, "xoxb-test");
       assert.equal(config.communicationAppToken, "xapp-test");
@@ -157,6 +166,7 @@ test("loadConfig supports non-default provider selections without requiring unre
       CODE_HOST_PROVIDER: "bitbucket",
       DEPLOY_PROVIDER: "aws",
       EMAIL_PROVIDER: "outlook",
+      AI_PROVIDER: "anthropic",
       ERROR_TRACKING_PROVIDER: "rollbar",
       CODE_HOST_MAIN_BRANCH: "main",
       CODE_HOST_REPOSITORY: "workspace/repo",
@@ -170,6 +180,7 @@ test("loadConfig supports non-default provider selections without requiring unre
       assert.equal(config.codeHostProvider, CODE_HOST_PROVIDERS.bitbucket);
       assert.equal(config.deployProvider, DEPLOY_PROVIDERS.aws);
       assert.equal(config.emailProvider, EMAIL_PROVIDERS.outlook);
+      assert.equal(config.aiProvider, AI_PROVIDERS.anthropic);
       assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.rollbar);
       assert.equal(config.communicationBotToken, "");
       assert.equal(config.communicationAppToken, "");
@@ -238,6 +249,21 @@ test("loadConfig rejects unknown email provider", { concurrency: false }, () => 
   );
 });
 
+test("loadConfig rejects unknown ai provider", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      AI_PROVIDER: "gemini",
+    },
+    () => {
+      assert.throws(
+        () => loadConfig(),
+        /AI_PROVIDER must be one of: openai, anthropic/,
+      );
+    },
+  );
+});
+
 test("loadConfig rejects unknown error tracking provider", { concurrency: false }, () => {
   withEnvironment(
     {
@@ -269,6 +295,15 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS: undefined,
       ENVIRONMENT_STATUS_TIMEOUT_SECONDS: undefined,
       EMAIL_PROVIDER: undefined,
+      AI_PROVIDER: undefined,
+      AI_TIMEOUT_SECONDS: undefined,
+      AI_OPENAI_API_KEY: undefined,
+      AI_OPENAI_MODEL: undefined,
+      AI_OPENAI_BASE_URL: undefined,
+      AI_ANTHROPIC_API_KEY: undefined,
+      AI_ANTHROPIC_MODEL: undefined,
+      AI_ANTHROPIC_BASE_URL: undefined,
+      AI_SUPPORT_EMAIL_SYSTEM_PROMPT: undefined,
       ERROR_TRACKING_ROLLBAR_BASE_URL: undefined,
       ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN: undefined,
       EMAIL_GMAIL_ADDRESS: undefined,
@@ -309,6 +344,15 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.errorTrackingRollbarBaseUrl, "https://api.rollbar.com");
       assert.equal(config.errorTrackingRollbarAccessToken, "");
       assert.equal(config.emailProvider, DEFAULT_EMAIL_PROVIDER);
+      assert.equal(config.aiProvider, DEFAULT_AI_PROVIDER);
+      assert.equal(config.aiTimeoutSeconds, DEFAULT_AI_TIMEOUT_SECONDS);
+      assert.equal(config.aiOpenAiApiKey, "");
+      assert.equal(config.aiOpenAiModel, "");
+      assert.equal(config.aiOpenAiBaseUrl, DEFAULT_OPENAI_BASE_URL);
+      assert.equal(config.aiAnthropicApiKey, "");
+      assert.equal(config.aiAnthropicModel, "");
+      assert.equal(config.aiAnthropicBaseUrl, DEFAULT_ANTHROPIC_BASE_URL);
+      assert.equal(config.aiSupportEmailSystemPrompt, "");
       assert.equal(config.emailGmailAddress, "");
       assert.equal(config.emailGmailClientId, "");
       assert.equal(config.emailGmailClientSecret, "");
@@ -443,6 +487,11 @@ test("loadConfig reads optional environment status and email polling values", { 
       ERROR_TRACKING_SENTRY_BASE_URL: " https://sentry.example.com ",
       ERROR_TRACKING_SENTRY_AUTH_TOKEN: " sentry-token ",
       ERROR_TRACKING_SENTRY_ORGANIZATION_SLUG: " acme ",
+      AI_TIMEOUT_SECONDS: "45",
+      AI_OPENAI_API_KEY: " openai-key ",
+      AI_OPENAI_MODEL: " gpt-4.1-mini ",
+      AI_OPENAI_BASE_URL: " https://openai.example.com/v1 ",
+      AI_SUPPORT_EMAIL_SYSTEM_PROMPT: " Keep replies concise. ",
       EMAIL_GMAIL_ADDRESS: " support@example.com ",
       EMAIL_GMAIL_CLIENT_ID: " gmail-client-id ",
       EMAIL_GMAIL_CLIENT_SECRET: " gmail-client-secret ",
@@ -462,6 +511,11 @@ test("loadConfig reads optional environment status and email polling values", { 
       assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.example.com");
       assert.equal(config.errorTrackingSentryAuthToken, "sentry-token");
       assert.equal(config.errorTrackingSentryOrganizationSlug, "acme");
+      assert.equal(config.aiTimeoutSeconds, 45);
+      assert.equal(config.aiOpenAiApiKey, "openai-key");
+      assert.equal(config.aiOpenAiModel, "gpt-4.1-mini");
+      assert.equal(config.aiOpenAiBaseUrl, "https://openai.example.com/v1");
+      assert.equal(config.aiSupportEmailSystemPrompt, "Keep replies concise.");
       assert.equal(config.emailGmailAddress, "support@example.com");
       assert.equal(config.emailGmailClientId, "gmail-client-id");
       assert.equal(config.emailGmailClientSecret, "gmail-client-secret");
@@ -483,7 +537,11 @@ test("loadConfig reads optional outlook and rollbar values", { concurrency: fals
     {
       ...REQUIRED_ENV,
       EMAIL_PROVIDER: "outlook",
+      AI_PROVIDER: "anthropic",
       ERROR_TRACKING_PROVIDER: "rollbar",
+      AI_ANTHROPIC_API_KEY: " anthropic-key ",
+      AI_ANTHROPIC_MODEL: " claude-3-7-sonnet ",
+      AI_ANTHROPIC_BASE_URL: " https://anthropic.example.com ",
       ERROR_TRACKING_ROLLBAR_BASE_URL: " https://api.rollbar.example.com ",
       ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN: " rollbar-token ",
       EMAIL_OUTLOOK_ADDRESS: " support@example.com ",
@@ -494,7 +552,11 @@ test("loadConfig reads optional outlook and rollbar values", { concurrency: fals
     () => {
       const config = loadConfig();
       assert.equal(config.emailProvider, EMAIL_PROVIDERS.outlook);
+      assert.equal(config.aiProvider, AI_PROVIDERS.anthropic);
       assert.equal(config.errorTrackingProvider, ERROR_TRACKING_PROVIDERS.rollbar);
+      assert.equal(config.aiAnthropicApiKey, "anthropic-key");
+      assert.equal(config.aiAnthropicModel, "claude-3-7-sonnet");
+      assert.equal(config.aiAnthropicBaseUrl, "https://anthropic.example.com");
       assert.equal(config.errorTrackingRollbarBaseUrl, "https://api.rollbar.example.com");
       assert.equal(config.errorTrackingRollbarAccessToken, "rollbar-token");
       assert.equal(config.emailOutlookAddress, "support@example.com");
@@ -514,6 +576,7 @@ function withEnvironment(overrides, fn) {
     "CODE_HOST_PROVIDER",
     "DEPLOY_PROVIDER",
     "EMAIL_PROVIDER",
+    "AI_PROVIDER",
     "COMMUNICATION_BOT_TOKEN",
     "COMMUNICATION_APP_TOKEN",
     "COMMUNICATION_WEBHOOK_URL",
@@ -527,6 +590,14 @@ function withEnvironment(overrides, fn) {
     "CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS",
     "CODEX_APPROVAL_POLL_INTERVAL_MINUTES",
     "ERROR_TRACKING_PROVIDER",
+    "AI_TIMEOUT_SECONDS",
+    "AI_OPENAI_API_KEY",
+    "AI_OPENAI_MODEL",
+    "AI_OPENAI_BASE_URL",
+    "AI_ANTHROPIC_API_KEY",
+    "AI_ANTHROPIC_MODEL",
+    "AI_ANTHROPIC_BASE_URL",
+    "AI_SUPPORT_EMAIL_SYSTEM_PROMPT",
     "ERROR_TRACKING_POLL_INTERVAL_SECONDS",
     "ERROR_TRACKING_TIMEOUT_SECONDS",
     "ERROR_TRACKING_SENTRY_BASE_URL",

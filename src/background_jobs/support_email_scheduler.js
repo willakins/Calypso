@@ -359,8 +359,15 @@ async function buildSupportEmailThreadsFromMessageRefs({
   const threadCandidatesByThreadId = new Map();
 
   for (const messageId of messageIdSet) {
-    const message = await emailClient.getMessageMetadata(messageId);
-    const candidateThread = mapMessageToSupportEmailThread(message, normalizedMailboxAddress);
+    const message =
+      typeof emailClient.getMessageDetail === "function"
+        ? await emailClient.getMessageDetail(messageId)
+        : await emailClient.getMessageMetadata(messageId);
+    const candidateThread = mapMessageToSupportEmailThread({
+      message,
+      sourceProvider: resolveEmailClientProvider(emailClient),
+      supportMailboxAddress: normalizedMailboxAddress,
+    });
     if (!candidateThread) {
       continue;
     }
@@ -376,12 +383,13 @@ async function buildSupportEmailThreadsFromMessageRefs({
   });
 }
 
-function mapMessageToSupportEmailThread(message, supportMailboxAddress) {
+function mapMessageToSupportEmailThread({ message, sourceProvider, supportMailboxAddress }) {
   const gmailThreadId = String(message?.threadId || message?.conversationId || "").trim();
   const gmailFirstMessageId = String(message?.id || "").trim();
   const internalDate = normalizeMessageReceivedAt(message);
   const subject = readMessageSubject(message);
   const firstSender = readMessageSender(message);
+  const firstMessageText = readMessagePlainTextBody(message);
   const normalizedFirstSender = String(firstSender || "").trim().toLowerCase();
 
   if (!gmailThreadId || !gmailFirstMessageId || !internalDate) {
@@ -395,7 +403,9 @@ function mapMessageToSupportEmailThread(message, supportMailboxAddress) {
     gmailFirstMessageId,
     gmailThreadId,
     firstReceivedAt: internalDate,
+    firstMessageText,
     firstSender,
+    sourceProvider,
     subject,
   };
 }
@@ -483,6 +493,12 @@ function normalizeInternalDate(value) {
 }
 
 function normalizeMessageReceivedAt(message) {
+  const directReceivedAt = String(message?.receivedAt || "").trim();
+  if (directReceivedAt !== "") {
+    const parsedDate = new Date(directReceivedAt);
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString();
+  }
+
   const internalDate = normalizeInternalDate(message?.internalDate);
   if (internalDate) {
     return internalDate;
@@ -508,6 +524,11 @@ function readMessageSubject(message) {
 }
 
 function readMessageSender(message) {
+  const directSender = String(message?.fromAddress || "").trim();
+  if (directSender) {
+    return directSender.toLowerCase();
+  }
+
   const outlookSender = String(message?.from?.emailAddress?.address || "").trim();
   if (outlookSender) {
     return outlookSender.toLowerCase();
@@ -518,10 +539,24 @@ function readMessageSender(message) {
   return extractEmailAddress(fromHeader) || fromHeader || null;
 }
 
+function readMessagePlainTextBody(message) {
+  const directBody = String(message?.plainTextBody || "").trim();
+  return directBody === "" ? null : directBody;
+}
+
 function resolveMailboxAddress(emailClient) {
   return String(emailClient?.mailboxAddress || emailClient?.gmailAddress || "")
     .trim()
     .toLowerCase();
+}
+
+function resolveEmailClientProvider(emailClient) {
+  const normalizedProvider = String(emailClient?.provider || "").trim().toLowerCase();
+  if (normalizedProvider === "gmail" || normalizedProvider === "outlook") {
+    return normalizedProvider;
+  }
+
+  return null;
 }
 
 async function resolveCurrentEmailClient({ emailClient, resolveEmailClientFn }) {

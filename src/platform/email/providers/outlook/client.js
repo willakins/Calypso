@@ -1,4 +1,8 @@
 const DEFAULT_GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
+const {
+  normalizeEmailText,
+  stripHtmlToText,
+} = require("../../../../shared/email_text");
 
 function createOutlookClient({ config, fetchFn = fetch } = {}) {
   const mailboxAddress = String(config?.emailOutlookAddress || "").trim().toLowerCase();
@@ -22,6 +26,29 @@ function createOutlookClient({ config, fetchFn = fetch } = {}) {
           ["$select", "id,conversationId,receivedDateTime,subject,from"],
         ],
       });
+    },
+    async getMessageDetail(messageId) {
+      const message = await graphRequestJson(
+        `/users/${encodeURIComponent(mailboxAddress)}/messages/${encodeURIComponent(messageId)}`,
+        {
+          headers: {
+            Prefer: 'outlook.body-content-type="text"',
+          },
+          query: [
+            ["$select", "id,conversationId,receivedDateTime,subject,from,body,bodyPreview"],
+          ],
+        },
+      );
+
+      return {
+        fromAddress: String(message?.from?.emailAddress?.address || "").trim().toLowerCase() || null,
+        id: String(message?.id || "").trim() || null,
+        plainTextBody: readMessageBody(message),
+        provider: "outlook",
+        receivedAt: normalizeTimestamp(message?.receivedDateTime),
+        subject: String(message?.subject || "").trim() || null,
+        threadId: String(message?.conversationId || "").trim() || null,
+      };
     },
     async listRecentInboxMessages({ afterTimestamp }) {
       const messages = [];
@@ -99,7 +126,7 @@ function createOutlookClient({ config, fetchFn = fetch } = {}) {
     return accessToken;
   }
 
-  async function graphRequestJson(pathOrUrl, { absoluteUrl = false, query = [] } = {}) {
+  async function graphRequestJson(pathOrUrl, { absoluteUrl = false, headers = {}, query = [] } = {}) {
     const bearerToken = await ensureAccessToken();
     const requestUrl = absoluteUrl
       ? new URL(pathOrUrl)
@@ -114,6 +141,7 @@ function createOutlookClient({ config, fetchFn = fetch } = {}) {
       method: "GET",
       headers: {
         Authorization: `Bearer ${bearerToken}`,
+        ...headers,
       },
     });
 
@@ -156,6 +184,27 @@ function normalizeTimestamp(value) {
   }
 
   return parsedDate.toISOString();
+}
+
+function readMessageBody(message) {
+  const rawBodyContent = String(message?.body?.content || "");
+  const htmlFallback = containsHtmlMarkup(rawBodyContent)
+    ? stripHtmlToText(rawBodyContent)
+    : null;
+  const textBody = htmlFallback ? null : normalizeEmailText(rawBodyContent);
+  if (textBody) {
+    return textBody;
+  }
+
+  if (htmlFallback) {
+    return normalizeEmailText(htmlFallback);
+  }
+
+  return normalizeEmailText(message?.bodyPreview || "");
+}
+
+function containsHtmlMarkup(value) {
+  return /<[^>]+>/.test(String(value || ""));
 }
 
 function parseJsonSafely(rawText) {

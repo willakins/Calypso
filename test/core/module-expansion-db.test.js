@@ -2,9 +2,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  cacheSupportEmailThreadMessageText,
   clearSupportEmailOnCall,
   getEnvironmentStatusConfig,
   getSupportEmailConfig,
+  getSupportEmailThreadById,
   insertSupportEmailThread,
   markEnvironmentStatusNotificationSent,
   markSupportEmailThreadResponded,
@@ -238,13 +240,55 @@ test("insertSupportEmailThread inserts a pending support email row", async () =>
     gmailThreadId: "thread-1",
     gmailFirstMessageId: "msg-1",
     firstReceivedAt: "2026-03-06T12:00:00.000Z",
+    firstMessageText: "Hello, I need help with billing.",
     firstSender: "alice@example.com",
+    sourceProvider: "gmail",
     subject: "Billing question",
   });
 
   assert.match(captured.sql, /INSERT INTO support_email_threads/);
   assert.equal(captured.params[0], "thread-1");
+  assert.equal(captured.params[2], "gmail");
+  assert.equal(captured.params[3], "Hello, I need help with billing.");
   assert.deepEqual(row, { id: 42, gmail_thread_id: "thread-1" });
+});
+
+test("getSupportEmailThreadById returns full draft context", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ id: 42, source_provider: "gmail", first_message_text: "Need help" }],
+      };
+    },
+  };
+
+  const row = await getSupportEmailThreadById(pool, 42);
+
+  assert.match(captured.sql, /FROM support_email_threads/);
+  assert.deepEqual(captured.params, [42]);
+  assert.deepEqual(row, { id: 42, source_provider: "gmail", first_message_text: "Need help" });
+});
+
+test("cacheSupportEmailThreadMessageText updates cached body and provider", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ id: 42, source_provider: "outlook", first_message_text: "Resolved body" }],
+      };
+    },
+  };
+
+  const row = await cacheSupportEmailThreadMessageText(pool, 42, "Resolved body", "outlook");
+
+  assert.match(captured.sql, /UPDATE support_email_threads/);
+  assert.deepEqual(captured.params, [42, "Resolved body", "outlook"]);
+  assert.deepEqual(row, { id: 42, source_provider: "outlook", first_message_text: "Resolved body" });
 });
 
 test("markSupportEmailThreadResponded marks a pending thread responded", async () => {

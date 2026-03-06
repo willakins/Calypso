@@ -2,12 +2,12 @@
 
 Calypso is a platform-abstracted deployment gatekeeper for a single repository workflow.
 It currently runs with Slack + GitHub + DigitalOcean by default, while exposing provider
-abstractions for communication, code-host, deploy, email, and error-tracking integrations.
+abstractions for communication, code-host, deploy, email, AI, and error-tracking integrations.
 It tracks merged pull requests in Postgres, requires explicit testing confirmation,
 blocks production deploys when untested changes exist, posts scheduled review recap messages,
 can poll one environment health endpoint for outage alerts, and can track customer support
-emails from Gmail or Outlook as an actionable queue, and can poll Sentry or Rollbar for
-newly tracked unresolved error groups.
+emails from Gmail or Outlook as an actionable queue, can draft support-email replies through
+OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved error groups.
 
 ## What It Does
 
@@ -23,6 +23,7 @@ newly tracked unresolved error groups.
   - `/calypso config code-host-provider:github|bitbucket`
   - `/calypso config deploy-provider:digitalocean|aws`
   - `/calypso config email-provider:gmail|outlook`
+  - `/calypso config ai-provider:openai|anthropic`
   - `/calypso config error-tracking-provider:sentry|rollbar`
   - `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
   - `/calypso config review-recap-recency:<Nd|Nw>`
@@ -45,6 +46,7 @@ newly tracked unresolved error groups.
   - `/calypso errors`
   - `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
   - `/calypso emails`
+  - `/calypso emails draft <EMAIL_ID> [ADDITIONAL_INSTRUCTIONS...]`
   - `/calypso emails responded <EMAIL_ID>`
   - `/calypso tested <PR_NUMBER>`
   - `/calypso deploy staging`
@@ -57,6 +59,7 @@ newly tracked unresolved error groups.
 - Optionally polls one configured Sentry or Rollbar project/environment scope and posts one alert per new or regressed unresolved issue group.
 - Optionally ingests Gmail or Outlook support mailbox activity into `support_email_threads`, posts new-email
   notifications, and lets responders mark queued items handled.
+- Optionally drafts support-email replies for queued items through the active AI provider.
 - Runtime display config is per communication user (defaults: time format `human`, timezone `America/New_York`).
 - Review recap schedule config is workspace-wide (defaults: Monday 9:00 AM `America/New_York`, recency `1w`).
 
@@ -68,6 +71,7 @@ Calypso is a single Node.js service composed of:
 - Code-host platform provider (GitHub implemented; Bitbucket implemented).
 - Deploy platform provider (DigitalOcean implemented; AWS CodePipeline implemented).
 - Email platform provider (Gmail implemented; Outlook implemented).
+- AI platform provider (OpenAI implemented; Anthropic implemented).
 - Error-tracking platform provider (Sentry implemented; Rollbar implemented).
 - Express HTTP server for webhooks.
 - Postgres persistence through `pg`.
@@ -162,6 +166,16 @@ src/
           client.js
         digitalocean/
           client.js
+    ai/
+      base_ai_platform.js
+      factory.js
+      providers/
+        anthropic/
+          ai_platform.js
+          client.js
+        openai/
+          ai_platform.js
+          client.js
     error_tracking/
       base_error_tracking_platform.js
       factory.js
@@ -219,6 +233,7 @@ Always required:
 - `CODE_HOST_PROVIDER` (default: `github`)
 - `DEPLOY_PROVIDER` (default: `digitalocean`)
 - `EMAIL_PROVIDER` (default: `gmail`)
+- `AI_PROVIDER` (default: `openai`)
 - `ERROR_TRACKING_PROVIDER` (default: `sentry`)
 
 Required when `COMMUNICATION_PROVIDER=slack`:
@@ -256,6 +271,15 @@ Optional:
 - `ERROR_TRACKING_ROLLBAR_BASE_URL` (default `https://api.rollbar.com`)
 - `ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN`
 - `EMAIL_PROVIDER` (default `gmail`)
+- `AI_PROVIDER` (default `openai`)
+- `AI_TIMEOUT_SECONDS` (default `30`)
+- `AI_OPENAI_API_KEY`
+- `AI_OPENAI_MODEL`
+- `AI_OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
+- `AI_ANTHROPIC_API_KEY`
+- `AI_ANTHROPIC_MODEL`
+- `AI_ANTHROPIC_BASE_URL` (default `https://api.anthropic.com`)
+- `AI_SUPPORT_EMAIL_SYSTEM_PROMPT`
 - `EMAIL_GMAIL_ADDRESS`
 - `EMAIL_GMAIL_CLIENT_ID`
 - `EMAIL_GMAIL_CLIENT_SECRET`
@@ -284,6 +308,9 @@ Provider support matrix:
 - Email:
   - `gmail`: implemented
   - `outlook`: implemented
+- AI:
+  - `openai`: implemented
+  - `anthropic`: implemented
 - Error tracking:
   - `sentry`: implemented
   - `rollbar`: implemented
@@ -313,6 +340,12 @@ Provider support matrix:
 - Provider selector for support-email integration.
 - Supported values: `gmail` (implemented), `outlook` (implemented).
 - Default: `gmail`.
+
+`AI_PROVIDER`
+
+- Provider selector for AI-assisted drafting.
+- Supported values: `openai` (implemented), `anthropic` (implemented).
+- Default: `openai`.
 
 `ERROR_TRACKING_PROVIDER`
 
@@ -853,6 +886,11 @@ Rules:
 - Sets the support-email provider in runtime config.
 - Resets provider-specific email sync state so the new provider can establish a fresh baseline.
 
+`/calypso config ai-provider:openai|anthropic`
+
+- Sets the AI provider in runtime config.
+- Takes effect immediately for `/calypso` command handling.
+
 `/calypso config error-tracking-provider:sentry|rollbar`
 
 - Sets the error-tracking provider in runtime config.
@@ -882,6 +920,13 @@ Rules:
 
 - Lists pending customer support email items oldest-first.
 - Each line includes Calypso's email queue id, first sender, and subject.
+
+`/calypso emails draft <EMAIL_ID> [ADDITIONAL_INSTRUCTIONS...]`
+
+- Drafts a support-email reply for one queued item using the active AI provider.
+- Returns the draft ephemerally and does not send or persist the generated reply.
+- Restricted to workspace admins or the current support-email on-call user.
+- Uses the first tracked inbound customer message for context.
 
 `/calypso emails responded <EMAIL_ID>`
 
@@ -988,11 +1033,21 @@ Rules:
 - New inbox threads create rows in `support_email_threads` with:
   - subject
   - first sender
+  - first inbound message text
+  - source provider
   - received timestamp
   - manual response state
 - New queue items trigger an automatic notification in the configured email channel.
 - If an unexpired on-call user is configured, Calypso appends `On call: <@USER>` on Slack notifications.
 - Notification delivery is separate from ingestion, so a temporary post failure is retried without losing the email record.
+
+## AI Drafting
+
+- AI provider is selected at runtime with `/calypso config ai-provider:openai|anthropic`.
+- OpenAI uses `AI_OPENAI_API_KEY` and `AI_OPENAI_MODEL`.
+- Anthropic uses `AI_ANTHROPIC_API_KEY` and `AI_ANTHROPIC_MODEL`.
+- `AI_SUPPORT_EMAIL_SYSTEM_PROMPT` can append organization-specific drafting guidance on top of Calypso's default support-email guardrails.
+- Draft generation uses the first tracked inbound customer email plus optional operator instructions from `/calypso emails draft ...`.
 
 ## Testing
 

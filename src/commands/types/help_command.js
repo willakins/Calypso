@@ -123,15 +123,17 @@ function buildEmailHelpText(botName) {
     `*${botName} Email Help*`,
     "",
     "`/calypso emails` List pending customer support emails.",
+    "`/calypso emails draft <EMAIL_ID> [ADDITIONAL_INSTRUCTIONS...]` Draft a reply with the active AI provider.",
     "`/calypso emails responded <EMAIL_ID>` Mark one queue item responded.",
     "",
     "*Support Email Config*",
     "`/calypso config email-monitor:on|off`",
     "`/calypso config email-provider:gmail|outlook`",
+    "`/calypso config ai-provider:openai|anthropic`",
     "`/calypso config email-channel:<#CHANNEL|CHANNEL_ID>`",
     "`/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`",
     "`/calypso config email-on-call off`",
-    "Notifications mention the on-call user when one is active.",
+    "Notifications mention the on-call user when one is active. AI drafts are limited to workspace admins or the current on-call user.",
   ].join("\n");
 }
 
@@ -147,6 +149,7 @@ function buildConfigHelpText(botName) {
     "`/calypso config code-host-provider:github|bitbucket`",
     "`/calypso config deploy-provider:digitalocean|aws`",
     "`/calypso config email-provider:gmail|outlook`",
+    "`/calypso config ai-provider:openai|anthropic`",
     "`/calypso config error-tracking-provider:sentry|rollbar`",
     "Provider changes apply to command handling immediately.",
     "",
