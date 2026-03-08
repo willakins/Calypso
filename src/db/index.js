@@ -47,6 +47,11 @@ const ENVIRONMENT_STATUS_STATES = Object.freeze({
   healthy: "healthy",
   unhealthy: "unhealthy",
 });
+const ENVIRONMENT_CONNECTIVITY_STATES = Object.freeze({
+  unknown: "unknown",
+  reachable: "reachable",
+  unreachable: "unreachable",
+});
 const ENVIRONMENT_STATUS_DEFAULTS = Object.freeze({
   enabled: false,
   targetChannelId: null,
@@ -56,6 +61,10 @@ const ENVIRONMENT_STATUS_DEFAULTS = Object.freeze({
   lastCheckedAt: null,
   lastHttpStatus: null,
   lastErrorMessage: null,
+  consecutiveFailureCount: 0,
+  lastConnectivityState: ENVIRONMENT_CONNECTIVITY_STATES.unknown,
+  lastConnectivityCheckedAt: null,
+  lastConnectivityErrorMessage: null,
   lastNotifiedState: null,
   lastNotifiedAt: null,
 });
@@ -631,6 +640,10 @@ async function getEnvironmentStatusConfig(pool) {
         last_checked_at,
         last_http_status,
         last_error_message,
+        consecutive_failure_count,
+        last_connectivity_state,
+        last_connectivity_checked_at,
+        last_connectivity_error_message,
         last_notified_state,
         last_notified_at
       FROM environment_status_config
@@ -844,6 +857,17 @@ async function setEnvironmentStatusEnabled(pool, enabled, updatedBy) {
   return upsertEnvironmentStatusConfig(pool, {
     enabled: normalizedEnabled,
     updatedBy: normalizedUserId,
+    lastObservedState: ENVIRONMENT_STATUS_STATES.unknown,
+    consecutiveFailureCount: 0,
+    lastConnectivityState: ENVIRONMENT_CONNECTIVITY_STATES.unknown,
+    clearLastStateChangedAt: true,
+    clearLastCheckedAt: true,
+    clearLastHttpStatus: true,
+    clearLastErrorMessage: true,
+    clearLastConnectivityCheckedAt: true,
+    clearLastConnectivityErrorMessage: true,
+    clearLastNotifiedState: true,
+    clearLastNotifiedAt: true,
   });
 }
 
@@ -860,6 +884,17 @@ async function setEnvironmentStatusUrl(pool, targetUrl, updatedBy) {
   return upsertEnvironmentStatusConfig(pool, {
     targetUrl: normalizedTargetUrl,
     updatedBy: normalizedUserId,
+    lastObservedState: ENVIRONMENT_STATUS_STATES.unknown,
+    consecutiveFailureCount: 0,
+    lastConnectivityState: ENVIRONMENT_CONNECTIVITY_STATES.unknown,
+    clearLastStateChangedAt: true,
+    clearLastCheckedAt: true,
+    clearLastHttpStatus: true,
+    clearLastErrorMessage: true,
+    clearLastConnectivityCheckedAt: true,
+    clearLastConnectivityErrorMessage: true,
+    clearLastNotifiedState: true,
+    clearLastNotifiedAt: true,
   });
 }
 
@@ -887,13 +922,24 @@ async function recordEnvironmentStatusObservation(
     lastCheckedAt,
     lastHttpStatus,
     lastErrorMessage,
+    consecutiveFailureCount,
   },
 ) {
   const normalizedObservedState = normalizeEnvironmentStatusState(lastObservedState);
   const normalizedHttpStatus = normalizeNullableInteger(lastHttpStatus);
   const normalizedErrorMessage = normalizeOptionalText(lastErrorMessage);
+  const normalizedFailureCount = normalizeNonNegativeInteger(consecutiveFailureCount);
   if (!normalizedObservedState) {
     throw new Error(`Unsupported environment status state: ${lastObservedState}`);
+  }
+  if (
+    consecutiveFailureCount !== undefined &&
+    consecutiveFailureCount !== null &&
+    normalizedFailureCount === null
+  ) {
+    throw new Error(
+      `Unsupported environment consecutive failure count: ${consecutiveFailureCount}`,
+    );
   }
 
   const result = await pool.query(
@@ -904,6 +950,7 @@ async function recordEnvironmentStatusObservation(
           last_checked_at = COALESCE($3::timestamptz, NOW()),
           last_http_status = $4,
           last_error_message = $5,
+          consecutive_failure_count = COALESCE($6, environment_status_config.consecutive_failure_count),
           updated_at = NOW()
       WHERE id = 1
       RETURNING
@@ -915,6 +962,10 @@ async function recordEnvironmentStatusObservation(
         last_checked_at,
         last_http_status,
         last_error_message,
+        consecutive_failure_count,
+        last_connectivity_state,
+        last_connectivity_checked_at,
+        last_connectivity_error_message,
         last_notified_state,
         last_notified_at
     `,
@@ -924,10 +975,15 @@ async function recordEnvironmentStatusObservation(
       lastCheckedAt || null,
       normalizedHttpStatus,
       normalizedErrorMessage,
+      normalizedFailureCount,
     ],
   );
 
   return mapEnvironmentStatusConfigRow(result.rows[0]);
+}
+
+async function updateEnvironmentStatusRuntimeState(pool, updates = {}) {
+  return upsertEnvironmentStatusConfig(pool, updates);
 }
 
 async function markEnvironmentStatusNotificationSent(pool, state, notifiedAt) {
@@ -952,6 +1008,10 @@ async function markEnvironmentStatusNotificationSent(pool, state, notifiedAt) {
         last_checked_at,
         last_http_status,
         last_error_message,
+        consecutive_failure_count,
+        last_connectivity_state,
+        last_connectivity_checked_at,
+        last_connectivity_error_message,
         last_notified_state,
         last_notified_at
     `,
@@ -1923,6 +1983,48 @@ async function upsertReviewRecapConfig(pool, updates) {
 }
 
 async function upsertEnvironmentStatusConfig(pool, updates) {
+  const normalizedObservedState =
+    updates.lastObservedState === undefined || updates.lastObservedState === null
+      ? null
+      : normalizeEnvironmentStatusState(updates.lastObservedState);
+  const normalizedNotifiedState =
+    updates.lastNotifiedState === undefined || updates.lastNotifiedState === null
+      ? null
+      : normalizeEnvironmentNotifiedState(updates.lastNotifiedState);
+  const normalizedConnectivityState =
+    updates.lastConnectivityState === undefined || updates.lastConnectivityState === null
+      ? null
+      : normalizeEnvironmentConnectivityState(updates.lastConnectivityState);
+  const normalizedHttpStatus = normalizeNullableInteger(updates.lastHttpStatus);
+  const normalizedFailureCount =
+    updates.consecutiveFailureCount === undefined || updates.consecutiveFailureCount === null
+      ? null
+      : normalizeNonNegativeInteger(updates.consecutiveFailureCount);
+  if (updates.lastObservedState !== undefined && updates.lastObservedState !== null && !normalizedObservedState) {
+    throw new Error(`Unsupported environment status state: ${updates.lastObservedState}`);
+  }
+  if (updates.lastNotifiedState !== undefined && updates.lastNotifiedState !== null && !normalizedNotifiedState) {
+    throw new Error(`Unsupported environment status notified state: ${updates.lastNotifiedState}`);
+  }
+  if (
+    updates.lastConnectivityState !== undefined &&
+    updates.lastConnectivityState !== null &&
+    !normalizedConnectivityState
+  ) {
+    throw new Error(
+      `Unsupported environment connectivity state: ${updates.lastConnectivityState}`,
+    );
+  }
+  if (
+    updates.consecutiveFailureCount !== undefined &&
+    updates.consecutiveFailureCount !== null &&
+    normalizedFailureCount === null
+  ) {
+    throw new Error(
+      `Unsupported environment consecutive failure count: ${updates.consecutiveFailureCount}`,
+    );
+  }
+
   const result = await pool.query(
     `
       INSERT INTO environment_status_config (
@@ -1935,6 +2037,10 @@ async function upsertEnvironmentStatusConfig(pool, updates) {
         last_checked_at,
         last_http_status,
         last_error_message,
+        consecutive_failure_count,
+        last_connectivity_state,
+        last_connectivity_checked_at,
+        last_connectivity_error_message,
         last_notified_state,
         last_notified_at,
         updated_by,
@@ -1950,9 +2056,13 @@ async function upsertEnvironmentStatusConfig(pool, updates) {
         $6::timestamptz,
         $7,
         $8,
-        $9,
-        $10::timestamptz,
-        $11,
+        COALESCE($9, ${ENVIRONMENT_STATUS_DEFAULTS.consecutiveFailureCount}),
+        COALESCE($10, '${ENVIRONMENT_STATUS_DEFAULTS.lastConnectivityState}'),
+        $11::timestamptz,
+        $12,
+        $13,
+        $14::timestamptz,
+        $15,
         NOW()
       )
       ON CONFLICT (id)
@@ -1961,12 +2071,40 @@ async function upsertEnvironmentStatusConfig(pool, updates) {
         target_url = COALESCE($2, environment_status_config.target_url),
         target_channel_id = COALESCE($3, environment_status_config.target_channel_id),
         last_observed_state = COALESCE($4, environment_status_config.last_observed_state),
-        last_state_changed_at = COALESCE($5::timestamptz, environment_status_config.last_state_changed_at),
-        last_checked_at = COALESCE($6::timestamptz, environment_status_config.last_checked_at),
-        last_http_status = COALESCE($7, environment_status_config.last_http_status),
-        last_error_message = COALESCE($8, environment_status_config.last_error_message),
-        last_notified_state = COALESCE($9, environment_status_config.last_notified_state),
-        last_notified_at = COALESCE($10::timestamptz, environment_status_config.last_notified_at),
+        last_state_changed_at = CASE
+          WHEN $16 THEN NULL
+          ELSE COALESCE($5::timestamptz, environment_status_config.last_state_changed_at)
+        END,
+        last_checked_at = CASE
+          WHEN $17 THEN NULL
+          ELSE COALESCE($6::timestamptz, environment_status_config.last_checked_at)
+        END,
+        last_http_status = CASE
+          WHEN $18 THEN NULL
+          ELSE COALESCE($7, environment_status_config.last_http_status)
+        END,
+        last_error_message = CASE
+          WHEN $19 THEN NULL
+          ELSE COALESCE($8, environment_status_config.last_error_message)
+        END,
+        consecutive_failure_count = COALESCE($9, environment_status_config.consecutive_failure_count),
+        last_connectivity_state = COALESCE($10, environment_status_config.last_connectivity_state),
+        last_connectivity_checked_at = CASE
+          WHEN $20 THEN NULL
+          ELSE COALESCE($11::timestamptz, environment_status_config.last_connectivity_checked_at)
+        END,
+        last_connectivity_error_message = CASE
+          WHEN $21 THEN NULL
+          ELSE COALESCE($12, environment_status_config.last_connectivity_error_message)
+        END,
+        last_notified_state = CASE
+          WHEN $22 THEN NULL
+          ELSE COALESCE($13, environment_status_config.last_notified_state)
+        END,
+        last_notified_at = CASE
+          WHEN $23 THEN NULL
+          ELSE COALESCE($14::timestamptz, environment_status_config.last_notified_at)
+        END,
         updated_by = COALESCE(EXCLUDED.updated_by, environment_status_config.updated_by),
         updated_at = NOW()
       RETURNING
@@ -1978,6 +2116,10 @@ async function upsertEnvironmentStatusConfig(pool, updates) {
         last_checked_at,
         last_http_status,
         last_error_message,
+        consecutive_failure_count,
+        last_connectivity_state,
+        last_connectivity_checked_at,
+        last_connectivity_error_message,
         last_notified_state,
         last_notified_at
     `,
@@ -1985,14 +2127,26 @@ async function upsertEnvironmentStatusConfig(pool, updates) {
       updates.enabled ?? null,
       updates.targetUrl ?? null,
       updates.targetChannelId ?? null,
-      updates.lastObservedState ?? null,
+      normalizedObservedState,
       updates.lastStateChangedAt ?? null,
       updates.lastCheckedAt ?? null,
-      normalizeNullableInteger(updates.lastHttpStatus),
+      normalizedHttpStatus,
       updates.lastErrorMessage ?? null,
-      updates.lastNotifiedState ?? null,
+      normalizedFailureCount,
+      normalizedConnectivityState,
+      updates.lastConnectivityCheckedAt ?? null,
+      updates.lastConnectivityErrorMessage ?? null,
+      normalizedNotifiedState,
       updates.lastNotifiedAt ?? null,
       updates.updatedBy ?? null,
+      Boolean(updates.clearLastStateChangedAt),
+      Boolean(updates.clearLastCheckedAt),
+      Boolean(updates.clearLastHttpStatus),
+      Boolean(updates.clearLastErrorMessage),
+      Boolean(updates.clearLastConnectivityCheckedAt),
+      Boolean(updates.clearLastConnectivityErrorMessage),
+      Boolean(updates.clearLastNotifiedState),
+      Boolean(updates.clearLastNotifiedAt),
     ],
   );
 
@@ -2476,6 +2630,11 @@ function normalizeNullableInteger(value) {
   return normalizeInteger(value);
 }
 
+function normalizeNonNegativeInteger(value) {
+  const parsedValue = normalizeInteger(value);
+  return parsedValue !== null && parsedValue >= 0 ? parsedValue : null;
+}
+
 function normalizeHistoryId(value) {
   const normalizedValue = String(value || "").trim();
   return /^\d+$/.test(normalizedValue) ? normalizedValue : null;
@@ -2492,6 +2651,13 @@ function normalizeEnvironmentNotifiedState(value) {
   const normalizedValue = String(value || "").toLowerCase().trim();
   return normalizedValue === ENVIRONMENT_STATUS_STATES.healthy ||
     normalizedValue === ENVIRONMENT_STATUS_STATES.unhealthy
+    ? normalizedValue
+    : null;
+}
+
+function normalizeEnvironmentConnectivityState(value) {
+  const normalizedValue = String(value || "").toLowerCase().trim();
+  return Object.values(ENVIRONMENT_CONNECTIVITY_STATES).includes(normalizedValue)
     ? normalizedValue
     : null;
 }
@@ -2696,6 +2862,14 @@ function mapEnvironmentStatusConfigRow(row) {
     lastCheckedAt: row.last_checked_at || null,
     lastHttpStatus: normalizeInteger(row.last_http_status),
     lastErrorMessage: normalizeOptionalText(row.last_error_message),
+    consecutiveFailureCount:
+      normalizeNonNegativeInteger(row.consecutive_failure_count) ??
+      ENVIRONMENT_STATUS_DEFAULTS.consecutiveFailureCount,
+    lastConnectivityState:
+      normalizeEnvironmentConnectivityState(row.last_connectivity_state) ||
+      ENVIRONMENT_STATUS_DEFAULTS.lastConnectivityState,
+    lastConnectivityCheckedAt: row.last_connectivity_checked_at || null,
+    lastConnectivityErrorMessage: normalizeOptionalText(row.last_connectivity_error_message),
     lastNotifiedState: normalizeEnvironmentNotifiedState(row.last_notified_state),
     lastNotifiedAt: row.last_notified_at || null,
   };
@@ -2805,6 +2979,7 @@ module.exports = {
   DEFAULT_TIME_ZONE,
   ERROR_TRACKING_DEFAULTS,
   ERROR_TRACKING_ISSUE_STATUSES,
+  ENVIRONMENT_CONNECTIVITY_STATES,
   ENVIRONMENT_STATUS_DEFAULTS,
   ENVIRONMENT_STATUS_STATES,
   RUNTIME_PROVIDER_DEFAULTS,
@@ -2845,6 +3020,7 @@ module.exports = {
   recordEnvironmentStatusObservation,
   updatePullRequestCodexApproval,
   updateErrorTrackingRuntimeState,
+  updateEnvironmentStatusRuntimeState,
   updateSupportEmailRuntimeState,
   markPullRequestTested,
   upsertPendingSupportEmailHistoryId,

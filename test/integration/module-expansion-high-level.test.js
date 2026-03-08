@@ -247,11 +247,15 @@ test("high-level support email flow: enable -> webhook -> notify -> list -> resp
   assert.equal(state.supportEmailThreads[0].status, "responded");
 });
 
-test("high-level environment status flow: enable -> alert once -> recover once", async () => {
+test("high-level environment status flow: transient failure -> confirmed outage -> recovery", async () => {
   const state = {
     environmentStatusConfig: {
+      consecutiveFailureCount: 0,
       enabled: false,
       lastCheckedAt: null,
+      lastConnectivityCheckedAt: null,
+      lastConnectivityErrorMessage: null,
+      lastConnectivityState: "unknown",
       lastErrorMessage: null,
       lastHttpStatus: null,
       lastNotifiedAt: null,
@@ -293,14 +297,23 @@ test("high-level environment status flow: enable -> alert once -> recover once",
   await runSlashCommand(commandHandler, "config environment-status-url:https://example.com/healthz");
   await runSlashCommand(commandHandler, "config environment-status-channel:<#COPS|ops>");
 
-  const runTick = async (statusCode) =>
-    runEnvironmentStatusSchedulerTick({
+  const runTick = async ({ targetStatuses }) => {
+    const pendingTargetStatuses = [...targetStatuses];
+    return runEnvironmentStatusSchedulerTick({
       communicationClient: {
         async postChannelMessage(message) {
           postedMessages.push(message);
         },
       },
-      fetchFn: async () => ({ status: statusCode }),
+      connectivityProbeUrl: "https://probe.example.com/healthz",
+      dnsLookupFn: async () => ({ address: "203.0.113.10", family: 4 }),
+      fetchFn: async (requestUrl) => {
+        if (requestUrl === "https://probe.example.com/healthz") {
+          return { status: 204 };
+        }
+
+        return { status: pendingTargetStatuses.shift() ?? 200 };
+      },
       getEnvironmentStatusConfigFn: async () => state.environmentStatusConfig,
       logger: silentLogger(),
       markEnvironmentStatusNotificationSentFn: async (_pool, stateName, notifiedAt) => {
@@ -310,22 +323,26 @@ test("high-level environment status flow: enable -> alert once -> recover once",
       nowFn: () => new Date("2026-03-06T12:00:00.000Z"),
       pool: {},
       recordEnvironmentStatusObservationFn: async (_pool, observation) => {
-        state.environmentStatusConfig.lastObservedState = observation.lastObservedState;
-        if (observation.lastHttpStatus !== undefined) {
-          state.environmentStatusConfig.lastHttpStatus = observation.lastHttpStatus;
-        }
-        state.environmentStatusConfig.lastErrorMessage = observation.lastErrorMessage;
+        applyEnvironmentStatusConfigUpdates(state.environmentStatusConfig, observation);
       },
       schedulerState: { lastSkipLogMinuteKeyByReason: new Map() },
+      sleepFn: async () => {},
+      updateEnvironmentStatusRuntimeStateFn: async (_pool, updates) => {
+        applyEnvironmentStatusConfigUpdates(state.environmentStatusConfig, updates);
+        return { ...state.environmentStatusConfig };
+      },
     });
+  };
 
-  await runTick(503);
-  await runTick(503);
-  await runTick(200);
+  await runTick({ targetStatuses: [503, 200] });
+  await runTick({ targetStatuses: [503, 503, 503] });
+  await runTick({ targetStatuses: [200] });
 
   assert.equal(postedMessages.length, 2);
-  assert.match(postedMessages[0].text, /Environment alert: https:\/\/example.com\/healthz is down/);
+  assert.match(postedMessages[0].text, /Environment alert: https:\/\/example.com\/healthz is down after 3 consecutive failed checks/);
   assert.match(postedMessages[1].text, /Environment recovery: https:\/\/example.com\/healthz returned HTTP 200 again/);
+  assert.equal(state.environmentStatusConfig.lastConnectivityState, "reachable");
+  assert.equal(state.environmentStatusConfig.consecutiveFailureCount, 0);
 });
 
 async function runSlashCommand(commandHandler, text) {
@@ -358,6 +375,39 @@ function applySupportEmailConfigUpdates(config, updates) {
   }
   if (updates.clearBackfillCompletedAt) {
     config.backfillCompletedAt = null;
+  }
+}
+
+function applyEnvironmentStatusConfigUpdates(config, updates) {
+  if (updates.lastObservedState !== undefined) {
+    config.lastObservedState = updates.lastObservedState;
+  }
+  if (updates.lastStateChangedAt !== undefined && updates.lastStateChangedAt !== null) {
+    config.lastStateChangedAt = updates.lastStateChangedAt;
+  }
+  if (updates.lastCheckedAt !== undefined) {
+    config.lastCheckedAt = updates.lastCheckedAt;
+  }
+  if (updates.lastHttpStatus !== undefined) {
+    config.lastHttpStatus = updates.lastHttpStatus;
+  }
+  if (updates.lastErrorMessage !== undefined) {
+    config.lastErrorMessage = updates.lastErrorMessage;
+  }
+  if (updates.consecutiveFailureCount !== undefined) {
+    config.consecutiveFailureCount = updates.consecutiveFailureCount;
+  }
+  if (updates.lastConnectivityState !== undefined) {
+    config.lastConnectivityState = updates.lastConnectivityState;
+  }
+  if (updates.lastConnectivityCheckedAt !== undefined) {
+    config.lastConnectivityCheckedAt = updates.lastConnectivityCheckedAt;
+  }
+  if (updates.lastConnectivityErrorMessage !== undefined) {
+    config.lastConnectivityErrorMessage = updates.lastConnectivityErrorMessage;
+  }
+  if (updates.clearLastConnectivityErrorMessage) {
+    config.lastConnectivityErrorMessage = null;
   }
 }
 

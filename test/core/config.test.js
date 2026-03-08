@@ -132,7 +132,12 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.deploySecretAccessKey, "secret-123");
       assert.equal(config.deploySessionToken, "session-123");
       assert.equal(config.environmentStatusPollIntervalSeconds, 60);
-      assert.equal(config.environmentStatusTimeoutSeconds, 10);
+      assert.equal(config.environmentStatusTimeoutSeconds, 60);
+      assert.equal(config.environmentStatusFailureThreshold, 3);
+      assert.equal(config.environmentStatusRetryInitialDelaySeconds, 5);
+      assert.equal(config.environmentStatusRetryBackoffMultiplier, 3);
+      assert.equal(config.environmentStatusRetryMaxDelaySeconds, 45);
+      assert.equal(config.environmentStatusConnectivityProbeUrl, "");
       assert.equal(config.errorTrackingPollIntervalSeconds, 300);
       assert.equal(config.errorTrackingTimeoutSeconds, 15);
       assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.io");
@@ -335,7 +340,12 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.deploySecretAccessKey, "");
       assert.equal(config.deploySessionToken, "");
       assert.equal(config.environmentStatusPollIntervalSeconds, 60);
-      assert.equal(config.environmentStatusTimeoutSeconds, 10);
+      assert.equal(config.environmentStatusTimeoutSeconds, 60);
+      assert.equal(config.environmentStatusFailureThreshold, 3);
+      assert.equal(config.environmentStatusRetryInitialDelaySeconds, 5);
+      assert.equal(config.environmentStatusRetryBackoffMultiplier, 3);
+      assert.equal(config.environmentStatusRetryMaxDelaySeconds, 45);
+      assert.equal(config.environmentStatusConnectivityProbeUrl, "");
       assert.equal(config.errorTrackingPollIntervalSeconds, 300);
       assert.equal(config.errorTrackingTimeoutSeconds, 15);
       assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.io");
@@ -482,6 +492,11 @@ test("loadConfig reads optional environment status and email polling values", { 
       ...REQUIRED_ENV,
       ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS: "30",
       ENVIRONMENT_STATUS_TIMEOUT_SECONDS: "8",
+      ENVIRONMENT_STATUS_FAILURE_THRESHOLD: "4",
+      ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS: "6",
+      ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER: "4",
+      ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS: "40",
+      ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL: " https://status-probe.example.com/ok ",
       ERROR_TRACKING_POLL_INTERVAL_SECONDS: "120",
       ERROR_TRACKING_TIMEOUT_SECONDS: "11",
       ERROR_TRACKING_SENTRY_BASE_URL: " https://sentry.example.com ",
@@ -506,6 +521,14 @@ test("loadConfig reads optional environment status and email polling values", { 
       const config = loadConfig();
       assert.equal(config.environmentStatusPollIntervalSeconds, 30);
       assert.equal(config.environmentStatusTimeoutSeconds, 8);
+      assert.equal(config.environmentStatusFailureThreshold, 4);
+      assert.equal(config.environmentStatusRetryInitialDelaySeconds, 6);
+      assert.equal(config.environmentStatusRetryBackoffMultiplier, 4);
+      assert.equal(config.environmentStatusRetryMaxDelaySeconds, 40);
+      assert.equal(
+        config.environmentStatusConnectivityProbeUrl,
+        "https://status-probe.example.com/ok",
+      );
       assert.equal(config.errorTrackingPollIntervalSeconds, 120);
       assert.equal(config.errorTrackingTimeoutSeconds, 11);
       assert.equal(config.errorTrackingSentryBaseUrl, "https://sentry.example.com");
@@ -567,6 +590,21 @@ test("loadConfig reads optional outlook and rollbar values", { concurrency: fals
   );
 });
 
+test("loadConfig rejects invalid environment status connectivity probe url", { concurrency: false }, () => {
+  withEnvironment(
+    {
+      ...REQUIRED_ENV,
+      ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL: "http://status-probe.example.com",
+    },
+    () => {
+      assert.throws(
+        () => loadConfig(),
+        /ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL must be a valid HTTPS URL/,
+      );
+    },
+  );
+});
+
 function withEnvironment(overrides, fn) {
   const originalEnvironment = process.env;
   process.env = { ...originalEnvironment };
@@ -607,6 +645,11 @@ function withEnvironment(overrides, fn) {
     "ERROR_TRACKING_ROLLBAR_ACCESS_TOKEN",
     "ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS",
     "ENVIRONMENT_STATUS_TIMEOUT_SECONDS",
+    "ENVIRONMENT_STATUS_FAILURE_THRESHOLD",
+    "ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS",
+    "ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER",
+    "ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS",
+    "ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL",
     "EMAIL_GMAIL_ADDRESS",
     "EMAIL_GMAIL_CLIENT_ID",
     "EMAIL_GMAIL_CLIENT_SECRET",

@@ -17,6 +17,7 @@ const {
   setSupportEmailChannel,
   setSupportEmailMonitorEnabled,
   setSupportEmailOnCall,
+  updateEnvironmentStatusRuntimeState,
   updateSupportEmailRuntimeState,
   upsertPendingSupportEmailHistoryId,
 } = require("../../src/db");
@@ -33,15 +34,28 @@ test("getEnvironmentStatusConfig returns defaults when singleton row is missing"
   assert.equal(config.enabled, false);
   assert.equal(config.targetUrl, null);
   assert.equal(config.lastObservedState, "unknown");
+  assert.equal(config.consecutiveFailureCount, 0);
+  assert.equal(config.lastConnectivityState, "unknown");
+  assert.equal(config.lastConnectivityCheckedAt, null);
+  assert.equal(config.lastConnectivityErrorMessage, null);
 });
 
-test("setEnvironmentStatusEnabled upserts enabled flag", async () => {
+test("setEnvironmentStatusEnabled upserts enabled flag and resets monitor runtime state", async () => {
   const captured = {};
   const pool = {
     async query(sql, params) {
       captured.sql = sql;
       captured.params = params;
-      return { rows: [{ enabled: true, last_observed_state: "unknown" }] };
+      return {
+        rows: [
+          {
+            enabled: true,
+            last_observed_state: "unknown",
+            consecutive_failure_count: 0,
+            last_connectivity_state: "unknown",
+          },
+        ],
+      };
     },
   };
 
@@ -49,7 +63,12 @@ test("setEnvironmentStatusEnabled upserts enabled flag", async () => {
 
   assert.match(captured.sql, /INSERT INTO environment_status_config/);
   assert.equal(captured.params[0], true);
-  assert.equal(captured.params[10], "UADMIN");
+  assert.equal(captured.params[3], "unknown");
+  assert.equal(captured.params[8], 0);
+  assert.equal(captured.params[9], "unknown");
+  assert.equal(captured.params[14], "UADMIN");
+  assert.equal(captured.params[21], true);
+  assert.equal(captured.params[22], true);
 });
 
 test("setEnvironmentStatusUrl rejects invalid urls", async () => {
@@ -76,13 +95,51 @@ test("setEnvironmentStatusChannel requires a user id", async () => {
   }, /user id is required/);
 });
 
-test("recordEnvironmentStatusObservation updates observed state", async () => {
+test("setEnvironmentStatusUrl resets observed environment monitor state", async () => {
   const captured = {};
   const pool = {
     async query(sql, params) {
       captured.sql = sql;
       captured.params = params;
-      return { rows: [{ last_observed_state: "unhealthy" }] };
+      return {
+        rows: [
+          {
+            target_url: "https://example.com/healthz",
+            last_observed_state: "unknown",
+            consecutive_failure_count: 0,
+            last_connectivity_state: "unknown",
+          },
+        ],
+      };
+    },
+  };
+
+  await setEnvironmentStatusUrl(pool, "https://example.com/healthz", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO environment_status_config/);
+  assert.equal(captured.params[1], "https://example.com/healthz");
+  assert.equal(captured.params[3], "unknown");
+  assert.equal(captured.params[8], 0);
+  assert.equal(captured.params[9], "unknown");
+  assert.equal(captured.params[18], true);
+  assert.equal(captured.params[20], true);
+});
+
+test("recordEnvironmentStatusObservation updates observed state and failure count", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [
+          {
+            last_observed_state: "unhealthy",
+            consecutive_failure_count: 3,
+            last_connectivity_state: "reachable",
+          },
+        ],
+      };
     },
   };
 
@@ -90,11 +147,44 @@ test("recordEnvironmentStatusObservation updates observed state", async () => {
     lastObservedState: "unhealthy",
     lastCheckedAt: "2026-03-06T12:00:00.000Z",
     lastErrorMessage: "timeout",
+    consecutiveFailureCount: 3,
   });
 
   assert.match(captured.sql, /UPDATE environment_status_config/);
   assert.equal(captured.params[0], "unhealthy");
   assert.equal(captured.params[4], "timeout");
+  assert.equal(captured.params[5], 3);
+});
+
+test("updateEnvironmentStatusRuntimeState updates connectivity fields without clearing app state", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [
+          {
+            last_observed_state: "healthy",
+            last_connectivity_state: "reachable",
+            last_connectivity_checked_at: "2026-03-06T12:00:00.000Z",
+          },
+        ],
+      };
+    },
+  };
+
+  await updateEnvironmentStatusRuntimeState(pool, {
+    lastConnectivityState: "reachable",
+    lastConnectivityCheckedAt: "2026-03-06T12:00:00.000Z",
+    clearLastConnectivityErrorMessage: true,
+  });
+
+  assert.match(captured.sql, /INSERT INTO environment_status_config/);
+  assert.equal(captured.params[3], null);
+  assert.equal(captured.params[9], "reachable");
+  assert.equal(captured.params[10], "2026-03-06T12:00:00.000Z");
+  assert.equal(captured.params[20], true);
 });
 
 test("markEnvironmentStatusNotificationSent rejects unsupported state", async () => {

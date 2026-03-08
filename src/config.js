@@ -45,7 +45,11 @@ const DEFAULT_CODE_HOST_CODEX_USER_LOGINS = Object.freeze(["codex", "codex[bot]"
 const DEFAULT_DEPLOY_REGION = "us-east-1";
 const DEFAULT_CODEX_APPROVAL_POLL_INTERVAL_MINUTES = 5;
 const DEFAULT_ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS = 60;
-const DEFAULT_ENVIRONMENT_STATUS_TIMEOUT_SECONDS = 10;
+const DEFAULT_ENVIRONMENT_STATUS_TIMEOUT_SECONDS = 60;
+const DEFAULT_ENVIRONMENT_STATUS_FAILURE_THRESHOLD = 3;
+const DEFAULT_ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS = 5;
+const DEFAULT_ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER = 3;
+const DEFAULT_ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS = 45;
 const DEFAULT_EMAIL_WATCH_RENEW_INTERVAL_HOURS = 24;
 const DEFAULT_EMAIL_SYNC_FALLBACK_INTERVAL_MINUTES = 5;
 const DEFAULT_AI_TIMEOUT_SECONDS = 30;
@@ -154,6 +158,25 @@ function loadConfig() {
     "ENVIRONMENT_STATUS_TIMEOUT_SECONDS",
     DEFAULT_ENVIRONMENT_STATUS_TIMEOUT_SECONDS,
   );
+  const environmentStatusFailureThreshold = readPositiveInteger(
+    "ENVIRONMENT_STATUS_FAILURE_THRESHOLD",
+    DEFAULT_ENVIRONMENT_STATUS_FAILURE_THRESHOLD,
+  );
+  const environmentStatusRetryInitialDelaySeconds = readPositiveInteger(
+    "ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS",
+    DEFAULT_ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS,
+  );
+  const environmentStatusRetryBackoffMultiplier = readPositiveInteger(
+    "ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER",
+    DEFAULT_ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER,
+  );
+  const environmentStatusRetryMaxDelaySeconds = readPositiveInteger(
+    "ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS",
+    DEFAULT_ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS,
+  );
+  const environmentStatusConnectivityProbeUrl = readOptionalHttpsUrl(
+    "ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL",
+  );
   const emailGmailAddress = readOptionalEnvironmentValue("EMAIL_GMAIL_ADDRESS");
   const emailGmailClientId = readOptionalEnvironmentValue("EMAIL_GMAIL_CLIENT_ID");
   const emailGmailClientSecret = readOptionalEnvironmentValue("EMAIL_GMAIL_CLIENT_SECRET");
@@ -227,6 +250,11 @@ function loadConfig() {
     deploySessionToken,
     environmentStatusPollIntervalSeconds,
     environmentStatusTimeoutSeconds,
+    environmentStatusFailureThreshold,
+    environmentStatusRetryInitialDelaySeconds,
+    environmentStatusRetryBackoffMultiplier,
+    environmentStatusRetryMaxDelaySeconds,
+    environmentStatusConnectivityProbeUrl,
     codeHostOpenPrSyncIntervalHours,
     codexApprovalPollIntervalMinutes,
     codeHostApiBaseUrl: resolveCodeHostApiBaseUrl(codeHostProvider),
@@ -385,6 +413,26 @@ function readPositiveInteger(name, fallbackValue) {
   return parsed;
 }
 
+function readOptionalHttpsUrl(name) {
+  const value = readOptionalEnvironmentValue(name);
+  if (value === "") {
+    return "";
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(value);
+  } catch (_error) {
+    throw new Error(`${name} must be a valid HTTPS URL`);
+  }
+
+  if (parsedUrl.protocol !== "https:") {
+    throw new Error(`${name} must be a valid HTTPS URL`);
+  }
+
+  return parsedUrl.toString();
+}
+
 function readCommaSeparatedValues(name) {
   const value = readOptionalEnvironmentValue(name);
   if (value === "") {
@@ -427,10 +475,14 @@ module.exports = {
   DEFAULT_CODE_HOST_CODEX_USER_LOGINS,
   DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS,
   DEFAULT_CODEX_APPROVAL_POLL_INTERVAL_MINUTES,
+  DEFAULT_ENVIRONMENT_STATUS_FAILURE_THRESHOLD,
   DEFAULT_ANTHROPIC_BASE_URL,
   DEFAULT_AI_TIMEOUT_SECONDS,
   DEFAULT_COMMUNICATION_COMMAND_PATH,
   DEFAULT_BOT_NAME,
+  DEFAULT_ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER,
+  DEFAULT_ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS,
+  DEFAULT_ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS,
   DEFAULT_ERROR_TRACKING_POLL_INTERVAL_SECONDS,
   DEFAULT_ERROR_TRACKING_TIMEOUT_SECONDS,
   DEFAULT_ROLLBAR_BASE_URL,

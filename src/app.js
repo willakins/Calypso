@@ -204,6 +204,14 @@ function startBackgroundSchedulers(runtime) {
 
   runtime.environmentStatusScheduler = startEnvironmentStatusScheduler({
     communicationClient: runtime.communicationPlatform,
+    connectivityProbeUrl: runtime.config.environmentStatusConnectivityProbeUrl,
+    environmentStatusFailureThreshold: runtime.config.environmentStatusFailureThreshold,
+    environmentStatusRetryBackoffMultiplier:
+      runtime.config.environmentStatusRetryBackoffMultiplier,
+    environmentStatusRetryInitialDelayMs:
+      runtime.config.environmentStatusRetryInitialDelaySeconds * 1000,
+    environmentStatusRetryMaxDelayMs:
+      runtime.config.environmentStatusRetryMaxDelaySeconds * 1000,
     environmentStatusTimeoutMs: runtime.config.environmentStatusTimeoutSeconds * 1000,
     pool: runtime.pool,
     tickIntervalMs: runtime.config.environmentStatusPollIntervalSeconds * 1000,

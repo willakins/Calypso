@@ -1,16 +1,27 @@
 const {
+  ENVIRONMENT_CONNECTIVITY_STATES,
   ENVIRONMENT_STATUS_STATES,
   getEnvironmentStatusConfig,
   markEnvironmentStatusNotificationSent,
   recordEnvironmentStatusObservation,
+  updateEnvironmentStatusRuntimeState,
 } = require("../db");
+const {
+  runEnvironmentStatusCheckCycle,
+} = require("./tasks/environment_status_check");
 
 const DEFAULT_TICK_INTERVAL_MS = 60_000;
 
 function startEnvironmentStatusScheduler(options = {}) {
   const {
     communicationClient,
-    environmentStatusTimeoutMs = 10_000,
+    connectivityProbeUrl = "",
+    dnsLookupFn,
+    environmentStatusFailureThreshold = 3,
+    environmentStatusRetryBackoffMultiplier = 3,
+    environmentStatusRetryInitialDelayMs = 5_000,
+    environmentStatusRetryMaxDelayMs = 45_000,
+    environmentStatusTimeoutMs = 60_000,
     fetchFn = fetch,
     getEnvironmentStatusConfigFn = getEnvironmentStatusConfig,
     logger = console,
@@ -18,7 +29,11 @@ function startEnvironmentStatusScheduler(options = {}) {
     nowFn = () => new Date(),
     pool,
     recordEnvironmentStatusObservationFn = recordEnvironmentStatusObservation,
+    runEnvironmentStatusCheckCycleFn = runEnvironmentStatusCheckCycle,
+    schedulerState = null,
+    sleepFn,
     tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
+    updateEnvironmentStatusRuntimeStateFn = updateEnvironmentStatusRuntimeState,
   } = options;
 
   if (!pool || !communicationClient || typeof communicationClient.postChannelMessage !== "function") {
@@ -28,23 +43,42 @@ function startEnvironmentStatusScheduler(options = {}) {
     };
   }
 
-  const schedulerState = {
+  const resolvedSchedulerState = schedulerState || {
+    inFlight: false,
     lastSkipLogMinuteKeyByReason: new Map(),
   };
 
   async function tick() {
-    await runEnvironmentStatusSchedulerTick({
-      communicationClient,
-      environmentStatusTimeoutMs,
-      fetchFn,
-      getEnvironmentStatusConfigFn,
-      logger,
-      markEnvironmentStatusNotificationSentFn,
-      nowFn,
-      pool,
-      recordEnvironmentStatusObservationFn,
-      schedulerState,
-    });
+    if (resolvedSchedulerState.inFlight) {
+      return;
+    }
+
+    resolvedSchedulerState.inFlight = true;
+    try {
+      await runEnvironmentStatusSchedulerTick({
+        communicationClient,
+        connectivityProbeUrl,
+        dnsLookupFn,
+        environmentStatusFailureThreshold,
+        environmentStatusRetryBackoffMultiplier,
+        environmentStatusRetryInitialDelayMs,
+        environmentStatusRetryMaxDelayMs,
+        environmentStatusTimeoutMs,
+        fetchFn,
+        getEnvironmentStatusConfigFn,
+        logger,
+        markEnvironmentStatusNotificationSentFn,
+        nowFn,
+        pool,
+        recordEnvironmentStatusObservationFn,
+        runEnvironmentStatusCheckCycleFn,
+        schedulerState: resolvedSchedulerState,
+        sleepFn,
+        updateEnvironmentStatusRuntimeStateFn,
+      });
+    } finally {
+      resolvedSchedulerState.inFlight = false;
+    }
   }
 
   void tick();
@@ -61,6 +95,12 @@ function startEnvironmentStatusScheduler(options = {}) {
 
 async function runEnvironmentStatusSchedulerTick({
   communicationClient,
+  connectivityProbeUrl,
+  dnsLookupFn,
+  environmentStatusFailureThreshold,
+  environmentStatusRetryBackoffMultiplier,
+  environmentStatusRetryInitialDelayMs,
+  environmentStatusRetryMaxDelayMs,
   environmentStatusTimeoutMs,
   fetchFn,
   getEnvironmentStatusConfigFn,
@@ -69,7 +109,10 @@ async function runEnvironmentStatusSchedulerTick({
   nowFn,
   pool,
   recordEnvironmentStatusObservationFn,
+  runEnvironmentStatusCheckCycleFn = runEnvironmentStatusCheckCycle,
   schedulerState,
+  sleepFn,
+  updateEnvironmentStatusRuntimeStateFn = updateEnvironmentStatusRuntimeState,
 }) {
   try {
     const now = nowFn();
@@ -86,23 +129,51 @@ async function runEnvironmentStatusSchedulerTick({
       logSchedulerSkip({ logger, now, reason: "missing_target_channel", schedulerState });
       return;
     }
+    if (!String(connectivityProbeUrl || "").trim()) {
+      logSchedulerSkip({ logger, now, reason: "missing_connectivity_probe_url", schedulerState });
+      return;
+    }
 
-    const checkResult = await fetchEnvironmentStatus({
+    const checkResult = await runEnvironmentStatusCheckCycleFn({
+      connectivityProbeUrl,
+      dnsLookupFn,
+      environmentStatusTimeoutMs,
+      failureThreshold: environmentStatusFailureThreshold,
       fetchFn,
+      logger,
+      nowFn,
+      retryBackoffMultiplier: environmentStatusRetryBackoffMultiplier,
+      retryInitialDelayMs: environmentStatusRetryInitialDelayMs,
+      retryMaxDelayMs: environmentStatusRetryMaxDelayMs,
+      sleepFn,
       targetUrl: config.targetUrl,
-      timeoutMs: environmentStatusTimeoutMs,
     });
 
-    const observedAt = now.toISOString();
-    const nextState = checkResult.state;
+    if (checkResult.outcome === "observer_unreachable") {
+      await updateEnvironmentStatusRuntimeStateFn(pool, {
+        lastConnectivityState: ENVIRONMENT_CONNECTIVITY_STATES.unreachable,
+        lastConnectivityCheckedAt: checkResult.connectivity.checkedAt,
+        lastConnectivityErrorMessage: checkResult.connectivity.errorMessage,
+      });
+      return;
+    }
+
+    const observedAt = checkResult.observedAt;
+    const nextState = checkResult.outcome;
     const stateChanged =
       String(config.lastObservedState || ENVIRONMENT_STATUS_STATES.unknown) !== nextState;
     await recordEnvironmentStatusObservationFn(pool, {
       lastObservedState: nextState,
       lastStateChangedAt: stateChanged ? observedAt : null,
       lastCheckedAt: observedAt,
-      lastHttpStatus: checkResult.httpStatus,
-      lastErrorMessage: checkResult.errorMessage,
+      lastHttpStatus: checkResult.app.httpStatus,
+      lastErrorMessage: checkResult.app.errorMessage,
+      consecutiveFailureCount: checkResult.consecutiveFailureCount,
+    });
+    await updateEnvironmentStatusRuntimeStateFn(pool, {
+      lastConnectivityState: ENVIRONMENT_CONNECTIVITY_STATES.reachable,
+      lastConnectivityCheckedAt: checkResult.connectivity.checkedAt,
+      clearLastConnectivityErrorMessage: true,
     });
 
     const notificationMessage = buildEnvironmentStatusNotification({
@@ -125,54 +196,19 @@ async function runEnvironmentStatusSchedulerTick({
   }
 }
 
-async function fetchEnvironmentStatus({ fetchFn, targetUrl, timeoutMs }) {
-  const abortController = new AbortController();
-  const timeoutId = setTimeout(() => {
-    abortController.abort();
-  }, timeoutMs);
-
-  try {
-    const response = await fetchFn(targetUrl, {
-      method: "GET",
-      redirect: "follow",
-      signal: abortController.signal,
-    });
-
-    if (response.status === 200) {
-      return {
-        state: ENVIRONMENT_STATUS_STATES.healthy,
-        httpStatus: 200,
-        errorMessage: null,
-      };
-    }
-
-    return {
-      state: ENVIRONMENT_STATUS_STATES.unhealthy,
-      httpStatus: response.status,
-      errorMessage: null,
-    };
-  } catch (error) {
-    const isTimeout = error?.name === "AbortError";
-    return {
-      state: ENVIRONMENT_STATUS_STATES.unhealthy,
-      httpStatus: null,
-      errorMessage: isTimeout ? "timeout" : String(error?.message || "network error"),
-    };
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
 function buildEnvironmentStatusNotification({ config, checkResult }) {
   if (
-    checkResult.state === ENVIRONMENT_STATUS_STATES.unhealthy &&
+    checkResult.outcome === ENVIRONMENT_STATUS_STATES.unhealthy &&
     config.lastNotifiedState !== ENVIRONMENT_STATUS_STATES.unhealthy
   ) {
-    return `Environment alert: ${config.targetUrl} is down. Expected HTTP 200, got ${formatFailureDetail(checkResult)}.`;
+    return [
+      `Environment alert: ${config.targetUrl} is down after ${checkResult.appAttemptCount} consecutive failed checks.`,
+      `Expected HTTP 200, got ${formatFailureDetail(checkResult.app)}.`,
+    ].join(" ");
   }
 
   if (
-    checkResult.state === ENVIRONMENT_STATUS_STATES.healthy &&
+    checkResult.outcome === ENVIRONMENT_STATUS_STATES.healthy &&
     config.lastNotifiedState === ENVIRONMENT_STATUS_STATES.unhealthy
   ) {
     return `Environment recovery: ${config.targetUrl} returned HTTP 200 again.`;
@@ -182,11 +218,11 @@ function buildEnvironmentStatusNotification({ config, checkResult }) {
 }
 
 function formatFailureDetail(checkResult) {
-  if (Number.isInteger(checkResult.httpStatus)) {
+  if (Number.isInteger(checkResult?.httpStatus)) {
     return `HTTP ${checkResult.httpStatus}`;
   }
 
-  const normalizedErrorMessage = String(checkResult.errorMessage || "").trim();
+  const normalizedErrorMessage = String(checkResult?.errorMessage || "").trim();
   return normalizedErrorMessage || "network error";
 }
 
@@ -205,12 +241,16 @@ function logSchedulerSkip({ logger, now, reason, schedulerState }) {
     logger.info("Environment status scheduler skipped: no target URL configured.");
     return;
   }
+  if (reason === "missing_target_channel") {
+    logger.info("Environment status scheduler skipped: no target channel configured.");
+    return;
+  }
 
-  logger.info("Environment status scheduler skipped: no target channel configured.");
+  logger.info("Environment status scheduler skipped: no connectivity probe URL configured.");
 }
 
 module.exports = {
-  fetchEnvironmentStatus,
+  buildEnvironmentStatusNotification,
   runEnvironmentStatusSchedulerTick,
   startEnvironmentStatusScheduler,
 };

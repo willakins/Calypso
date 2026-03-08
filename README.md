@@ -262,7 +262,12 @@ Optional:
 - `CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS` (default `24`)
 - `CODEX_APPROVAL_POLL_INTERVAL_MINUTES` (default `5`)
 - `ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS` (default `60`)
-- `ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (default `10`)
+- `ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (default `60`)
+- `ENVIRONMENT_STATUS_FAILURE_THRESHOLD` (default `3`)
+- `ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS` (default `5`)
+- `ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER` (default `3`)
+- `ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS` (default `45`)
+- `ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL` (recommended)
 - `ERROR_TRACKING_POLL_INTERVAL_SECONDS` (default `300`)
 - `ERROR_TRACKING_TIMEOUT_SECONDS` (default `15`)
 - `ERROR_TRACKING_SENTRY_BASE_URL` (default `https://sentry.io`)
@@ -491,7 +496,33 @@ Provider support matrix:
 `ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (optional)
 
 - Request timeout for each environment poll.
-- Default: `10` seconds.
+- Default: `60` seconds.
+
+`ENVIRONMENT_STATUS_FAILURE_THRESHOLD` (optional)
+
+- Number of consecutive failed app probes required in one monitoring cycle before Calypso marks the app unhealthy.
+- Default: `3`.
+
+`ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS` (optional)
+
+- Delay before the first retry after a failed app probe.
+- Default: `5` seconds.
+
+`ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER` (optional)
+
+- Exponential multiplier applied between failed app-probe retries.
+- Default: `3`.
+
+`ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS` (optional)
+
+- Maximum delay between failed app-probe retries.
+- Default: `45` seconds.
+
+`ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL` (optional but recommended)
+
+- HTTPS endpoint Calypso uses to verify its own outbound connectivity before probing the app URL.
+- Should be lightweight, operator-controlled, and independent from the monitored app origin.
+- If unset, environment monitoring stays skipped even when `/calypso config environment-status:on` is enabled.
 
 `ERROR_TRACKING_POLL_INTERVAL_SECONDS` (optional)
 
@@ -821,6 +852,7 @@ Rules:
 
 - Sets the single environment endpoint Calypso should poll.
 - Health is exact HTTP `200`; all other responses, timeouts, and network errors are unhealthy.
+- Observer-side network loss does not mark the app down; Calypso first verifies outbound DNS + HTTPS reachability through `ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL`.
 
 `/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
 
@@ -1001,12 +1033,24 @@ Rules:
 
 - Runs as a background scheduler in the app runtime.
 - Polls one configured URL every `ENVIRONMENT_STATUS_POLL_INTERVAL_SECONDS` (default `60`).
-- Uses `GET` with timeout `ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (default `10`).
-- Posts only on state transitions:
-  - first unhealthy observation posts a down alert
+- Before each app probe, Calypso verifies observer connectivity by resolving the probe host with DNS and fetching `ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL` over HTTPS.
+- If the observer connectivity preflight fails, Calypso skips the app probe, preserves the last known app state, and records the observer-side failure without posting a down alert.
+- Uses `GET` with timeout `ENVIRONMENT_STATUS_TIMEOUT_SECONDS` (default `60`) for the app endpoint.
+- App health is still strict: only HTTP `200` is healthy.
+- Failed app probes use exponential backoff with:
+  - `ENVIRONMENT_STATUS_FAILURE_THRESHOLD` consecutive failures required to confirm an outage
+  - `ENVIRONMENT_STATUS_RETRY_INITIAL_DELAY_SECONDS` for the first retry delay
+  - `ENVIRONMENT_STATUS_RETRY_BACKOFF_MULTIPLIER` for the backoff curve
+  - `ENVIRONMENT_STATUS_RETRY_MAX_DELAY_SECONDS` as the delay cap
+- Posts only on confirmed state transitions:
+  - a down alert posts only after the configured failure threshold is reached in one cycle
   - repeated unhealthy checks stay quiet
   - recovery posts once when the endpoint returns HTTP `200` again
 - First healthy observation only establishes baseline state; it does not post a recovery message.
+- Rollout guidance:
+  - Set `ENVIRONMENT_STATUS_CONNECTIVITY_PROBE_URL` before enabling environment monitoring.
+  - Verify the probe URL is reachable from the Calypso runtime, for example with `curl https://<probe-host>/healthz`.
+  - Re-enable environment monitoring after changing the target URL or probe configuration so the monitor starts from a clean baseline.
 
 ## Error Tracking Monitoring
 
