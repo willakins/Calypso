@@ -87,6 +87,20 @@ stop_remaining_calypso_node_processes() {
   fi
 }
 
+stop_remaining_ngrok_processes() {
+  if ! command -v pgrep >/dev/null 2>&1 || ! command -v pkill >/dev/null 2>&1; then
+    return
+  fi
+
+  if pgrep -f "[n]grok" >/dev/null 2>&1; then
+    echo "Stopping additional ngrok process(es)"
+    pkill -f "[n]grok" >/dev/null 2>&1 || true
+    return
+  fi
+
+  echo "No additional ngrok processes found"
+}
+
 cleanup_runtime_state() {
   rm -f "$APP_PID_FILE" "$NGROK_PID_FILE"
   rmdir "$RUNTIME_DIR" >/dev/null 2>&1 || true
@@ -95,6 +109,7 @@ cleanup_runtime_state() {
 main() {
   stop_process_from_pid_file "calypso app" "$APP_PID_FILE"
   stop_process_from_pid_file "ngrok" "$NGROK_PID_FILE"
+  stop_remaining_ngrok_processes
   stop_remaining_calypso_node_processes
   cleanup_runtime_state
 

@@ -120,13 +120,27 @@ read_ngrok_public_url() {
     return
   fi
 
+  local ngrok_web_address
+  ngrok_web_address="$(read_ngrok_web_address)"
+  if [[ -z "$ngrok_web_address" ]]; then
+    ngrok_web_address="127.0.0.1:4040"
+  fi
+
   local tunnels_json
-  tunnels_json="$(curl -s --max-time 2 http://127.0.0.1:4040/api/tunnels || true)"
+  tunnels_json="$(curl -s --max-time 2 "http://$ngrok_web_address/api/tunnels" || true)"
   if [[ -z "$tunnels_json" ]]; then
     return
   fi
 
   node -e 'const payload = JSON.parse(process.argv[1] || "{}"); const tunnel = (payload.tunnels || []).find((candidate) => String(candidate.public_url || "").startsWith("https://")); if (tunnel) process.stdout.write(tunnel.public_url);' "$tunnels_json" 2>/dev/null || true
+}
+
+read_ngrok_web_address() {
+  if [[ ! -f "$NGROK_LOG_FILE" ]]; then
+    return
+  fi
+
+  node -e 'const fs = require("fs"); const logPath = process.argv[1]; const lines = fs.readFileSync(logPath, "utf8").trim().split(/\n+/).reverse(); for (const line of lines) { try { const entry = JSON.parse(line); if (entry.obj === "web" && entry.msg === "starting web service" && entry.addr) { process.stdout.write(entry.addr); break; } } catch {} }' "$NGROK_LOG_FILE" 2>/dev/null || true
 }
 
 main() {
@@ -156,7 +170,13 @@ main() {
 
   ensure_database_url_is_reachable
 
-  start_background_process "ngrok" "$NGROK_PID_FILE" "$NGROK_LOG_FILE" ngrok http "$PORT" --log=stdout
+  local -a ngrok_command
+  ngrok_command=(ngrok http "$PORT" --log=stdout --log-format=json)
+  if [[ "${NGROK_POOLING_ENABLED:-true}" == "true" ]]; then
+    ngrok_command+=(--pooling-enabled)
+  fi
+
+  start_background_process "ngrok" "$NGROK_PID_FILE" "$NGROK_LOG_FILE" "${ngrok_command[@]}"
   start_background_process "calypso app" "$APP_PID_FILE" "$APP_LOG_FILE" node src/app.js
 
   sleep 1

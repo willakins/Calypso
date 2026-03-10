@@ -650,8 +650,10 @@ npm run start
 This local command starts:
 
 - Temporary Postgres at `.tmp/calypso-pg` (first run initializes it).
-- ngrok tunnel on `PORT` (default `3001`).
+- ngrok tunnel on `PORT` (default `3001`) with `--pooling-enabled` by default.
 - Calypso app process.
+
+If your ngrok config points multiple local apps at the same public URL, ngrok will load-balance requests across them when pooling is enabled. Set a different ngrok URL for each repo if you need isolated traffic, or set `NGROK_POOLING_ENABLED=false` before `npm run start` to disable pooling for Calypso.
 
 4. Configure your code-host webhook to the printed ngrok URL:
 
