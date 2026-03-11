@@ -1,10 +1,28 @@
 const { BaseCalypsoCommand } = require("./base_command");
 const { isValidTimeframe, timeframeSince } = require("../../shared/timeframes");
 const {
-  formatPullRequestReference,
-  formatPullRequestReviewIndicators,
-  formatTimestampByTimeFormat,
+  formatReviewListHeader,
+  formatReviewPullRequestLine,
+  sortPullRequestsByMostRecent,
 } = require("../../util/format");
+
+const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
+const LAST_MONTH_WINDOW_MILLISECONDS = 30 * DAY_IN_MILLISECONDS;
+const LAST_THREE_MONTHS_WINDOW_MILLISECONDS = 90 * DAY_IN_MILLISECONDS;
+const LAST_MODIFIED_SECTION_DEFINITIONS = Object.freeze([
+  {
+    key: "last_month",
+    title: "Modified in the last month",
+  },
+  {
+    key: "last_three_months",
+    title: "Modified in the last 3 months",
+  },
+  {
+    key: "three_plus_months",
+    title: "Modified 3+ months ago",
+  },
+]);
 
 class ReviewsCommand extends BaseCalypsoCommand {
   constructor() {
@@ -74,8 +92,9 @@ class ReviewsCommand extends BaseCalypsoCommand {
           String(pullRequest.author_login || "").toLowerCase() === parsedCommand.githubUser,
       )
       : waitingPullRequests;
+    const sortedPullRequests = sortPullRequestsByMostRecent(filteredPullRequests);
 
-    if (filteredPullRequests.length === 0) {
+    if (sortedPullRequests.length === 0) {
       return this.buildExecutionResult(
         buildNoResultsMessage({
           githubUser: parsedCommand.githubUser,
@@ -84,17 +103,21 @@ class ReviewsCommand extends BaseCalypsoCommand {
       );
     }
 
-    const timeFormat = await runtime.readTimeFormatPreferenceFn(runtime);
     const timeZone = await runtime.readTimeZonePreferenceFn(runtime);
+    const pullRequestSections = buildLastModifiedSections(sortedPullRequests);
     return this.buildExecutionResult(
       [
         buildResultsHeader({
           githubUser: parsedCommand.githubUser,
           timeframe: parsedCommand.timeframe,
         }),
-        ...filteredPullRequests.map((pullRequest) =>
-          formatWaitingPullRequestLine({ pullRequest, timeFormat, timeZone }),
-        ),
+        ...pullRequestSections.flatMap((section, index) => [
+          ...(index === 0 ? [] : [""]),
+          `*${section.title}*`,
+          ...section.pullRequests.map((pullRequest) =>
+            formatReviewPullRequestLine({ pullRequest, timeZone }),
+          ),
+        ]),
       ].join("\n"),
     );
   }
@@ -124,7 +147,7 @@ function buildUsageMessage() {
 function buildResultsHeader({ githubUser, timeframe }) {
   const timeScopeSuffix = timeframe ? ` in the last ${timeframe}` : "";
   const githubUserSuffix = githubUser ? ` for github user ${githubUser}` : "";
-  return `Open PRs waiting on review${timeScopeSuffix}${githubUserSuffix}:`;
+  return formatReviewListHeader(`Open PRs waiting on review${timeScopeSuffix}${githubUserSuffix}`);
 }
 
 function buildNoResultsMessage({ githubUser, timeframe }) {
@@ -133,23 +156,57 @@ function buildNoResultsMessage({ githubUser, timeframe }) {
   return `No open PRs waiting on review${timeScopeSuffix}${githubUserSuffix}.`;
 }
 
-function formatWaitingPullRequestLine({ pullRequest, timeFormat, timeZone }) {
-  const pullRequestReference = formatPullRequestReference({
-    repo: pullRequest.repo,
-    prNumber: pullRequest.pr_number,
-    url: pullRequest.url,
-  });
-  const titleSuffix = pullRequest.title ? ` - ${pullRequest.title}` : "";
-  const authorLogin = pullRequest.author_login || "unknown";
-  const openedForReviewAt = pullRequest.opened_for_review_at
-    ? formatTimestampByTimeFormat(pullRequest.opened_for_review_at, { timeFormat, timeZone })
-    : "at an unknown time";
-  return [
-    `• ${pullRequestReference}${titleSuffix}`,
-    `created by ${authorLogin}`,
-    formatPullRequestReviewIndicators(pullRequest),
-    `opened for review ${openedForReviewAt}`,
-  ].join(" | ");
+function buildLastModifiedSections(sortedPullRequests) {
+  const nowTimestamp = Date.now();
+  const pullRequestsBySectionKey = {
+    last_month: [],
+    last_three_months: [],
+    three_plus_months: [],
+  };
+
+  for (const pullRequest of sortedPullRequests) {
+    const sectionKey = mapPullRequestToLastModifiedSectionKey(pullRequest, nowTimestamp);
+    pullRequestsBySectionKey[sectionKey].push(pullRequest);
+  }
+
+  return LAST_MODIFIED_SECTION_DEFINITIONS
+    .map((sectionDefinition) => ({
+      title: sectionDefinition.title,
+      pullRequests: pullRequestsBySectionKey[sectionDefinition.key],
+    }))
+    .filter((section) => section.pullRequests.length > 0);
+}
+
+function mapPullRequestToLastModifiedSectionKey(pullRequest, nowTimestamp) {
+  const lastModifiedTimestamp = readPullRequestLastModifiedTimestamp(pullRequest);
+  if (!Number.isFinite(lastModifiedTimestamp)) {
+    return "three_plus_months";
+  }
+
+  const ageInMilliseconds = nowTimestamp - lastModifiedTimestamp;
+  if (ageInMilliseconds < LAST_MONTH_WINDOW_MILLISECONDS) {
+    return "last_month";
+  }
+  if (ageInMilliseconds < LAST_THREE_MONTHS_WINDOW_MILLISECONDS) {
+    return "last_three_months";
+  }
+
+  return "three_plus_months";
+}
+
+function readPullRequestLastModifiedTimestamp(pullRequest) {
+  const lastModifiedAt = pullRequest?.last_modified_at
+    || pullRequest?.last_reviewed_at
+    || pullRequest?.opened_for_review_at
+    || pullRequest?.opened_at
+    || null;
+  if (!lastModifiedAt) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const parsedDate = lastModifiedAt instanceof Date ? lastModifiedAt : new Date(lastModifiedAt);
+  const timestamp = parsedDate.getTime();
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
 }
 
 module.exports = {

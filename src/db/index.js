@@ -15,6 +15,13 @@ const REVIEW_RECAP_RECENCY_UNITS = Object.freeze({
   day: "d",
   week: "w",
 });
+const REVIEW_RECAP_SCOPES = Object.freeze({
+  all: "all",
+  day: "day",
+  week: "week",
+  month: "month",
+  legacy: "legacy",
+});
 const REVIEW_RECAP_WEEKDAYS = Object.freeze({
   daily: "daily",
   mon: "mon",
@@ -26,6 +33,7 @@ const REVIEW_RECAP_WEEKDAYS = Object.freeze({
   sun: "sun",
 });
 const REVIEW_RECAP_DEFAULTS = Object.freeze({
+  reviewScope: REVIEW_RECAP_SCOPES.all,
   recencyValue: 1,
   recencyUnit: REVIEW_RECAP_RECENCY_UNITS.week,
   scheduleWeekday: REVIEW_RECAP_WEEKDAYS.mon,
@@ -518,7 +526,8 @@ async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
       is_draft,
       review_state,
       codex_approved,
-      opened_for_review_at
+      opened_for_review_at,
+      COALESCE(last_reviewed_at, opened_for_review_at, opened_at) AS last_modified_at
     FROM open_pr_review_state
     WHERE lifecycle_state = 'open'
       AND is_draft = false
@@ -526,6 +535,30 @@ async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
       AND opened_for_review_at IS NOT NULL
       AND opened_for_review_at >= $1
     ORDER BY opened_for_review_at ASC, pr_number ASC
+  `;
+  const result = await pool.query(query, [sinceTimestamp]);
+  return result.rows;
+}
+
+async function listOpenPullRequestsForReviewRecapSince(pool, sinceTimestamp) {
+  const query = `
+    SELECT
+      repo,
+      pr_number,
+      title,
+      url,
+      author_login,
+      is_draft,
+      review_state,
+      codex_approved,
+      opened_at,
+      opened_for_review_at,
+      COALESCE(last_reviewed_at, opened_for_review_at, opened_at) AS last_modified_at
+    FROM open_pr_review_state
+    WHERE lifecycle_state = 'open'
+      AND is_draft = false
+      AND COALESCE(opened_for_review_at, opened_at) >= $1
+    ORDER BY COALESCE(opened_for_review_at, opened_at) ASC, pr_number ASC
   `;
   const result = await pool.query(query, [sinceTimestamp]);
   return result.rows;
@@ -578,6 +611,7 @@ async function getReviewRecapConfig(pool) {
     `
       SELECT
         target_channel_id,
+        review_scope,
         recency_value,
         recency_unit,
         schedule_weekday,
@@ -596,6 +630,7 @@ async function getReviewRecapConfig(pool) {
   if (!row) {
     return {
       targetChannelId: null,
+      reviewScope: REVIEW_RECAP_DEFAULTS.reviewScope,
       recencyValue: REVIEW_RECAP_DEFAULTS.recencyValue,
       recencyUnit: REVIEW_RECAP_DEFAULTS.recencyUnit,
       scheduleWeekday: REVIEW_RECAP_DEFAULTS.scheduleWeekday,
@@ -609,6 +644,8 @@ async function getReviewRecapConfig(pool) {
 
   return {
     targetChannelId: row.target_channel_id || null,
+    reviewScope:
+      normalizeReviewRecapScope(row.review_scope) || REVIEW_RECAP_DEFAULTS.reviewScope,
     recencyValue: row.recency_value || REVIEW_RECAP_DEFAULTS.recencyValue,
     recencyUnit: normalizeReviewRecencyUnit(row.recency_unit) || REVIEW_RECAP_DEFAULTS.recencyUnit,
     scheduleWeekday:
@@ -767,8 +804,25 @@ async function setReviewRecapRecency(pool, recencyValue, recencyUnit, updatedBy)
   }
 
   return upsertReviewRecapConfig(pool, {
+    reviewScope: REVIEW_RECAP_SCOPES.legacy,
     recencyValue: normalizedRecencyValue,
     recencyUnit: normalizedRecencyUnit,
+    updatedBy: normalizedUserId,
+  });
+}
+
+async function setReviewRecapScope(pool, reviewScope, updatedBy) {
+  const normalizedReviewScope = normalizeReviewRecapScope(reviewScope);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedReviewScope || normalizedReviewScope === REVIEW_RECAP_SCOPES.legacy) {
+    throw new Error(`Unsupported review recap scope: ${reviewScope}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertReviewRecapConfig(pool, {
+    reviewScope: normalizedReviewScope,
     updatedBy: normalizedUserId,
   });
 }
@@ -1914,6 +1968,7 @@ async function upsertReviewRecapConfig(pool, updates) {
       INSERT INTO review_recap_config (
         id,
         target_channel_id,
+        review_scope,
         recency_value,
         recency_unit,
         schedule_weekday,
@@ -1928,32 +1983,35 @@ async function upsertReviewRecapConfig(pool, updates) {
       VALUES (
         1,
         COALESCE($1, NULL),
-        COALESCE($2, ${REVIEW_RECAP_DEFAULTS.recencyValue}),
-        COALESCE($3, '${REVIEW_RECAP_DEFAULTS.recencyUnit}'),
-        COALESCE($4, '${REVIEW_RECAP_DEFAULTS.scheduleWeekday}'),
-        COALESCE($5, '${REVIEW_RECAP_DEFAULTS.scheduleTime}'),
-        COALESCE($6, '${REVIEW_RECAP_DEFAULTS.timeZone}'),
-        COALESCE($7::timestamptz, NULL),
-        COALESCE($8, ${REVIEW_RECAP_DEFAULTS.sendOnWeekends}),
-        COALESCE($9, ${REVIEW_RECAP_DEFAULTS.sendOnHolidays}),
-        $10,
+        COALESCE($2, '${REVIEW_RECAP_DEFAULTS.reviewScope}'),
+        COALESCE($3, ${REVIEW_RECAP_DEFAULTS.recencyValue}),
+        COALESCE($4, '${REVIEW_RECAP_DEFAULTS.recencyUnit}'),
+        COALESCE($5, '${REVIEW_RECAP_DEFAULTS.scheduleWeekday}'),
+        COALESCE($6, '${REVIEW_RECAP_DEFAULTS.scheduleTime}'),
+        COALESCE($7, '${REVIEW_RECAP_DEFAULTS.timeZone}'),
+        COALESCE($8::timestamptz, NULL),
+        COALESCE($9, ${REVIEW_RECAP_DEFAULTS.sendOnWeekends}),
+        COALESCE($10, ${REVIEW_RECAP_DEFAULTS.sendOnHolidays}),
+        $11,
         NOW()
       )
       ON CONFLICT (id)
       DO UPDATE SET
         target_channel_id = COALESCE($1, review_recap_config.target_channel_id),
-        recency_value = COALESCE($2, review_recap_config.recency_value),
-        recency_unit = COALESCE($3, review_recap_config.recency_unit),
-        schedule_weekday = COALESCE($4, review_recap_config.schedule_weekday),
-        schedule_time = COALESCE($5, review_recap_config.schedule_time),
-        timezone = COALESCE($6, review_recap_config.timezone),
-        last_sent_slot_at = COALESCE($7::timestamptz, review_recap_config.last_sent_slot_at),
-        send_on_weekends = COALESCE($8, review_recap_config.send_on_weekends),
-        send_on_holidays = COALESCE($9, review_recap_config.send_on_holidays),
+        review_scope = COALESCE($2, review_recap_config.review_scope),
+        recency_value = COALESCE($3, review_recap_config.recency_value),
+        recency_unit = COALESCE($4, review_recap_config.recency_unit),
+        schedule_weekday = COALESCE($5, review_recap_config.schedule_weekday),
+        schedule_time = COALESCE($6, review_recap_config.schedule_time),
+        timezone = COALESCE($7, review_recap_config.timezone),
+        last_sent_slot_at = COALESCE($8::timestamptz, review_recap_config.last_sent_slot_at),
+        send_on_weekends = COALESCE($9, review_recap_config.send_on_weekends),
+        send_on_holidays = COALESCE($10, review_recap_config.send_on_holidays),
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
       RETURNING
         target_channel_id,
+        review_scope,
         recency_value,
         recency_unit,
         schedule_weekday,
@@ -1967,6 +2025,7 @@ async function upsertReviewRecapConfig(pool, updates) {
     `,
     [
       updates.targetChannelId || null,
+      updates.reviewScope || null,
       updates.recencyValue || null,
       updates.recencyUnit || null,
       updates.scheduleWeekday || null,
@@ -2547,6 +2606,13 @@ function normalizeReviewRecencyUnit(recencyUnit) {
     : null;
 }
 
+function normalizeReviewRecapScope(reviewScope) {
+  const normalizedReviewScope = String(reviewScope || "").toLowerCase().trim();
+  return Object.values(REVIEW_RECAP_SCOPES).includes(normalizedReviewScope)
+    ? normalizedReviewScope
+    : null;
+}
+
 function normalizeReviewScheduleWeekday(scheduleWeekday) {
   const normalizedScheduleWeekday = String(scheduleWeekday || "").toLowerCase().trim();
   return REVIEW_RECAP_WEEKDAYS[normalizedScheduleWeekday] || null;
@@ -2985,6 +3051,7 @@ module.exports = {
   RUNTIME_PROVIDER_DEFAULTS,
   REVIEW_RECAP_DEFAULTS,
   REVIEW_RECAP_RECENCY_UNITS,
+  REVIEW_RECAP_SCOPES,
   REVIEW_RECAP_WEEKDAYS,
   SUPPORT_EMAIL_DEFAULTS,
   SUPPORT_EMAIL_THREAD_STATUSES,
@@ -3002,6 +3069,7 @@ module.exports = {
   insertDeployment,
   insertSupportEmailThread,
   listOpenErrorTrackingIssues,
+  listOpenPullRequestsForReviewRecapSince,
   listPendingSupportEmailThreads,
   listRecentlyTestedPullRequests,
   listOpenPullRequestsWaitingOnReviewSince,
@@ -3034,6 +3102,7 @@ module.exports = {
   setEnvironmentStatusUrl,
   setReviewRecapChannel,
   setReviewRecapRecency,
+  setReviewRecapScope,
   setReviewRecapSchedule,
   setReviewRecapSendHolidays,
   setReviewRecapSendWeekends,

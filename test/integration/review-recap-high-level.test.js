@@ -51,6 +51,7 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
     },
     reviewRecapConfig: {
       targetChannelId: null,
+      reviewScope: "all",
       recencyValue: 1,
       recencyUnit: "w",
       scheduleWeekday: "mon",
@@ -161,7 +162,12 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
     setReviewRecapRecencyFn: async (_pool, recencyValue, recencyUnit) => {
       state.reviewRecapConfig.recencyValue = recencyValue;
       state.reviewRecapConfig.recencyUnit = recencyUnit;
+      state.reviewRecapConfig.reviewScope = "legacy";
       return { recency_value: recencyValue, recency_unit: recencyUnit };
+    },
+    setReviewRecapScopeFn: async (_pool, reviewScope) => {
+      state.reviewRecapConfig.reviewScope = reviewScope;
+      return { review_scope: reviewScope };
     },
     setReviewRecapScheduleFn: async (_pool, scheduleWeekday, scheduleTime) => {
       state.reviewRecapConfig.scheduleWeekday = scheduleWeekday;
@@ -179,13 +185,12 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
   });
 
   await runSlashCommand(commandHandler, "config review-recap-channel:<#CRECAP|deployments>");
-  await runSlashCommand(commandHandler, "config review-recap-recency:2w");
+  await runSlashCommand(commandHandler, "config review-recap-window:last-week");
   await runSlashCommand(commandHandler, "config review-recap-schedule:tue@10:15");
   await runSlashCommand(commandHandler, "config timezone:America/Los_Angeles");
 
   assert.equal(state.reviewRecapConfig.targetChannelId, "CRECAP");
-  assert.equal(state.reviewRecapConfig.recencyValue, 2);
-  assert.equal(state.reviewRecapConfig.recencyUnit, "w");
+  assert.equal(state.reviewRecapConfig.reviewScope, "week");
   assert.equal(state.reviewRecapConfig.scheduleWeekday, "tue");
   assert.equal(state.reviewRecapConfig.scheduleTime, "10:15");
   assert.equal(state.reviewRecapConfig.timeZone, "America/Los_Angeles");
@@ -199,14 +204,13 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
 
   await runReviewRecapSchedulerTick({
     getReviewRecapConfigFn: async () => state.reviewRecapConfig,
-    listOpenPullRequestsWaitingOnReviewSinceFn: async (_pool, sinceTimestamp) => {
+    listOpenPullRequestsForReviewRecapSinceFn: async (_pool, sinceTimestamp) => {
       schedulerCalls.sinceTimestamps.push(sinceTimestamp);
       return state.openPullRequests.filter((pullRequest) => {
         const openedForReviewAt = new Date(pullRequest.opened_for_review_at);
         return (
           pullRequest.lifecycle_state === "open" &&
           pullRequest.is_draft === false &&
-          (pullRequest.review_state === "waiting" || pullRequest.review_state === "changes_requested") &&
           openedForReviewAt >= sinceTimestamp
         );
       });
@@ -240,13 +244,13 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
   assert.equal(schedulerCalls.postedMessages[0].channel, "CRECAP");
   assert.match(
     schedulerCalls.postedMessages[0].text,
-    /^\*Pull Requests waiting on review in the last 2 weeks\*/,
+    /^\*PR Review Recap — last week\*/,
   );
-  assert.match(schedulerCalls.postedMessages[0].text, /opened for review on .* PST/);
+  assert.match(schedulerCalls.postedMessages[0].text, /Last modified: \d{1,2}\/\d{1,2}\/\d{4}/);
   assert.deepEqual(schedulerCalls.markSlots, ["2026-02-17T18:15:00.000Z"]);
   assert.equal(schedulerCalls.sinceTimestamps.length, 1);
 
-  const expectedSince = new Date("2026-02-03T18:16:00.000Z").getTime();
+  const expectedSince = new Date("2026-02-10T18:16:00.000Z").getTime();
   assert.equal(schedulerCalls.sinceTimestamps[0].getTime(), expectedSince);
 });
 

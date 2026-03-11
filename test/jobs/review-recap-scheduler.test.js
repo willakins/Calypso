@@ -56,6 +56,7 @@ test("runReviewRecapSchedulerTick posts and marks slot when due", async () => {
   await runReviewRecapSchedulerTick({
     getReviewRecapConfigFn: async () => ({
       targetChannelId: "CDEPLOY",
+      reviewScope: "week",
       recencyValue: 1,
       recencyUnit: "w",
       scheduleWeekday: "mon",
@@ -82,8 +83,8 @@ test("runReviewRecapSchedulerTick posts and marks slot when due", async () => {
       calls.mark.push(slotTimestamp);
       return { id: 1, last_sent_slot_at: slotTimestamp };
     },
-    formatReviewRecapResponseFn: ({ waitingPullRequests }) => {
-      assert.equal(waitingPullRequests.length, 1);
+    formatReviewRecapResponseFn: ({ pullRequests }) => {
+      assert.equal(pullRequests.length, 1);
       return "recap message";
     },
     nowFn: () => now,
@@ -113,6 +114,47 @@ test("runReviewRecapSchedulerTick posts and marks slot when due", async () => {
     mrkdwn: true,
   });
   assert.deepEqual(calls.mark, ["2026-02-16T14:00:00.000Z"]);
+});
+
+test("runReviewRecapSchedulerTick uses epoch lookback for all-scope recap", async () => {
+  let capturedSinceTimestamp = null;
+
+  await runReviewRecapSchedulerTick({
+    getReviewRecapConfigFn: async () => ({
+      targetChannelId: "CDEPLOY",
+      reviewScope: "all",
+      recencyValue: 1,
+      recencyUnit: "w",
+      scheduleWeekday: "mon",
+      scheduleTime: "09:00",
+      sendOnWeekends: true,
+      sendOnHolidays: true,
+      timeZone: "America/New_York",
+      lastSentSlotAt: null,
+    }),
+    listOpenPullRequestsForReviewRecapSinceFn: async (_pool, sinceTimestamp) => {
+      capturedSinceTimestamp = sinceTimestamp;
+      return [];
+    },
+    markReviewRecapSentFn: async () => ({ id: 1 }),
+    formatReviewRecapResponseFn: () => "recap message",
+    nowFn: () => new Date("2026-02-16T14:05:00.000Z"),
+    logger: {
+      info() {},
+      warn() {},
+      error() {},
+    },
+    messageClient: {
+      async postChannelMessage() {},
+    },
+    pool: {},
+    schedulerState: {
+      lastNoChannelLogMinuteKey: null,
+    },
+  });
+
+  assert.ok(capturedSinceTimestamp instanceof Date);
+  assert.equal(capturedSinceTimestamp.getTime(), 0);
 });
 
 test("runReviewRecapSchedulerTick skips when slot already sent", async () => {

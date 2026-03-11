@@ -48,6 +48,7 @@ test("handleCalypsoCommand returns reviews topic help for reviewing alias", () =
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\*Calypso Reviews Help\*/);
   assert.match(result.responseText, /\/calypso reviews <GITHUB_USER>/);
+  assert.match(result.responseText, /\/calypso config review-recap-window:<all\|last-day\|last-week\|last-month>/);
   assert.match(result.responseText, /\/calypso config review-recap-schedule:<daily\|weekday>@HH:MM\[,HH:MM\.\.\.\]/);
   assert.match(result.responseText, /\/calypso config timezone:America\/New_York/);
 });
@@ -276,6 +277,16 @@ test("handleCalypsoCommand routes config review recap recency input", () => {
   assert.equal(result.action, "config_review_recap_recency");
   assert.equal(result.recencyValue, 2);
   assert.equal(result.recencyUnit, "w");
+});
+
+test("handleCalypsoCommand routes config review recap window input", () => {
+  const result = handleCalypsoCommand({
+    text: "config review-recap-window:last-week",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_review_recap_window");
+  assert.equal(result.reviewScope, "week");
 });
 
 test("handleCalypsoCommand routes config review recap schedule input", () => {
@@ -647,11 +658,11 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Open PRs waiting on review:/);
-  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/55\|croft-eng\/croft#55> - Add observability/);
-  assert.match(payload.text, /created by octocat/);
-  assert.match(payload.text, /📝 Draft: No/);
-  assert.match(payload.text, /🤖 Codex Approved: No/);
-  assert.match(payload.text, /opened for review on February 13th, 2026 at 5:00 PM EST/);
+  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/55\|#55> - \*Add observability\*/);
+  assert.match(payload.text, /author: octocat/);
+  assert.match(payload.text, /review: waiting/);
+  assert.match(payload.text, /codex: not approved/);
+  assert.match(payload.text, /Last modified: 2\/13\/2026/);
 });
 
 test("registerCalypsoCommand filters waiting reviews by github user", async () => {
@@ -701,8 +712,140 @@ test("registerCalypsoCommand filters waiting reviews by github user", async () =
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /for github user octocat/);
-  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/11\|croft-eng\/croft#11> - One/);
-  assert.doesNotMatch(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|croft-eng\/croft#12> - Two/);
+  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/11\|#11> - \*One\*/);
+  assert.doesNotMatch(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|#12> - \*Two\*/);
+});
+
+test("registerCalypsoCommand sorts waiting reviews most recent first", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    listOpenPullRequestsWaitingOnReviewSinceFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 55,
+        title: "Older",
+        url: "https://github.com/croft-eng/croft/pull/55",
+        author_login: "octocat",
+        is_draft: false,
+        review_state: "waiting",
+        opened_for_review_at: "2026-02-13T22:00:17.000Z",
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 56,
+        title: "Newer",
+        url: "https://github.com/croft-eng/croft/pull/56",
+        author_login: "octocat",
+        is_draft: false,
+        review_state: "waiting",
+        opened_for_review_at: "2026-02-14T22:00:17.000Z",
+      },
+    ],
+    readTimeFormatPreferenceFn: async () => "human",
+    readTimeZonePreferenceFn: async () => "America/New_York",
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  const newerIndex = payload.text.indexOf("<https://github.com/croft-eng/croft/pull/56|#56>");
+  const olderIndex = payload.text.indexOf("<https://github.com/croft-eng/croft/pull/55|#55>");
+  assert.ok(newerIndex >= 0);
+  assert.ok(olderIndex >= 0);
+  assert.ok(newerIndex < olderIndex);
+});
+
+test("registerCalypsoCommand groups waiting reviews by last-modified age buckets", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+  const dayInMilliseconds = 24 * 60 * 60 * 1000;
+  const nowTimestamp = Date.now();
+  const tenDaysAgo = new Date(nowTimestamp - (10 * dayInMilliseconds)).toISOString();
+  const sixtyDaysAgo = new Date(nowTimestamp - (60 * dayInMilliseconds)).toISOString();
+  const oneHundredTwentyDaysAgo = new Date(nowTimestamp - (120 * dayInMilliseconds)).toISOString();
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    listOpenPullRequestsWaitingOnReviewSinceFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 201,
+        title: "Recent update",
+        url: "https://github.com/croft-eng/croft/pull/201",
+        author_login: "octocat",
+        is_draft: false,
+        review_state: "waiting",
+        opened_for_review_at: tenDaysAgo,
+        last_modified_at: tenDaysAgo,
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 202,
+        title: "Mid-age update",
+        url: "https://github.com/croft-eng/croft/pull/202",
+        author_login: "octocat",
+        is_draft: false,
+        review_state: "waiting",
+        opened_for_review_at: sixtyDaysAgo,
+        last_modified_at: sixtyDaysAgo,
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 203,
+        title: "Old update",
+        url: "https://github.com/croft-eng/croft/pull/203",
+        author_login: "octocat",
+        is_draft: false,
+        review_state: "waiting",
+        opened_for_review_at: oneHundredTwentyDaysAgo,
+        last_modified_at: oneHundredTwentyDaysAgo,
+      },
+    ],
+    readTimeFormatPreferenceFn: async () => "human",
+    readTimeZonePreferenceFn: async () => "America/New_York",
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /\*Modified in the last month\*/);
+  assert.match(payload.text, /\*Modified in the last 3 months\*/);
+  assert.match(payload.text, /\*Modified 3\+ months ago\*/);
+
+  const lastMonthIndex = payload.text.indexOf("*Modified in the last month*");
+  const pr201Index = payload.text.indexOf("<https://github.com/croft-eng/croft/pull/201|#201>");
+  const lastThreeMonthsIndex = payload.text.indexOf("*Modified in the last 3 months*");
+  const pr202Index = payload.text.indexOf("<https://github.com/croft-eng/croft/pull/202|#202>");
+  const threePlusMonthsIndex = payload.text.indexOf("*Modified 3+ months ago*");
+  const pr203Index = payload.text.indexOf("<https://github.com/croft-eng/croft/pull/203|#203>");
+  assert.ok(lastMonthIndex >= 0 && pr201Index > lastMonthIndex);
+  assert.ok(lastThreeMonthsIndex > pr201Index && pr202Index > lastThreeMonthsIndex);
+  assert.ok(threePlusMonthsIndex > pr202Index && pr203Index > threePlusMonthsIndex);
 });
 
 test("registerCalypsoCommand shows no-results message for reviews timeframe filter", async () => {
@@ -2255,6 +2398,41 @@ test("registerCalypsoCommand config command updates review recap recency", async
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].recencyValue, 2);
   assert.equal(capturedCalls[0].recencyUnit, "w");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates review recap window", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setReviewRecapScopeFn: async (pool, reviewScope, updatedBy) => {
+      capturedCalls.push({ pool, reviewScope, updatedBy });
+      return { review_scope: reviewScope, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config review-recap-window:last-month", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated review recap window to `last month`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].reviewScope, "month");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 

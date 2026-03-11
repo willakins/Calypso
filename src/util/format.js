@@ -20,6 +20,37 @@ const UTC_MONTH_NAMES = [
   "December",
 ];
 
+function formatReviewListHeader(label) {
+  const normalizedLabel = String(label || "").trim();
+  if (normalizedLabel === "") {
+    return ":";
+  }
+
+  return normalizedLabel.endsWith(":") ? normalizedLabel : `${normalizedLabel}:`;
+}
+
+function formatReviewListItem(summary, details = null) {
+  const normalizedSummary = String(summary || "").trim();
+  const headerLine = normalizedSummary === "" ? "•" : `• ${normalizedSummary}`;
+  if (details === null || details === undefined) {
+    return headerLine;
+  }
+
+  const detailLines = (Array.isArray(details) ? details : [details])
+    .flatMap((line) => String(line || "").split("\n"))
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+
+  if (detailLines.length === 0) {
+    return headerLine;
+  }
+
+  return [
+    headerLine,
+    ...detailLines.map((line) => `  ${line}`),
+  ].join("\n");
+}
+
 function formatStatusResponse({ lastDeployAt, blockers, timeFormat, timeZone }) {
   const lastDeploymentTimestamp = formatTimestampByTimeFormat(lastDeployAt, { timeFormat, timeZone });
   const hasBlockingPullRequests = Array.isArray(blockers) && blockers.length > 0;
@@ -32,46 +63,170 @@ function formatStatusResponse({ lastDeployAt, blockers, timeFormat, timeZone }) 
 }
 
 function formatReviewRecapResponse({
+  pullRequests,
   waitingPullRequests,
+  reviewScope,
   recencyValue,
   recencyUnit,
   timeZone,
 }) {
-  const recencyLabel = formatReviewRecencyLabel(recencyValue, recencyUnit);
-  const header = `*Pull Requests waiting on review in the last ${recencyLabel}*`;
-  const hasWaitingPullRequests =
-    Array.isArray(waitingPullRequests) && waitingPullRequests.length > 0;
+  const effectivePullRequests = Array.isArray(pullRequests)
+    ? pullRequests
+    : waitingPullRequests;
+  const inScopeLabel = formatReviewRecapScopeLabel({
+    reviewScope,
+    recencyValue,
+    recencyUnit,
+  });
+  const header = `*PR Review Recap — ${inScopeLabel}*`;
+  const hasPullRequests = Array.isArray(effectivePullRequests) && effectivePullRequests.length > 0;
 
-  if (!hasWaitingPullRequests) {
-    return [header, "• None"].join("\n");
+  if (!hasPullRequests) {
+    return [header, formatReviewListItem("No open non-draft pull requests in scope.")].join("\n");
   }
 
+  const sections = buildReviewRecapSections(effectivePullRequests);
   return [
     header,
-    ...waitingPullRequests.map((pullRequest) =>
-      formatWaitingPullRequestLine({ pullRequest, timeZone }),
-    ),
+    ...sections.flatMap((section) => [
+      "",
+      `*${section.title}*`,
+      ...section.pullRequests.map((pullRequest) =>
+        formatReviewPullRequestLine({ pullRequest, timeZone }),
+      ),
+    ]),
   ].join("\n");
 }
 
-function formatWaitingPullRequestLine({ pullRequest, timeZone }) {
+function buildReviewRecapSections(pullRequests) {
+  const approvedByUsers = [];
+  const codexApprovedWithoutUserApproval = [];
+  const otherOpenPullRequests = [];
+
+  for (const pullRequest of pullRequests) {
+    if (isUserApprovedPullRequest(pullRequest)) {
+      approvedByUsers.push(pullRequest);
+      continue;
+    }
+
+    if (pullRequest?.codex_approved === true) {
+      codexApprovedWithoutUserApproval.push(pullRequest);
+      continue;
+    }
+
+    otherOpenPullRequests.push(pullRequest);
+  }
+
+  return [
+    {
+      title: "Approved By Reviewers (Unmerged)",
+      pullRequests: sortPullRequestsByMostRecent(approvedByUsers),
+    },
+    {
+      title: "Codex Approved, Waiting On Human Approval",
+      pullRequests: sortPullRequestsByMostRecent(codexApprovedWithoutUserApproval),
+    },
+    {
+      title: "Other Open Pull Requests",
+      pullRequests: sortPullRequestsByMostRecent(otherOpenPullRequests),
+    },
+  ].filter((section) => section.pullRequests.length > 0);
+}
+
+function sortPullRequestsByMostRecent(pullRequests) {
+  return [...(Array.isArray(pullRequests) ? pullRequests : [])].sort((left, right) => {
+    const leftTimestamp = readComparableTimestamp(readReviewPullRequestLastModifiedAt(left));
+    const rightTimestamp = readComparableTimestamp(readReviewPullRequestLastModifiedAt(right));
+    if (leftTimestamp !== rightTimestamp) {
+      return rightTimestamp - leftTimestamp;
+    }
+
+    const leftPrNumber = Number(left?.pr_number);
+    const rightPrNumber = Number(right?.pr_number);
+    const normalizedLeftPrNumber = Number.isFinite(leftPrNumber) ? leftPrNumber : -Infinity;
+    const normalizedRightPrNumber = Number.isFinite(rightPrNumber) ? rightPrNumber : -Infinity;
+    return normalizedRightPrNumber - normalizedLeftPrNumber;
+  });
+}
+
+function readComparableTimestamp(value) {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const parsedDate = value instanceof Date ? value : new Date(value);
+  const timestamp = parsedDate.getTime();
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function readReviewPullRequestLastModifiedAt(pullRequest) {
+  return pullRequest?.last_modified_at
+    || pullRequest?.last_reviewed_at
+    || pullRequest?.opened_for_review_at
+    || pullRequest?.opened_at
+    || null;
+}
+
+function isUserApprovedPullRequest(pullRequest) {
+  return String(pullRequest?.review_state || "").toLowerCase().trim() === "approved";
+}
+
+function formatReviewPullRequestLine({ pullRequest, timeZone }) {
   const pullRequestTitle = pullRequest.title || "(no title)";
   const pullRequestLink = formatPullRequestReference({
     repo: pullRequest.repo,
     prNumber: pullRequest.pr_number,
     url: pullRequest.url,
+    display: "number",
   });
-  const formattedTimestamp = formatTimestampWithTimezone(pullRequest.opened_for_review_at, {
-    style: TIMESTAMP_STYLES.human,
-    timeZone: timeZone || "America/New_York",
-  });
+  const lastModifiedAt = readReviewPullRequestLastModifiedAt(pullRequest);
+  const formattedLastModified = lastModifiedAt
+    ? formatDateWithTimezone(lastModifiedAt, timeZone || "America/New_York")
+    : "unknown";
 
-  return [
-    `• ${pullRequestLink} - ${pullRequestTitle}`,
-    `created by ${pullRequest.author_login}`,
-    formatPullRequestReviewIndicators(pullRequest),
-    `opened for review ${formattedTimestamp}`,
-  ].join(" | ");
+  return formatReviewListItem(
+    `${pullRequestLink} - *${pullRequestTitle}*`,
+    [
+      `author: ${pullRequest.author_login || "unknown"}`,
+      `review: ${formatReviewStateLabel(pullRequest.review_state)}`,
+      `codex: ${pullRequest?.codex_approved === true ? "approved" : "not approved"}`,
+      `Last modified: ${formattedLastModified}`,
+    ].join(" | "),
+  );
+}
+
+function formatReviewStateLabel(reviewState) {
+  const normalizedReviewState = String(reviewState || "").toLowerCase().trim();
+  if (normalizedReviewState === "approved") {
+    return "approved";
+  }
+  if (normalizedReviewState === "changes_requested") {
+    return "changes requested";
+  }
+  if (normalizedReviewState === "waiting") {
+    return "waiting";
+  }
+
+  return "unknown";
+}
+
+function formatReviewRecapScopeLabel({ reviewScope, recencyValue, recencyUnit }) {
+  const normalizedScope = String(reviewScope || "").toLowerCase().trim();
+  if (normalizedScope === "day") {
+    return "last day";
+  }
+  if (normalizedScope === "week") {
+    return "last week";
+  }
+  if (normalizedScope === "month") {
+    return "last month";
+  }
+  if (normalizedScope === "legacy") {
+    const recencyLabel = formatReviewRecencyLabel(recencyValue, recencyUnit);
+    return `last ${recencyLabel}`;
+  }
+
+  return "all open non-draft PRs";
 }
 
 function formatPullRequestReviewIndicators(pullRequest) {
@@ -82,12 +237,12 @@ function formatPullRequestReviewIndicators(pullRequest) {
 }
 
 function formatDraftIndicator(isDraft) {
-  return isDraft ? "📝 Draft: Yes" : "📝 Draft: No";
+  return isDraft ? "Draft: Yes" : "Draft: No";
 }
 
 function formatCodexApprovalIndicator(pullRequest) {
   const isCodexApproved = pullRequest?.codex_approved === true;
-  return isCodexApproved ? "🤖 Codex Approved: Yes" : "🤖 Codex Approved: No";
+  return isCodexApproved ? "Codex Approved: Yes" : "Codex Approved: No";
 }
 
 function buildNoBlockersMessage(lastDeploymentTimestamp) {
@@ -111,15 +266,18 @@ function formatBlockingPullRequestLine(pullRequest) {
   return `• ${pullRequestReference} (${pullRequest.status})${pullRequestTitleSuffix}`;
 }
 
-function formatPullRequestReference({ repo, prNumber, url }) {
+function formatPullRequestReference({ repo, prNumber, url, display = "full" }) {
   const normalizedRepo = String(repo || "").trim();
   const normalizedPrNumber = Number.isFinite(Number(prNumber)) ? Number(prNumber) : String(prNumber || "");
-  const plainReference = `${normalizedRepo}#${normalizedPrNumber}`;
+  const referenceLabel =
+    display === "number"
+      ? `#${normalizedPrNumber}`
+      : `${normalizedRepo}#${normalizedPrNumber}`;
   if (!url) {
-    return plainReference;
+    return referenceLabel;
   }
 
-  return `<${url}|${plainReference}>`;
+  return `<${url}|${referenceLabel}>`;
 }
 
 function formatTimestampWithTimezone(value, options = {}) {
@@ -201,6 +359,25 @@ function formatTimestampAsUtcLegacyFromParsedDate(parsedDate) {
   return `${year}-${month}-${day} ${hour}:${minute}:${second} UTC`;
 }
 
+function formatDateWithTimezone(value, timeZone) {
+  const parsedDate = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return String(value);
+  }
+
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      month: "numeric",
+      day: "numeric",
+      year: "numeric",
+    });
+    return formatter.format(parsedDate);
+  } catch (_error) {
+    return formatDateWithTimezone(parsedDate, "UTC");
+  }
+}
+
 function readDateTimeParts(parsedDate, timeZone) {
   try {
     const formatter = new Intl.DateTimeFormat("en-US", {
@@ -269,6 +446,10 @@ function readOrdinalSuffix(dayOfMonth) {
 module.exports = {
   TIMESTAMP_STYLES,
   formatPullRequestReviewIndicators,
+  sortPullRequestsByMostRecent,
+  formatReviewListHeader,
+  formatReviewListItem,
+  formatReviewPullRequestLine,
   formatReviewRecapResponse,
   formatReviewRecencyLabel,
   formatPullRequestReference,

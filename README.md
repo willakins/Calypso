@@ -26,7 +26,8 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   - `/calypso config ai-provider:openai|anthropic`
   - `/calypso config error-tracking-provider:sentry|rollbar`
   - `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`
-  - `/calypso config review-recap-recency:<Nd|Nw>`
+  - `/calypso config review-recap-window:<all|last-day|last-week|last-month>`
+  - `/calypso config review-recap-recency:<Nd|Nw>` (legacy)
   - `/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`
   - `/calypso config review-recap-send-weekends:<on|off>`
   - `/calypso config review-recap-send-holidays:<on|off>`
@@ -61,7 +62,7 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   notifications, and lets responders mark queued items handled.
 - Optionally drafts support-email replies for queued items through the active AI provider.
 - Runtime display config is per communication user (defaults: time format `human`, timezone `America/New_York`).
-- Review recap schedule config is workspace-wide (defaults: Monday 9:00 AM `America/New_York`, recency `1w`).
+- Review recap schedule config is workspace-wide (defaults: Monday 9:00 AM `America/New_York`, recap window `all`).
 
 ## Architecture
 
@@ -829,7 +830,13 @@ Rules:
 
 `/calypso config review-recap-recency:<Nd|Nw>`
 
-- Sets recap lookback window (for example `1w`, `2w`, `2d`).
+- Sets recap lookback window in legacy mode (for example `1w`, `2w`, `2d`).
+
+`/calypso config review-recap-window:<all|last-day|last-week|last-month>`
+
+- Sets recap PR selection scope.
+- `all` includes every open, non-draft PR.
+- `last-day`, `last-week`, and `last-month` apply rolling lookback windows.
 
 `/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`
 
@@ -949,6 +956,8 @@ Rules:
 - Optional GitHub user filter (author login).
 - Optional recency filter (`day`, `week`, `month`).
 - Supports `recent` keyword variant: `/calypso reviews recent <day|week|month>`.
+- Uses the same PR row format as review recap, including `Last modified` date (`M/D/YYYY`).
+- Groups rows by `Last modified` age with subheaders: last month, last 3 months, and 3+ months.
 
 `/calypso emails`
 
@@ -1022,14 +1031,17 @@ Rules:
 - Checks once per minute for configured recap slot (`daily@HH:MM` or `<weekday>@HH:MM`).
 - Optionally skips scheduled recap posts on weekends and/or observed US federal holidays.
 - Posts in-channel message in configured `review-recap-channel` containing:
-  - Header: `Pull Requests waiting on review in the last {recency}`
-  - PR rows with title, author login, and `opened for review` timestamp.
-- Includes empty state (`• None`) when no PRs match.
+  - Header: `PR Review Recap — {scope}`
+  - Bold sections in priority order:
+    - `Approved By Reviewers (Unmerged)`
+    - `Codex Approved, Waiting On Human Approval`
+    - `Other Open Pull Requests`
+  - Multi-line PR rows with PR reference, title, author, review state, Codex state, and `Last modified` date (`M/D/YYYY`).
+- Includes empty state (`• No open non-draft pull requests in scope.`) when no PRs match.
 - PR matching rule:
   - `lifecycle_state = open`
   - `is_draft = false`
-  - `review_state in (waiting, changes_requested)`
-  - `opened_for_review_at` within configured recency.
+  - `opened_for_review_at` (or fallback `opened_at`) within configured scope window.
 
 ## Environment Status Monitoring
 

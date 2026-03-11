@@ -1,6 +1,11 @@
 const { BaseCalypsoCommand } = require("./base_command");
 const { TIMEFRAME_DEFINITIONS, isValidTimeframe, timeframeSince } = require("../../shared/timeframes");
-const { formatPullRequestReference, formatTimestampByTimeFormat } = require("../../util/format");
+const {
+  formatPullRequestReference,
+  formatReviewListHeader,
+  formatReviewListItem,
+  formatTimestampByTimeFormat,
+} = require("../../util/format");
 
 class TestedCommand extends BaseCalypsoCommand {
   constructor() {
@@ -108,7 +113,7 @@ class TestedCommand extends BaseCalypsoCommand {
 
       return this.buildExecutionResult(
         [
-          `PRs tested in the last ${timeframeDefinition.displayName}:`,
+          formatReviewListHeader(`PRs tested in the last ${timeframeDefinition.displayName}`),
           ...recentlyTestedPullRequests.map((pullRequest) =>
             formatRecentlyTestedPullRequestLine(pullRequest, testedByNameById, timeFormat, timeZone),
           ),
@@ -174,7 +179,9 @@ function formatRecentlyTestedPullRequestLine(
     ? formatTimestampByTimeFormat(pullRequest.tested_at, { timeFormat, timeZone })
     : "at an unknown time";
   const titleSuffix = pullRequest.title ? ` - ${pullRequest.title}` : "";
-  return `• ${pullRequestReference}${titleSuffix} (${pullRequest.status}) tested by ${testedBy} ${testedAt}`;
+  return formatReviewListItem(
+    `${pullRequestReference}${titleSuffix} (${pullRequest.status}) tested by ${testedBy} ${testedAt}`,
+  );
 }
 
 module.exports = {

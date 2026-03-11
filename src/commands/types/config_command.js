@@ -19,6 +19,7 @@ const TIME_FORMAT_ARGUMENT_PATTERN = /^time-format:(human|long)$/i;
 const TIME_ZONE_ARGUMENT_PATTERN = /^timezone:(.+)$/i;
 const REVIEW_RECAP_CHANNEL_ARGUMENT_PATTERN = /^review-recap-channel:(.+)$/i;
 const REVIEW_RECAP_RECENCY_ARGUMENT_PATTERN = /^review-recap-recency:(\d+)([dw])$/i;
+const REVIEW_RECAP_WINDOW_ARGUMENT_PATTERN = /^review-recap-window:(.+)$/i;
 const REVIEW_RECAP_SCHEDULE_ARGUMENT_PATTERN =
   /^review-recap-schedule:(daily|mon|tue|wed|thu|fri|sat|sun)@(.+)$/i;
 const REVIEW_RECAP_SEND_WEEKENDS_ARGUMENT_PATTERN = /^review-recap-send-weekends:(on|off)$/i;
@@ -114,6 +115,19 @@ class ConfigCommand extends BaseCalypsoCommand {
         action: "config_review_recap_recency",
         recencyValue: Number(recapRecencyMatch[1]),
         recencyUnit: recapRecencyMatch[2].toLowerCase(),
+      });
+    }
+
+    const recapWindowMatch = argument.match(REVIEW_RECAP_WINDOW_ARGUMENT_PATTERN);
+    if (recapWindowMatch) {
+      const reviewScope = normalizeReviewRecapWindow(recapWindowMatch[1]);
+      if (!reviewScope) {
+        return this.buildRespondParsedCommand(buildConfigUsageMessage());
+      }
+
+      return this.buildParsedCommand({
+        action: "config_review_recap_window",
+        reviewScope,
       });
     }
 
@@ -341,7 +355,19 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
 
       return this.buildExecutionResult(
-        `Updated review recap recency to \`${parsedCommand.recencyValue}${parsedCommand.recencyUnit}\`.`,
+        `Updated review recap recency to \`${parsedCommand.recencyValue}${parsedCommand.recencyUnit}\` (legacy mode).`,
+      );
+    }
+
+    if (parsedCommand.action === "config_review_recap_window") {
+      await runtime.setReviewRecapScopeFn(
+        runtime.pool,
+        parsedCommand.reviewScope,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Updated review recap window to \`${formatReviewRecapWindowLabel(parsedCommand.reviewScope)}\`.`,
       );
     }
 
@@ -698,6 +724,7 @@ function isWorkspaceScopedConfigAction(action) {
   return (
     action === "config_review_recap_channel" ||
     action === "config_review_recap_recency" ||
+    action === "config_review_recap_window" ||
     action === "config_review_recap_schedule" ||
     action === "config_review_recap_send_weekends" ||
     action === "config_review_recap_send_holidays" ||
@@ -730,7 +757,8 @@ function buildConfigUsageMessage() {
     "",
     "PR review recap setup:",
     "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
-    "`/calypso config review-recap-recency:<Nd|Nw>`",
+    "`/calypso config review-recap-window:<all|last-day|last-week|last-month>`",
+    "`/calypso config review-recap-recency:<Nd|Nw>` (legacy)",
     "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
     "`/calypso config review-recap-send-weekends:<on|off>`",
     "`/calypso config review-recap-send-holidays:<on|off>`",
@@ -759,7 +787,7 @@ function buildConfigUsageMessage() {
     "`/calypso config email-provider:gmail|outlook`",
     "`/calypso config ai-provider:openai|anthropic`",
     "`/calypso config error-tracking-provider:sentry|rollbar`",
-    "Defaults: `1w`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/calypso config timezone`.",
+    "Defaults: `all`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/calypso config timezone`.",
   ].join("\n");
 }
 
@@ -805,6 +833,39 @@ function normalizeReviewRecapScheduleTimes(rawScheduleTimes) {
   }
 
   return uniqueScheduleTimes.sort().join(",");
+}
+
+function normalizeReviewRecapWindow(rawWindow) {
+  const normalizedWindow = String(rawWindow || "").toLowerCase().trim();
+  if (normalizedWindow === "all") {
+    return "all";
+  }
+  if (normalizedWindow === "day" || normalizedWindow === "last-day") {
+    return "day";
+  }
+  if (normalizedWindow === "week" || normalizedWindow === "last-week") {
+    return "week";
+  }
+  if (normalizedWindow === "month" || normalizedWindow === "last-month") {
+    return "month";
+  }
+
+  return null;
+}
+
+function formatReviewRecapWindowLabel(reviewScope) {
+  const normalizedScope = String(reviewScope || "").toLowerCase().trim();
+  if (normalizedScope === "day") {
+    return "last day";
+  }
+  if (normalizedScope === "week") {
+    return "last week";
+  }
+  if (normalizedScope === "month") {
+    return "last month";
+  }
+
+  return "all";
 }
 
 async function updateChannelScopedConfig({

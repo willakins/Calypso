@@ -9,6 +9,7 @@ const {
   getRuntimeProviderConfig,
   getReviewRecapConfig,
   isUserWhitelistedForDeploy,
+  listOpenPullRequestsForReviewRecapSince,
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
@@ -24,6 +25,7 @@ const {
   setConfiguredTimeZone,
   setReviewRecapChannel,
   setReviewRecapRecency,
+  setReviewRecapScope,
   setReviewRecapSendHolidays,
   setReviewRecapSendWeekends,
   setReviewRecapSchedule,
@@ -536,6 +538,34 @@ test("listOpenPullRequestsWaitingOnReviewSince returns rows in recency window", 
   assert.match(captured.sql, /FROM open_pr_review_state/);
   assert.match(captured.sql, /lifecycle_state = 'open'/);
   assert.match(captured.sql, /review_state IN \('waiting', 'changes_requested'\)/);
+  assert.match(captured.sql, /COALESCE\(last_reviewed_at, opened_for_review_at, opened_at\) AS last_modified_at/);
+  assert.doesNotMatch(captured.sql, /updated_at, opened_for_review_at, opened_at\) AS last_modified_at/);
+  assert.deepEqual(captured.params, [sinceTimestamp]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].pr_number, 71);
+});
+
+test("listOpenPullRequestsForReviewRecapSince returns open non-draft rows", async () => {
+  const captured = {};
+  const sinceTimestamp = new Date("2026-02-09T14:00:00.000Z");
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ repo: "croft-eng/croft", pr_number: 71, author_login: "octocat" }],
+      };
+    },
+  };
+
+  const result = await listOpenPullRequestsForReviewRecapSince(pool, sinceTimestamp);
+
+  assert.match(captured.sql, /FROM open_pr_review_state/);
+  assert.match(captured.sql, /lifecycle_state = 'open'/);
+  assert.match(captured.sql, /is_draft = false/);
+  assert.match(captured.sql, /COALESCE\(last_reviewed_at, opened_for_review_at, opened_at\) AS last_modified_at/);
+  assert.doesNotMatch(captured.sql, /updated_at, opened_for_review_at, opened_at\) AS last_modified_at/);
+  assert.match(captured.sql, /COALESCE\(opened_for_review_at, opened_at\) >= \$1/);
   assert.deepEqual(captured.params, [sinceTimestamp]);
   assert.equal(result.length, 1);
   assert.equal(result[0].pr_number, 71);
@@ -579,6 +609,7 @@ test("getReviewRecapConfig returns defaults when singleton row is missing", asyn
   const result = await getReviewRecapConfig(pool);
 
   assert.equal(result.targetChannelId, null);
+  assert.equal(result.reviewScope, "all");
   assert.equal(result.recencyValue, 1);
   assert.equal(result.recencyUnit, "w");
   assert.equal(result.scheduleWeekday, "mon");
@@ -596,6 +627,7 @@ test("getReviewRecapConfig returns configured values", async () => {
         rows: [
           {
             target_channel_id: "C123",
+            review_scope: "month",
             recency_value: 2,
             recency_unit: "d",
             schedule_weekday: "tue",
@@ -613,6 +645,7 @@ test("getReviewRecapConfig returns configured values", async () => {
   const result = await getReviewRecapConfig(pool);
 
   assert.equal(result.targetChannelId, "C123");
+  assert.equal(result.reviewScope, "month");
   assert.equal(result.recencyValue, 2);
   assert.equal(result.recencyUnit, "d");
   assert.equal(result.scheduleWeekday, "tue");
@@ -646,6 +679,7 @@ test("getReviewRecapConfig supports daily schedule weekday", async () => {
 
   assert.equal(result.scheduleWeekday, "daily");
   assert.equal(result.scheduleTime, "09:00");
+  assert.equal(result.reviewScope, "all");
 });
 
 test("getRuntimeProviderConfig returns defaults when singleton row is missing", async () => {
@@ -743,8 +777,9 @@ test("setReviewRecapRecency upserts recency", async () => {
   const result = await setReviewRecapRecency(pool, 2, "w", "UADMIN");
 
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
-  assert.equal(captured.params[1], 2);
-  assert.equal(captured.params[2], "w");
+  assert.equal(captured.params[1], "legacy");
+  assert.equal(captured.params[2], 2);
+  assert.equal(captured.params[3], "w");
   assert.equal(result.recency_value, 2);
   assert.equal(result.recency_unit, "w");
 });
@@ -776,11 +811,11 @@ test("setReviewRecapSchedule upserts schedule", async () => {
   const result = await setReviewRecapSchedule(pool, "tue", "10:15", "UADMIN");
 
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
-  assert.match(captured.sql, /COALESCE\(\$7::timestamptz, NULL\)/);
-  assert.equal(captured.params[3], "tue");
-  assert.equal(captured.params[4], "10:15");
-  assert.ok(captured.params[6]);
-  assert.equal(Number.isNaN(Date.parse(captured.params[6])), false);
+  assert.match(captured.sql, /COALESCE\(\$8::timestamptz, NULL\)/);
+  assert.equal(captured.params[4], "tue");
+  assert.equal(captured.params[5], "10:15");
+  assert.ok(captured.params[7]);
+  assert.equal(Number.isNaN(Date.parse(captured.params[7])), false);
   assert.equal(result.schedule_weekday, "tue");
   assert.equal(result.schedule_time, "10:15");
 });
@@ -800,10 +835,10 @@ test("setReviewRecapSchedule accepts daily schedule keyword", async () => {
   const result = await setReviewRecapSchedule(pool, "daily", "09:00", "UADMIN");
 
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
-  assert.equal(captured.params[3], "daily");
-  assert.equal(captured.params[4], "09:00");
-  assert.ok(captured.params[6]);
-  assert.equal(Number.isNaN(Date.parse(captured.params[6])), false);
+  assert.equal(captured.params[4], "daily");
+  assert.equal(captured.params[5], "09:00");
+  assert.ok(captured.params[7]);
+  assert.equal(Number.isNaN(Date.parse(captured.params[7])), false);
   assert.equal(result.schedule_weekday, "daily");
   assert.equal(result.schedule_time, "09:00");
 });
@@ -823,10 +858,41 @@ test("setReviewRecapSchedule accepts and normalizes multiple schedule times", as
   const result = await setReviewRecapSchedule(pool, "daily", "17:00,09:00,17:00", "UADMIN");
 
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
-  assert.equal(captured.params[3], "daily");
-  assert.equal(captured.params[4], "09:00,17:00");
+  assert.equal(captured.params[4], "daily");
+  assert.equal(captured.params[5], "09:00,17:00");
   assert.equal(result.schedule_weekday, "daily");
   assert.equal(result.schedule_time, "09:00,17:00");
+});
+
+test("setReviewRecapScope upserts recap window scope", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ review_scope: "week", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setReviewRecapScope(pool, "week", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO review_recap_config/);
+  assert.equal(captured.params[1], "week");
+  assert.equal(result.review_scope, "week");
+});
+
+test("setReviewRecapScope rejects unsupported scope", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setReviewRecapScope(pool, "quarter", "UADMIN");
+  }, /Unsupported review recap scope/);
 });
 
 test("setReviewRecapSchedule rejects invalid time", async () => {
@@ -856,7 +922,7 @@ test("setReviewRecapTimeZone upserts timezone", async () => {
   const result = await setReviewRecapTimeZone(pool, "America/Chicago", "UADMIN");
 
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
-  assert.equal(captured.params[5], "America/Chicago");
+  assert.equal(captured.params[6], "America/Chicago");
   assert.equal(result.timezone, "America/Chicago");
 });
 
@@ -875,7 +941,7 @@ test("setReviewRecapSendWeekends upserts weekend delivery flag", async () => {
   const result = await setReviewRecapSendWeekends(pool, false, "UADMIN");
 
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
-  assert.equal(captured.params[7], false);
+  assert.equal(captured.params[8], false);
   assert.equal(result.send_on_weekends, false);
 });
 
@@ -906,7 +972,7 @@ test("setReviewRecapSendHolidays upserts holiday delivery flag", async () => {
   const result = await setReviewRecapSendHolidays(pool, false, "UADMIN");
 
   assert.match(captured.sql, /INSERT INTO review_recap_config/);
-  assert.equal(captured.params[8], false);
+  assert.equal(captured.params[9], false);
   assert.equal(result.send_on_holidays, false);
 });
 

@@ -1,5 +1,6 @@
 const {
   getReviewRecapConfig,
+  listOpenPullRequestsForReviewRecapSince,
   listOpenPullRequestsWaitingOnReviewSince,
   markReviewRecapSent,
 } = require("../db");
@@ -9,6 +10,8 @@ const DEFAULT_TICK_INTERVAL_MS = 60_000;
 const SCHEDULE_LOOKBACK_MINUTES = 8 * 24 * 60;
 const MAX_POST_ATTEMPTS_PER_SLOT = 3;
 const DAILY_SCHEDULE_WEEKDAY = "daily";
+const REVIEW_RECAP_SCOPE_DEFAULT = "all";
+const REVIEW_RECAP_SCOPE_LEGACY = "legacy";
 const WEEKEND_WEEKDAYS = new Set(["sat", "sun"]);
 const US_FEDERAL_HOLIDAY_OBSERVED_DATE_KEYS_BY_YEAR = new Map();
 
@@ -16,7 +19,8 @@ function startReviewRecapScheduler(options) {
   const {
     communicationClient = null,
     getReviewRecapConfigFn = getReviewRecapConfig,
-    listOpenPullRequestsWaitingOnReviewSinceFn = listOpenPullRequestsWaitingOnReviewSince,
+    listOpenPullRequestsForReviewRecapSinceFn = listOpenPullRequestsForReviewRecapSince,
+    listOpenPullRequestsWaitingOnReviewSinceFn = null,
     markReviewRecapSentFn = markReviewRecapSent,
     formatReviewRecapResponseFn = formatReviewRecapResponse,
     tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
@@ -39,6 +43,7 @@ function startReviewRecapScheduler(options) {
   async function tick() {
     await runReviewRecapSchedulerTick({
       getReviewRecapConfigFn,
+      listOpenPullRequestsForReviewRecapSinceFn,
       listOpenPullRequestsWaitingOnReviewSinceFn,
       markReviewRecapSentFn,
       formatReviewRecapResponseFn,
@@ -64,6 +69,7 @@ function startReviewRecapScheduler(options) {
 
 async function runReviewRecapSchedulerTick({
   getReviewRecapConfigFn,
+  listOpenPullRequestsForReviewRecapSinceFn,
   listOpenPullRequestsWaitingOnReviewSinceFn,
   markReviewRecapSentFn,
   formatReviewRecapResponseFn,
@@ -125,12 +131,18 @@ async function runReviewRecapSchedulerTick({
 
     const sinceTimestamp = computeSinceTimestamp({
       now,
+      reviewScope: config.reviewScope,
       recencyValue: config.recencyValue,
       recencyUnit: config.recencyUnit,
     });
-    const waitingPullRequests = await listOpenPullRequestsWaitingOnReviewSinceFn(pool, sinceTimestamp);
+    const listPullRequestsFn = resolveRecapListFn({
+      listOpenPullRequestsForReviewRecapSinceFn,
+      listOpenPullRequestsWaitingOnReviewSinceFn,
+    });
+    const pullRequests = await listPullRequestsFn(pool, sinceTimestamp);
     const message = formatReviewRecapResponseFn({
-      waitingPullRequests,
+      pullRequests,
+      reviewScope: config.reviewScope,
       recencyValue: config.recencyValue,
       recencyUnit: config.recencyUnit,
       timeZone: config.timeZone,
@@ -299,7 +311,43 @@ function hasSlotAlreadyBeenSent({ scheduledSlot, lastSentSlotAt }) {
   return sentTimestamp.getTime() >= scheduledSlot.getTime();
 }
 
-function computeSinceTimestamp({ now, recencyValue, recencyUnit }) {
+function resolveRecapListFn({
+  listOpenPullRequestsForReviewRecapSinceFn,
+  listOpenPullRequestsWaitingOnReviewSinceFn,
+}) {
+  if (typeof listOpenPullRequestsForReviewRecapSinceFn === "function") {
+    return listOpenPullRequestsForReviewRecapSinceFn;
+  }
+
+  return (
+    listOpenPullRequestsWaitingOnReviewSinceFn ||
+    listOpenPullRequestsWaitingOnReviewSince
+  );
+}
+
+function computeSinceTimestamp({ now, reviewScope, recencyValue, recencyUnit }) {
+  const nowTimestamp = now instanceof Date ? now : new Date(now);
+  const normalizedReviewScope = normalizeReviewRecapScope(reviewScope);
+  if (normalizedReviewScope === REVIEW_RECAP_SCOPE_DEFAULT) {
+    return new Date(0);
+  }
+
+  if (normalizedReviewScope === "day") {
+    return new Date(nowTimestamp.getTime() - 24 * 60 * 60 * 1000);
+  }
+
+  if (normalizedReviewScope === "week") {
+    return new Date(nowTimestamp.getTime() - 7 * 24 * 60 * 60 * 1000);
+  }
+
+  if (normalizedReviewScope === "month") {
+    return new Date(nowTimestamp.getTime() - 30 * 24 * 60 * 60 * 1000);
+  }
+
+  if (normalizedReviewScope !== REVIEW_RECAP_SCOPE_LEGACY) {
+    return new Date(0);
+  }
+
   const parsedRecencyValue = Number(recencyValue);
   const normalizedRecencyValue = Number.isInteger(parsedRecencyValue) && parsedRecencyValue > 0
     ? parsedRecencyValue
@@ -310,7 +358,16 @@ function computeSinceTimestamp({ now, recencyValue, recencyUnit }) {
     ? normalizedRecencyValue
     : normalizedRecencyValue * 7;
 
-  return new Date(now.getTime() - durationDays * 24 * 60 * 60 * 1000);
+  return new Date(nowTimestamp.getTime() - durationDays * 24 * 60 * 60 * 1000);
+}
+
+function normalizeReviewRecapScope(reviewScope) {
+  const normalizedScope = String(reviewScope || "").toLowerCase().trim();
+  if (["all", "day", "week", "month", "legacy"].includes(normalizedScope)) {
+    return normalizedScope;
+  }
+
+  return REVIEW_RECAP_SCOPE_DEFAULT;
 }
 
 function findMostRecentScheduledSlot({ now, scheduleWeekday, scheduleTime, timeZone, lookbackMinutes }) {

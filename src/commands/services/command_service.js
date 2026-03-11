@@ -45,6 +45,7 @@ const {
   setEnvironmentStatusUrl,
   setReviewRecapChannel,
   setReviewRecapRecency,
+  setReviewRecapScope,
   setReviewRecapSchedule,
   setReviewRecapSendHolidays,
   setReviewRecapSendWeekends,
@@ -158,6 +159,7 @@ function createDefaultDependencies() {
     setEnvironmentStatusUrlFn: setEnvironmentStatusUrl,
     setReviewRecapChannelFn: setReviewRecapChannel,
     setReviewRecapRecencyFn: setReviewRecapRecency,
+    setReviewRecapScopeFn: setReviewRecapScope,
     setReviewRecapScheduleFn: setReviewRecapSchedule,
     setReviewRecapSendWeekendsFn: setReviewRecapSendWeekends,
     setReviewRecapSendHolidaysFn: setReviewRecapSendHolidays,
@@ -317,6 +319,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.setReviewRecapChannelFn || defaultDependencies.setReviewRecapChannelFn,
     setReviewRecapRecencyFn:
       mergedOptions.setReviewRecapRecencyFn || defaultDependencies.setReviewRecapRecencyFn,
+    setReviewRecapScopeFn:
+      mergedOptions.setReviewRecapScopeFn || defaultDependencies.setReviewRecapScopeFn,
     setReviewRecapScheduleFn:
       mergedOptions.setReviewRecapScheduleFn || defaultDependencies.setReviewRecapScheduleFn,
     setReviewRecapSendWeekendsFn:

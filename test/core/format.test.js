@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  formatReviewListHeader,
+  formatReviewListItem,
   formatReviewRecapResponse,
   formatReviewRecencyLabel,
   formatStatusResponse,
@@ -104,9 +106,22 @@ test("formatReviewRecencyLabel formats compact recency values", () => {
   assert.equal(formatReviewRecencyLabel(3, "d"), "3 days");
 });
 
-test("formatReviewRecapResponse renders waiting pull request lines", () => {
+test("formatReviewListHeader appends colon once", () => {
+  assert.equal(formatReviewListHeader("Open PRs waiting on review"), "Open PRs waiting on review:");
+  assert.equal(formatReviewListHeader("PRs tested in the last week:"), "PRs tested in the last week:");
+});
+
+test("formatReviewListItem renders summary and optional detail lines", () => {
+  assert.equal(formatReviewListItem("croft-eng/croft#11"), "• croft-eng/croft#11");
+  assert.equal(
+    formatReviewListItem("croft-eng/croft#11", "author: octocat"),
+    "• croft-eng/croft#11\n  author: octocat",
+  );
+});
+
+test("formatReviewRecapResponse renders prioritized recap sections", () => {
   const message = formatReviewRecapResponse({
-    waitingPullRequests: [
+    pullRequests: [
       {
         repo: "croft-eng/croft",
         pr_number: 71,
@@ -114,7 +129,8 @@ test("formatReviewRecapResponse renders waiting pull request lines", () => {
         url: "https://github.com/croft-eng/croft/pull/71",
         author_login: "octocat",
         is_draft: false,
-        review_state: "waiting",
+        review_state: "approved",
+        codex_approved: false,
         opened_for_review_at: "2026-02-13T22:00:17.000Z",
       },
       {
@@ -128,30 +144,162 @@ test("formatReviewRecapResponse renders waiting pull request lines", () => {
         codex_approved: true,
         opened_for_review_at: "2026-02-14T12:00:00.000Z",
       },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 73,
+        title: "Fix flaky test",
+        url: null,
+        author_login: "will",
+        is_draft: false,
+        review_state: "changes_requested",
+        codex_approved: false,
+        opened_for_review_at: "2026-02-15T12:00:00.000Z",
+      },
     ],
-    recencyValue: 1,
-    recencyUnit: "w",
+    reviewScope: "week",
     timeZone: "America/New_York",
   });
 
-  assert.match(message, /^\*Pull Requests waiting on review in the last week\*/);
+  assert.match(message, /^\*PR Review Recap — last week\*/);
+  assert.match(message, /\*Approved By Reviewers \(Unmerged\)\*/);
+  assert.match(message, /\*Codex Approved, Waiting On Human Approval\*/);
+  assert.match(message, /\*Other Open Pull Requests\*/);
   assert.match(
     message,
-    /• <https:\/\/github.com\/croft-eng\/croft\/pull\/71\|croft-eng\/croft#71> - Improve metrics \| created by octocat \| 📝 Draft: No \| 🤖 Codex Approved: No \| opened for review on February 13th, 2026 at 5:00 PM EST/,
+    /• <https:\/\/github.com\/croft-eng\/croft\/pull\/71\|#71> - \*Improve metrics\*\n  author: octocat \| review: approved \| codex: not approved \| Last modified: 2\/13\/2026/,
   );
   assert.match(
     message,
-    /• croft-eng\/croft#72 - \(no title\) \| created by hubot \| 📝 Draft: No \| 🤖 Codex Approved: Yes \| opened for review on February 14th, 2026 at 7:00 AM EST/,
+    /• #72 - \*\(no title\)\*\n  author: hubot \| review: waiting \| codex: approved \| Last modified: 2\/14\/2026/,
   );
+  assert.match(
+    message,
+    /• #73 - \*Fix flaky test\*\n  author: will \| review: changes requested \| codex: not approved \| Last modified: 2\/15\/2026/,
+  );
+});
+
+test("formatReviewRecapResponse sorts each section by most recent first", () => {
+  const message = formatReviewRecapResponse({
+    pullRequests: [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 11,
+        title: "Older approved",
+        url: "https://github.com/croft-eng/croft/pull/11",
+        author_login: "octocat",
+        is_draft: false,
+        review_state: "approved",
+        codex_approved: false,
+        opened_for_review_at: "2026-02-10T12:00:00.000Z",
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 12,
+        title: "Newer approved",
+        url: "https://github.com/croft-eng/croft/pull/12",
+        author_login: "octocat",
+        is_draft: false,
+        review_state: "approved",
+        codex_approved: false,
+        opened_for_review_at: "2026-02-12T12:00:00.000Z",
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 21,
+        title: "Older codex",
+        url: "https://github.com/croft-eng/croft/pull/21",
+        author_login: "hubot",
+        is_draft: false,
+        review_state: "waiting",
+        codex_approved: true,
+        opened_for_review_at: "2026-02-11T12:00:00.000Z",
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 22,
+        title: "Newer codex",
+        url: "https://github.com/croft-eng/croft/pull/22",
+        author_login: "hubot",
+        is_draft: false,
+        review_state: "waiting",
+        codex_approved: true,
+        opened_for_review_at: "2026-02-14T12:00:00.000Z",
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 31,
+        title: "Older other",
+        url: "https://github.com/croft-eng/croft/pull/31",
+        author_login: "will",
+        is_draft: false,
+        review_state: "changes_requested",
+        codex_approved: false,
+        opened_for_review_at: "2026-02-09T12:00:00.000Z",
+      },
+      {
+        repo: "croft-eng/croft",
+        pr_number: 32,
+        title: "Newer other",
+        url: "https://github.com/croft-eng/croft/pull/32",
+        author_login: "will",
+        is_draft: false,
+        review_state: "waiting",
+        codex_approved: false,
+        opened_for_review_at: "2026-02-15T12:00:00.000Z",
+      },
+    ],
+    reviewScope: "all",
+    timeZone: "America/New_York",
+  });
+
+  const approvedNewerIndex = message.indexOf("<https://github.com/croft-eng/croft/pull/12|#12>");
+  const approvedOlderIndex = message.indexOf("<https://github.com/croft-eng/croft/pull/11|#11>");
+  assert.ok(approvedNewerIndex >= 0);
+  assert.ok(approvedOlderIndex >= 0);
+  assert.ok(approvedNewerIndex < approvedOlderIndex);
+
+  const codexNewerIndex = message.indexOf("<https://github.com/croft-eng/croft/pull/22|#22>");
+  const codexOlderIndex = message.indexOf("<https://github.com/croft-eng/croft/pull/21|#21>");
+  assert.ok(codexNewerIndex >= 0);
+  assert.ok(codexOlderIndex >= 0);
+  assert.ok(codexNewerIndex < codexOlderIndex);
+
+  const otherNewerIndex = message.indexOf("<https://github.com/croft-eng/croft/pull/32|#32>");
+  const otherOlderIndex = message.indexOf("<https://github.com/croft-eng/croft/pull/31|#31>");
+  assert.ok(otherNewerIndex >= 0);
+  assert.ok(otherOlderIndex >= 0);
+  assert.ok(otherNewerIndex < otherOlderIndex);
+});
+
+test("formatReviewRecapResponse omits approved section when no approved PR exists", () => {
+  const message = formatReviewRecapResponse({
+    pullRequests: [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 72,
+        title: null,
+        url: null,
+        author_login: "hubot",
+        is_draft: false,
+        review_state: "waiting",
+        codex_approved: true,
+        opened_for_review_at: "2026-02-14T12:00:00.000Z",
+      },
+    ],
+    reviewScope: "all",
+    timeZone: "America/New_York",
+  });
+
+  assert.doesNotMatch(message, /\*Approved By Reviewers \(Unmerged\)\*/);
+  assert.match(message, /^\*PR Review Recap — all open non-draft PRs\*/);
 });
 
 test("formatReviewRecapResponse renders explicit none row when empty", () => {
   const message = formatReviewRecapResponse({
-    waitingPullRequests: [],
-    recencyValue: 2,
-    recencyUnit: "d",
+    pullRequests: [],
+    reviewScope: "day",
     timeZone: "America/New_York",
   });
 
-  assert.equal(message, "*Pull Requests waiting on review in the last 2 days*\n• None");
+  assert.equal(message, "*PR Review Recap — last day*\n• No open non-draft pull requests in scope.");
 });
