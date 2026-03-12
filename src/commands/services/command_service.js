@@ -338,6 +338,7 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.setSupportEmailMonitorEnabledFn,
     setSupportEmailOnCallFn:
       mergedOptions.setSupportEmailOnCallFn || defaultDependencies.setSupportEmailOnCallFn,
+    sendInterimResponseFn: mergedOptions.sendInterimResponseFn || null,
     communicationClient,
     currentChannelId,
     currentChannelName,

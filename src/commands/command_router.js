@@ -27,6 +27,12 @@ function registerCalypsoCommand(app, options = {}) {
         communicationClient: client,
         currentChannelId: resolveCommandChannelId(command),
         currentChannelName: resolveCommandChannelName(command),
+        sendInterimResponseFn: async ({ responseType, text }) => {
+          await respond({
+            response_type: normalizeResponseType(responseType),
+            text,
+          });
+        },
       });
 
       await respond({

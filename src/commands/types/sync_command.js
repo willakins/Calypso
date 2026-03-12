@@ -38,6 +38,7 @@ class SyncCommand extends BaseCalypsoCommand {
     }
 
     try {
+      await this.sendInProgressResponse(runtime);
       const syncSummary = await runtime.runOpenPullRequestSyncNowFn();
       if (syncSummary?.unavailableReason) {
         return this.buildExecutionResult(syncSummary.unavailableReason);
@@ -58,6 +59,21 @@ class SyncCommand extends BaseCalypsoCommand {
       return this.buildExecutionResult(
         `Open PR sync failed: ${error.message}`,
       );
+    }
+  }
+
+  async sendInProgressResponse(runtime) {
+    if (typeof runtime.sendInterimResponseFn !== "function") {
+      return;
+    }
+
+    try {
+      await runtime.sendInterimResponseFn({
+        responseType: "ephemeral",
+        text: "Open PR sync started. Syncing in progress...",
+      });
+    } catch (_error) {
+      // Continue sync execution even if interim message delivery fails.
     }
   }
 }

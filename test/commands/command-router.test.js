@@ -482,20 +482,23 @@ test("registerCalypsoCommand runs sync command and returns summary", async () =>
     }),
   });
 
-  let payload;
+  const responses = [];
   await commandHandler({
     command: { text: "sync", user_id: "U123" },
     ack: async () => {},
     respond: async (message) => {
-      payload = message;
+      responses.push(message);
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Open PR sync completed successfully/);
-  assert.match(payload.text, /Review sync: upserted 7 open PR\(s\)/);
-  assert.match(payload.text, /marked 2 stale PR\(s\) closed/);
-  assert.match(payload.text, /Untested merge sync: upserted 3 merged untested PR\(s\)/);
+  assert.equal(responses.length, 2);
+  assert.equal(responses[0].response_type, "ephemeral");
+  assert.match(responses[0].text, /Syncing in progress/);
+  assert.equal(responses[1].response_type, "ephemeral");
+  assert.match(responses[1].text, /Open PR sync completed successfully/);
+  assert.match(responses[1].text, /Review sync: upserted 7 open PR\(s\)/);
+  assert.match(responses[1].text, /marked 2 stale PR\(s\) closed/);
+  assert.match(responses[1].text, /Untested merge sync: upserted 3 merged untested PR\(s\)/);
 });
 
 test("registerCalypsoCommand reports sync unavailable when token is not configured", async () => {
@@ -512,18 +515,19 @@ test("registerCalypsoCommand reports sync unavailable when token is not configur
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
   });
 
-  let payload;
+  const responses = [];
   await commandHandler({
     command: { text: "sync", user_id: "U123" },
     ack: async () => {},
     respond: async (message) => {
-      payload = message;
+      responses.push(message);
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Sync unavailable/);
-  assert.match(payload.text, /CODE_HOST_TOKEN/);
+  assert.equal(responses.length, 1);
+  assert.equal(responses[0].response_type, "ephemeral");
+  assert.match(responses[0].text, /Sync unavailable/);
+  assert.match(responses[0].text, /CODE_HOST_TOKEN/);
 });
 
 test("registerCalypsoCommand returns sync failure details when manual sync throws", async () => {
@@ -543,18 +547,21 @@ test("registerCalypsoCommand returns sync failure details when manual sync throw
     },
   });
 
-  let payload;
+  const responses = [];
   await commandHandler({
     command: { text: "sync", user_id: "U123" },
     ack: async () => {},
     respond: async (message) => {
-      payload = message;
+      responses.push(message);
     },
   });
 
-  assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Open PR sync failed/);
-  assert.match(payload.text, /github rate limited/);
+  assert.equal(responses.length, 2);
+  assert.equal(responses[0].response_type, "ephemeral");
+  assert.match(responses[0].text, /Syncing in progress/);
+  assert.equal(responses[1].response_type, "ephemeral");
+  assert.match(responses[1].text, /Open PR sync failed/);
+  assert.match(responses[1].text, /github rate limited/);
 });
 
 test("registerCalypsoCommand denies sync for non-admin, non-whitelisted user", async () => {
