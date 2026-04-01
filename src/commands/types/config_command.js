@@ -36,6 +36,8 @@ const EMAIL_CHANNEL_ARGUMENT_PATTERN = /^email-channel:(.+)$/i;
 const GITHUB_SLACK_USER_MAP_ARGUMENT_PATTERN = /^github-slack-user-map:([^=]+)=(.+)$/i;
 const REVIEW_RECAP_SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const GITHUB_USERNAME_PATTERN = /^@?([a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)$/i;
+const SLACK_USER_MENTION_PATTERN = /^<@([UW][A-Z0-9]+)(?:\|[^>]+)?>$/i;
+const SLACK_USER_ID_PATTERN = /^([UW][A-Z0-9]+)$/i;
 const SLACK_USERNAME_PATTERN = /^@?([a-z0-9][a-z0-9._-]*)$/i;
 const EMAIL_ON_CALL_COMMAND_NAME = "email-on-call";
 const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
@@ -575,7 +577,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
 
       return this.buildExecutionResult(
-        `Mapped GitHub user \`${parsedCommand.githubUsername}\` to Slack user \`@${parsedCommand.slackUsername}\`.`,
+        `Mapped GitHub user \`${parsedCommand.githubUsername}\` to Slack user \`${formatSlackMappingDisplay(parsedCommand.slackUsername)}\`.`,
       );
     }
 
@@ -811,7 +813,7 @@ function buildConfigUsageMessage() {
     "`/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
     "`/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`",
     "`/calypso config email-on-call off`",
-    "`/calypso config github-slack-user-map:<GITHUB_USER>=@<SLACK_USER>`",
+    "`/calypso config github-slack-user-map:<GITHUB_USER>=<@USER|USER_ID|@HANDLE>`",
     "",
     "Platform provider setup:",
     "`/calypso config communication-provider:slack|microsoft_teams`",
@@ -834,12 +836,33 @@ function normalizeGithubUsernameToken(rawGithubUsername) {
 }
 
 function normalizeSlackUsernameToken(rawSlackUsername) {
-  const match = String(rawSlackUsername || "").trim().match(SLACK_USERNAME_PATTERN);
-  if (!match) {
+  const normalizedSlackReference = String(rawSlackUsername || "").trim();
+
+  const mentionMatch = normalizedSlackReference.match(SLACK_USER_MENTION_PATTERN);
+  if (mentionMatch) {
+    return mentionMatch[1].toUpperCase();
+  }
+
+  const userIdMatch = normalizedSlackReference.match(SLACK_USER_ID_PATTERN);
+  if (userIdMatch) {
+    return userIdMatch[1].toUpperCase();
+  }
+
+  const usernameMatch = normalizedSlackReference.match(SLACK_USERNAME_PATTERN);
+  if (!usernameMatch) {
     return null;
   }
 
-  return match[1].toLowerCase();
+  return usernameMatch[1].toLowerCase();
+}
+
+function formatSlackMappingDisplay(slackMappingValue) {
+  const normalizedSlackMappingValue = String(slackMappingValue || "").trim();
+  if (SLACK_USER_ID_PATTERN.test(normalizedSlackMappingValue)) {
+    return `<@${normalizedSlackMappingValue.toUpperCase()}>`;
+  }
+
+  return `@${normalizedSlackMappingValue}`;
 }
 
 function parseEmailOnCallCommand(commandDefinition, commandWords) {

@@ -81,7 +81,7 @@ test("handleCalypsoCommand returns config topic help", () => {
   assert.match(result.responseText, /\/calypso config time-format:human\|long/);
   assert.match(
     result.responseText,
-    /\/calypso config github-slack-user-map:<GITHUB_USER>=@<SLACK_USER>/,
+    /\/calypso config github-slack-user-map:<GITHUB_USER>=<@USER\|USER_ID\|@HANDLE>/,
   );
   assert.match(result.responseText, /\/calypso config communication-provider:slack\|microsoft_teams/);
   assert.match(result.responseText, /\/calypso config email-provider:gmail\|outlook/);
@@ -271,6 +271,17 @@ test("handleCalypsoCommand routes config github-slack user map input", () => {
   assert.equal(result.action, "config_github_slack_user_map");
   assert.equal(result.githubUsername, "octocat");
   assert.equal(result.slackUsername, "willa");
+});
+
+test("handleCalypsoCommand routes config github-slack user map input with mention", () => {
+  const result = handleCalypsoCommand({
+    text: "config github-slack-user-map:octocat=<@U123ABC>",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "config_github_slack_user_map");
+  assert.equal(result.githubUsername, "octocat");
+  assert.equal(result.slackUsername, "U123ABC");
 });
 
 test("handleCalypsoCommand routes config review recap channel input", () => {
@@ -1282,8 +1293,16 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
     insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
     markPullRequestsDeployedSinceFn: async () => ({
-      deployedPullRequestCount: 0,
-      deployedPullRequests: [],
+      deployedPullRequestCount: 1,
+      deployedPullRequests: [
+        {
+          repo: "croft-eng/croft",
+          pr_number: 12,
+          title: "Hotfix without tested",
+          url: "https://github.com/croft-eng/croft/pull/12",
+          author_login: "octocat",
+        },
+      ],
     }),
     deployConfig: {
       digitaloceanToken: "token",
@@ -1304,8 +1323,12 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
   assert.match(payload.text, /Force deploy to prod is in progress/);
   assert.match(payload.text, /Triggered by travis/);
   assert.match(payload.text, /Bypassed 1 blocking PR\(s\)/);
+  assert.match(payload.text, /Marked 1 PR\(s\) deployed/);
   assert.match(payload.text, /Deployed PRs:/);
-  assert.match(payload.text, /• none\./);
+  assert.match(
+    payload.text,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Hotfix without tested> by octocat \(github username since no matching slack username\)\./,
+  );
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
 });
 
@@ -1560,7 +1583,7 @@ test("registerCalypsoCommand triggers deploy and records deployment when clear a
         },
       ],
     }),
-    listGithubSlackUserMappingsFn: async () => new Map([["octocat", "willa"]]),
+    listGithubSlackUserMappingsFn: async () => new Map([["octocat", "U123ABC"]]),
     deployConfig: {
       digitaloceanToken: "token",
       doAppIdProd: "app-id",
@@ -1581,7 +1604,7 @@ test("registerCalypsoCommand triggers deploy and records deployment when clear a
   assert.match(payload.text, /Triggered by U123/);
   assert.match(payload.text, /Marked 2 PR\(s\) deployed/);
   assert.match(payload.text, /Deployed PRs:/);
-  assert.match(payload.text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by @willa\./);
+  assert.match(payload.text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC>\./);
   assert.match(
     payload.text,
     /<https:\/\/github\.com\/croft-eng\/croft\/pull\/13\|Fix flaky test> by hubot \(github username since no matching slack username\)\./,
@@ -2163,6 +2186,43 @@ test("registerCalypsoCommand config command updates github-slack user map", asyn
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].githubUsername, "octocat");
   assert.equal(capturedCalls[0].slackUsername, "willa");
+  assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates github-slack user map with slack user id", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setGithubSlackUserMappingFn: async (pool, githubUsername, slackUsername, updatedBy) => {
+      capturedCalls.push({ pool, githubUsername, slackUsername, updatedBy });
+      return { github_username: githubUsername, slack_username: slackUsername, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config github-slack-user-map:octocat=<@U123ABC>", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Mapped GitHub user `octocat` to Slack user `<@U123ABC>`/);
+  assert.equal(capturedCalls.length, 1);
+  assert.equal(capturedCalls[0].githubUsername, "octocat");
+  assert.equal(capturedCalls[0].slackUsername, "U123ABC");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
 

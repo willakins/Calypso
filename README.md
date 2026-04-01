@@ -42,7 +42,7 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   - `/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
   - `/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`
   - `/calypso config email-on-call off`
-  - `/calypso config github-slack-user-map:<GITHUB_USER>=@<SLACK_USER>`
+  - `/calypso config github-slack-user-map:<GITHUB_USER>=<@USER|USER_ID|@HANDLE>`
   - `/calypso sync`
   - `/calypso status`
   - `/calypso errors`
@@ -904,10 +904,11 @@ Rules:
 
 - Clears the configured support-email on-call user and expiration.
 
-`/calypso config github-slack-user-map:<GITHUB_USER>=@<SLACK_USER>`
+`/calypso config github-slack-user-map:<GITHUB_USER>=<@USER|USER_ID|@HANDLE>`
 
-- Maps a GitHub username to a Slack handle used in production deploy summaries.
-- Example: `/calypso config github-slack-user-map:octocat=@willa`
+- Maps a GitHub username to a Slack identity used in production deploy summaries.
+- Prefer Slack mention or user ID for reliable tagging: `<@U123ABC>` or `U123ABC`.
+- Example: `/calypso config github-slack-user-map:octocat=<@U123ABC>`
 
 `/calypso config timezone:America/New_York`
 
@@ -1031,6 +1032,8 @@ Rules:
 
 - Bypasses blocker checks and triggers deploy anyway.
 - Still requires deploy configuration (`DEPLOY_TOKEN`, `DEPLOY_PROD_APP_ID`).
+- Marks merged PRs since last prod deploy as `deployed`, even if they were `untested`.
+- Includes those PRs in the `Deployed PRs` response list.
 
 ## Review Recap
 

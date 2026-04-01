@@ -40,7 +40,7 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
       state.deployments.push(deploymentRecord);
       return deploymentRecord;
     },
-    listGithubSlackUserMappingsFn: async () => new Map([["octocat", "willa"]]),
+    listGithubSlackUserMappingsFn: async () => new Map([["octocat", "U123ABC"]]),
     markPullRequestsDeployedSinceFn: async (_pool, lastDeployAt, deployedAt) => {
       const deployedPullRequests = [];
 
@@ -88,7 +88,7 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.match(deploySuccess.text, /Deployed PRs:/);
   assert.match(
     deploySuccess.text,
-    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by @willa\./,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC>\./,
   );
   assert.match(statusAfter.text, /No blockers since last prod deploy/);
 

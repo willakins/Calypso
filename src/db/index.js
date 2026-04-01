@@ -362,7 +362,7 @@ async function markPullRequestsDeployedSince(pool, lastDeployAt, deployedAt) {
         deployed_at = $2,
         updated_at = NOW()
     WHERE merged_at > $1
-      AND status = 'tested'
+      AND status IN ('tested', 'untested')
     RETURNING
       repo,
       pr_number,
@@ -2673,8 +2673,18 @@ function normalizeGithubUsername(githubUsername) {
 }
 
 function normalizeSlackUsername(slackUsername) {
-  const normalizedSlackUsername = String(slackUsername || "")
-    .trim()
+  const normalizedSlackReference = String(slackUsername || "").trim();
+  const mentionMatch = normalizedSlackReference.match(/^<@([UW][A-Z0-9]+)(?:\|[^>]+)?>$/i);
+  if (mentionMatch) {
+    return mentionMatch[1].toUpperCase();
+  }
+
+  const userIdMatch = normalizedSlackReference.match(/^([UW][A-Z0-9]+)$/i);
+  if (userIdMatch) {
+    return userIdMatch[1].toUpperCase();
+  }
+
+  const normalizedSlackUsername = normalizedSlackReference
     .replace(/^@/, "")
     .toLowerCase();
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(normalizedSlackUsername)) {

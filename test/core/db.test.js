@@ -191,6 +191,29 @@ test("setGithubSlackUserMapping upserts normalized usernames", async () => {
   });
 });
 
+test("setGithubSlackUserMapping normalizes slack mention to user id", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ github_username: "octocat", slack_username: "U123ABC", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setGithubSlackUserMapping(pool, "octocat", "<@U123ABC>", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO github_slack_user_mappings/);
+  assert.deepEqual(captured.params, ["octocat", "U123ABC", "UADMIN"]);
+  assert.deepEqual(result, {
+    github_username: "octocat",
+    slack_username: "U123ABC",
+    updated_by: "UADMIN",
+  });
+});
+
 test("setGithubSlackUserMapping rejects invalid github usernames", async () => {
   const pool = {
     async query() {
@@ -247,6 +270,7 @@ test("markPullRequestsDeployedSince returns deployed count and pull request deta
   const result = await markPullRequestsDeployedSince(pool, sinceTimestamp, deployedAt);
 
   assert.match(captured.sql, /UPDATE pull_requests/);
+  assert.match(captured.sql, /status IN \('tested', 'untested'\)/);
   assert.match(captured.sql, /RETURNING/);
   assert.match(captured.sql, /author_login/);
   assert.deepEqual(captured.params, [sinceTimestamp, deployedAt]);

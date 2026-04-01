@@ -579,6 +579,9 @@ function formatDeployedPullRequestAuthor({
   if (normalizedGithubUsername) {
     const mappedSlackUsername = slackUsernameByGithubUsername.get(normalizedGithubUsername);
     if (mappedSlackUsername) {
+      if (isSlackUserId(mappedSlackUsername)) {
+        return `<@${mappedSlackUsername}>`;
+      }
       return `@${mappedSlackUsername}`;
     }
 
@@ -586,6 +589,10 @@ function formatDeployedPullRequestAuthor({
   }
 
   return "unknown (github username since no matching slack username)";
+}
+
+function isSlackUserId(value) {
+  return /^([UW][A-Z0-9]+)$/i.test(String(value || "").trim());
 }
 
 function readDeployAvailabilityFromTopic(topicText, deployEnvironment) {
