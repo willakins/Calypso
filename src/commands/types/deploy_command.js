@@ -532,8 +532,18 @@ function normalizeGithubUsername(githubUsername) {
 }
 
 function normalizeSlackUsername(slackUsername) {
-  const normalizedSlackUsername = String(slackUsername || "")
-    .trim()
+  const normalizedSlackReference = String(slackUsername || "").trim();
+  const mentionMatch = normalizedSlackReference.match(/^<@([UW][A-Z0-9]+)(?:\|[^>]+)?>$/i);
+  if (mentionMatch) {
+    return mentionMatch[1].toUpperCase();
+  }
+
+  const userIdMatch = normalizedSlackReference.match(/^([UW][A-Z0-9]+)$/i);
+  if (userIdMatch) {
+    return userIdMatch[1].toUpperCase();
+  }
+
+  const normalizedSlackUsername = normalizedSlackReference
     .replace(/^@/, "")
     .toLowerCase();
   if (normalizedSlackUsername === "") {

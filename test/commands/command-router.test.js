@@ -1612,6 +1612,61 @@ test("registerCalypsoCommand triggers deploy and records deployment when clear a
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
 });
 
+test("registerCalypsoCommand formats mapped slack user IDs as uppercase mentions", async () => {
+  let commandHandler;
+  const queryCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+  const pool = {
+    async query(sql) {
+      queryCalls.push(sql);
+      return { rows: [] };
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool,
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    listBlockingPullRequestsFn: async () => [],
+    triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
+    insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
+    markPullRequestsDeployedSinceFn: async () => ({
+      deployedPullRequestCount: 1,
+      deployedPullRequests: [
+        {
+          repo: "croft-eng/croft",
+          pr_number: 12,
+          title: "Add deploy gate",
+          url: "https://github.com/croft-eng/croft/pull/12",
+          author_login: "octocat",
+        },
+      ],
+    }),
+    listGithubSlackUserMappingsFn: async () => new Map([["octocat", "u123abc"]]),
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy prod", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC>\./);
+  assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
+});
+
 test("registerCalypsoCommand does not mutate DB when deploy call fails", async () => {
   let commandHandler;
   let inserted = false;
