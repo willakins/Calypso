@@ -144,6 +144,7 @@ function buildConfigHelpText(botName) {
     "",
     "`/calypso config time-format:human|long` Configure timestamp display format.",
     "`/calypso config timezone:America/New_York` Configure timezone for human timestamps.",
+    "`/calypso config github-slack-user-map:<GITHUB_USER>=@<SLACK_USER>` Map deploy PR authors.",
     "",
     "*Provider Switches*",
     "`/calypso config communication-provider:slack|microsoft_teams`",

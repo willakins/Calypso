@@ -33,7 +33,10 @@ const ERROR_TRACKING_PROJECT_ARGUMENT_PATTERN = /^error-tracking-project:(.+)$/i
 const ERROR_TRACKING_ENVIRONMENT_ARGUMENT_PATTERN = /^error-tracking-environment:(.+)$/i;
 const EMAIL_MONITOR_ARGUMENT_PATTERN = /^email-monitor:(on|off)$/i;
 const EMAIL_CHANNEL_ARGUMENT_PATTERN = /^email-channel:(.+)$/i;
+const GITHUB_SLACK_USER_MAP_ARGUMENT_PATTERN = /^github-slack-user-map:([^=]+)=(.+)$/i;
 const REVIEW_RECAP_SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const GITHUB_USERNAME_PATTERN = /^@?([a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)$/i;
+const SLACK_USERNAME_PATTERN = /^@?([a-z0-9][a-z0-9._-]*)$/i;
 const EMAIL_ON_CALL_COMMAND_NAME = "email-on-call";
 const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "communication-provider",
@@ -245,6 +248,21 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildParsedCommand({
         action: "config_email_channel",
         targetChannelReference,
+      });
+    }
+
+    const githubSlackUserMapMatch = argument.match(GITHUB_SLACK_USER_MAP_ARGUMENT_PATTERN);
+    if (githubSlackUserMapMatch) {
+      const githubUsername = normalizeGithubUsernameToken(githubSlackUserMapMatch[1]);
+      const slackUsername = normalizeSlackUsernameToken(githubSlackUserMapMatch[2]);
+      if (!githubUsername || !slackUsername) {
+        return this.buildRespondParsedCommand(buildConfigUsageMessage());
+      }
+
+      return this.buildParsedCommand({
+        action: "config_github_slack_user_map",
+        githubUsername,
+        slackUsername,
       });
     }
 
@@ -548,6 +566,19 @@ class ConfigCommand extends BaseCalypsoCommand {
       });
     }
 
+    if (parsedCommand.action === "config_github_slack_user_map") {
+      await runtime.setGithubSlackUserMappingFn(
+        runtime.pool,
+        parsedCommand.githubUsername,
+        parsedCommand.slackUsername,
+        runtime.userId,
+      );
+
+      return this.buildExecutionResult(
+        `Mapped GitHub user \`${parsedCommand.githubUsername}\` to Slack user \`@${parsedCommand.slackUsername}\`.`,
+      );
+    }
+
     if (parsedCommand.action === "config_email_on_call") {
       const userResolution = await resolveCommunicationUserId(runtime, parsedCommand);
       if (!userResolution.isResolvable) {
@@ -739,6 +770,7 @@ function isWorkspaceScopedConfigAction(action) {
     action === "config_email_channel" ||
     action === "config_email_on_call" ||
     action === "config_email_on_call_off" ||
+    action === "config_github_slack_user_map" ||
     action === "config_communication_provider" ||
     action === "config_code_host_provider" ||
     action === "config_deploy_provider" ||
@@ -779,6 +811,7 @@ function buildConfigUsageMessage() {
     "`/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
     "`/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`",
     "`/calypso config email-on-call off`",
+    "`/calypso config github-slack-user-map:<GITHUB_USER>=@<SLACK_USER>`",
     "",
     "Platform provider setup:",
     "`/calypso config communication-provider:slack|microsoft_teams`",
@@ -789,6 +822,24 @@ function buildConfigUsageMessage() {
     "`/calypso config error-tracking-provider:sentry|rollbar`",
     "Defaults: `all`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/calypso config timezone`.",
   ].join("\n");
+}
+
+function normalizeGithubUsernameToken(rawGithubUsername) {
+  const match = String(rawGithubUsername || "").trim().match(GITHUB_USERNAME_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  return match[1].toLowerCase();
+}
+
+function normalizeSlackUsernameToken(rawSlackUsername) {
+  const match = String(rawSlackUsername || "").trim().match(SLACK_USERNAME_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  return match[1].toLowerCase();
 }
 
 function parseEmailOnCallCommand(commandDefinition, commandWords) {

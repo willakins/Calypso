@@ -9,16 +9,19 @@ const {
   getRuntimeProviderConfig,
   getReviewRecapConfig,
   isUserWhitelistedForDeploy,
+  listGithubSlackUserMappings,
   listOpenPullRequestsForReviewRecapSince,
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
+  markPullRequestsDeployedSince,
   setConfiguredCodeHostProvider,
   setConfiguredCommunicationProvider,
   setConfiguredDeployProvider,
   setConfiguredEmailProvider,
   setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
+  setGithubSlackUserMapping,
   markStaleOpenPullRequestsClosed,
   markReviewRecapSent,
   setConfiguredTimeFormat,
@@ -163,6 +166,94 @@ test("addUserToDeployWhitelist inserts when user is not present", async () => {
   assert.deepEqual(result, { added: true });
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1].params, ["U123", "UADMIN"]);
+});
+
+test("setGithubSlackUserMapping upserts normalized usernames", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ github_username: "octocat", slack_username: "willa", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setGithubSlackUserMapping(pool, "@OctoCat", "@Willa", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO github_slack_user_mappings/);
+  assert.deepEqual(captured.params, ["octocat", "willa", "UADMIN"]);
+  assert.deepEqual(result, {
+    github_username: "octocat",
+    slack_username: "willa",
+    updated_by: "UADMIN",
+  });
+});
+
+test("setGithubSlackUserMapping rejects invalid github usernames", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(async () => {
+    await setGithubSlackUserMapping(pool, "bad user", "willa", "UADMIN");
+  }, /Unsupported GitHub username/);
+});
+
+test("listGithubSlackUserMappings returns mapping map by normalized github username", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ github_username: "octocat", slack_username: "willa" }],
+      };
+    },
+  };
+
+  const result = await listGithubSlackUserMappings(pool, ["@OctoCat", "bad user"]);
+
+  assert.match(captured.sql, /FROM github_slack_user_mappings/);
+  assert.deepEqual(captured.params, [["octocat"]]);
+  assert.deepEqual(result, new Map([["octocat", "willa"]]));
+});
+
+test("markPullRequestsDeployedSince returns deployed count and pull request details", async () => {
+  const captured = {};
+  const sinceTimestamp = new Date("2026-02-12T00:00:00.000Z");
+  const deployedAt = new Date("2026-02-13T00:00:00.000Z");
+  const row = {
+    repo: "croft-eng/croft",
+    pr_number: 42,
+    title: "Stabilize deploy flow",
+    url: "https://github.com/croft-eng/croft/pull/42",
+    author_login: "octocat",
+  };
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rowCount: 1,
+        rows: [row],
+      };
+    },
+  };
+
+  const result = await markPullRequestsDeployedSince(pool, sinceTimestamp, deployedAt);
+
+  assert.match(captured.sql, /UPDATE pull_requests/);
+  assert.match(captured.sql, /RETURNING/);
+  assert.match(captured.sql, /author_login/);
+  assert.deepEqual(captured.params, [sinceTimestamp, deployedAt]);
+  assert.deepEqual(result, {
+    deployedPullRequestCount: 1,
+    deployedPullRequests: [row],
+  });
 });
 
 test("getConfiguredTimeFormat returns configured value", async () => {

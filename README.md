@@ -42,6 +42,7 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   - `/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`
   - `/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`
   - `/calypso config email-on-call off`
+  - `/calypso config github-slack-user-map:<GITHUB_USER>=@<SLACK_USER>`
   - `/calypso sync`
   - `/calypso status`
   - `/calypso errors`
@@ -903,6 +904,11 @@ Rules:
 
 - Clears the configured support-email on-call user and expiration.
 
+`/calypso config github-slack-user-map:<GITHUB_USER>=@<SLACK_USER>`
+
+- Maps a GitHub username to a Slack handle used in production deploy summaries.
+- Example: `/calypso config github-slack-user-map:octocat=@willa`
+
 `/calypso config timezone:America/New_York`
 
 - Sets timezone (IANA), used by human timestamps and recap schedule rendering.
@@ -1006,6 +1012,7 @@ Rules:
 - If configured and deploy succeeds:
   - inserts a `deployments` row
   - marks tested PRs since last deploy as `deployed`
+  - includes a `Deployed PRs` list in the response with PR title links and mapped author handles
 - If deploy fails:
   - does not write deployment row
   - does not mark PRs deployed

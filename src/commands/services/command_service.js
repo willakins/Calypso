@@ -15,6 +15,7 @@ const {
   getSupportEmailConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
+  listGithubSlackUserMappings,
   listPendingSupportEmailThreads,
   listOpenErrorTrackingIssues,
   listOpenPullRequestsWaitingOnReviewSince,
@@ -36,6 +37,7 @@ const {
   setConfiguredEmailProvider,
   setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
+  setGithubSlackUserMapping,
   setErrorTrackingChannel,
   setErrorTrackingEnabled,
   setErrorTrackingEnvironment,
@@ -124,6 +126,7 @@ function createDefaultDependencies() {
     listPendingSupportEmailThreadsFn: listPendingSupportEmailThreads,
     listOpenErrorTrackingIssuesFn: listOpenErrorTrackingIssues,
     listOpenPullRequestsWaitingOnReviewSinceFn: listOpenPullRequestsWaitingOnReviewSince,
+    listGithubSlackUserMappingsFn: listGithubSlackUserMappings,
     markReviewRecapSentFn: markReviewRecapSent,
     listRecentlyTestedPullRequestsFn: listRecentlyTestedPullRequests,
     listBlockingPullRequestsFn: listBlockingPullRequests,
@@ -150,6 +153,7 @@ function createDefaultDependencies() {
     setConfiguredEmailProviderFn: setConfiguredEmailProvider,
     setConfiguredAiProviderFn: setConfiguredAiProvider,
     setConfiguredErrorTrackingProviderFn: setConfiguredErrorTrackingProvider,
+    setGithubSlackUserMappingFn: setGithubSlackUserMapping,
     setErrorTrackingChannelFn: setErrorTrackingChannel,
     setErrorTrackingEnabledFn: setErrorTrackingEnabled,
     setErrorTrackingEnvironmentFn: setErrorTrackingEnvironment,
@@ -238,6 +242,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     listOpenPullRequestsWaitingOnReviewSinceFn:
       mergedOptions.listOpenPullRequestsWaitingOnReviewSinceFn ||
       defaultDependencies.listOpenPullRequestsWaitingOnReviewSinceFn,
+    listGithubSlackUserMappingsFn:
+      mergedOptions.listGithubSlackUserMappingsFn ||
+      defaultDependencies.listGithubSlackUserMappingsFn,
     listBlockingPullRequestsFn:
       mergedOptions.listBlockingPullRequestsFn || defaultDependencies.listBlockingPullRequestsFn,
     markAllUntestedPullRequestsTestedFn:
@@ -300,6 +307,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     setConfiguredErrorTrackingProviderFn:
       mergedOptions.setConfiguredErrorTrackingProviderFn ||
       defaultDependencies.setConfiguredErrorTrackingProviderFn,
+    setGithubSlackUserMappingFn:
+      mergedOptions.setGithubSlackUserMappingFn ||
+      defaultDependencies.setGithubSlackUserMappingFn,
     setErrorTrackingChannelFn:
       mergedOptions.setErrorTrackingChannelFn || defaultDependencies.setErrorTrackingChannelFn,
     setErrorTrackingEnabledFn:

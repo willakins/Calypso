@@ -40,18 +40,28 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
       state.deployments.push(deploymentRecord);
       return deploymentRecord;
     },
+    listGithubSlackUserMappingsFn: async () => new Map([["octocat", "willa"]]),
     markPullRequestsDeployedSinceFn: async (_pool, lastDeployAt, deployedAt) => {
-      let deployedCount = 0;
+      const deployedPullRequests = [];
 
       for (const pullRequest of state.pullRequests) {
         if (pullRequest.merged_at > lastDeployAt && pullRequest.status === "tested") {
           pullRequest.status = "deployed";
           pullRequest.deployed_at = deployedAt;
-          deployedCount += 1;
+          deployedPullRequests.push({
+            repo: pullRequest.repo,
+            pr_number: pullRequest.pr_number,
+            title: pullRequest.title || null,
+            url: pullRequest.url || null,
+            author_login: pullRequest.author_login || "unknown",
+          });
         }
       }
 
-      return deployedCount;
+      return {
+        deployedPullRequestCount: deployedPullRequests.length,
+        deployedPullRequests,
+      };
     },
   });
 
@@ -64,7 +74,10 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   const statusAfter = await runSlashCommand(commandHandler, "status", "U_TESTER");
 
   assert.match(statusBefore.text, /Blocking PRs since last prod deploy/);
-  assert.match(statusBefore.text, /#700 \(untested\)/);
+  assert.match(
+    statusBefore.text,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|croft-eng\/croft#700> \(untested\)/,
+  );
 
   assert.match(deployBlocked.text, /Deploy blocked due to untested PRs/);
   assert.match(markTested.text, /Marked PR #700 as tested/);
@@ -72,6 +85,11 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.match(deploySuccess.text, /Deploy to prod is in progress \(id: dep-999\)/);
   assert.match(deploySuccess.text, /Triggered by U_TESTER/);
   assert.match(deploySuccess.text, /Marked 1 PR\(s\) deployed/);
+  assert.match(deploySuccess.text, /Deployed PRs:/);
+  assert.match(
+    deploySuccess.text,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by @willa\./,
+  );
   assert.match(statusAfter.text, /No blockers since last prod deploy/);
 
   assert.deepEqual(state.transactionStatements, ["BEGIN", "COMMIT"]);
@@ -91,6 +109,8 @@ function createInMemoryState() {
         repo: "croft-eng/croft",
         status: "untested",
         title: "Feature PR",
+        url: "https://github.com/croft-eng/croft/pull/700",
+        author_login: "octocat",
       },
     ],
     transactionStatements: [],

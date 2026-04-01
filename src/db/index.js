@@ -363,10 +363,23 @@ async function markPullRequestsDeployedSince(pool, lastDeployAt, deployedAt) {
         updated_at = NOW()
     WHERE merged_at > $1
       AND status = 'tested'
-    RETURNING id
+    RETURNING
+      repo,
+      pr_number,
+      title,
+      url,
+      (
+        SELECT author_login
+        FROM open_pr_review_state
+        WHERE open_pr_review_state.repo = pull_requests.repo
+          AND open_pr_review_state.pr_number = pull_requests.pr_number
+      ) AS author_login
   `;
   const result = await pool.query(query, [lastDeployAt, deployedAt]);
-  return result.rowCount;
+  return {
+    deployedPullRequestCount: result.rowCount,
+    deployedPullRequests: result.rows,
+  };
 }
 
 async function markAllUntestedPullRequestsTested(pool, testedBy) {
@@ -2486,6 +2499,69 @@ async function addUserToDeployWhitelist(pool, userId, addedBy) {
   return { added: true };
 }
 
+async function setGithubSlackUserMapping(pool, githubUsername, slackUsername, updatedBy) {
+  const normalizedGithubUsername = normalizeGithubUsername(githubUsername);
+  const normalizedSlackUsername = normalizeSlackUsername(slackUsername);
+  const normalizedUpdatedBy = normalizeUserId(updatedBy);
+  if (!normalizedGithubUsername) {
+    throw new Error(`Unsupported GitHub username: ${githubUsername}`);
+  }
+  if (!normalizedSlackUsername) {
+    throw new Error(`Unsupported Slack username: ${slackUsername}`);
+  }
+  if (!normalizedUpdatedBy) {
+    throw new Error("user id is required");
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO github_slack_user_mappings (
+        github_username,
+        slack_username,
+        updated_by,
+        updated_at
+      )
+      VALUES ($1, $2, $3, NOW())
+      ON CONFLICT (github_username)
+      DO UPDATE SET
+        slack_username = EXCLUDED.slack_username,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = NOW()
+      RETURNING github_username, slack_username, updated_by, updated_at
+    `,
+    [normalizedGithubUsername, normalizedSlackUsername, normalizedUpdatedBy],
+  );
+
+  return result.rows[0];
+}
+
+async function listGithubSlackUserMappings(pool, githubUsernames) {
+  const normalizedGithubUsernames = dedupeNormalizedGithubUsernames(githubUsernames);
+  if (normalizedGithubUsernames.length === 0) {
+    return new Map();
+  }
+
+  const result = await pool.query(
+    `
+      SELECT github_username, slack_username
+      FROM github_slack_user_mappings
+      WHERE github_username = ANY($1::TEXT[])
+    `,
+    [normalizedGithubUsernames],
+  );
+
+  const mappings = new Map();
+  for (const row of result.rows) {
+    const normalizedGithubUsername = normalizeGithubUsername(row.github_username);
+    const normalizedSlackUsername = normalizeSlackUsername(row.slack_username);
+    if (normalizedGithubUsername && normalizedSlackUsername) {
+      mappings.set(normalizedGithubUsername, normalizedSlackUsername);
+    }
+  }
+
+  return mappings;
+}
+
 async function getConfiguredTimeFormat(pool, userId) {
   const normalizedUserId = normalizeUserId(userId);
   if (!normalizedUserId) {
@@ -2582,6 +2658,42 @@ async function setConfiguredTimeZone(pool, timeZone, updatedBy) {
 function normalizeTimeFormat(timeFormat) {
   const normalizedTimeFormat = String(timeFormat || "").toLowerCase().trim();
   return TIME_FORMATS[normalizedTimeFormat] || null;
+}
+
+function normalizeGithubUsername(githubUsername) {
+  const normalizedGithubUsername = String(githubUsername || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(normalizedGithubUsername)) {
+    return null;
+  }
+
+  return normalizedGithubUsername;
+}
+
+function normalizeSlackUsername(slackUsername) {
+  const normalizedSlackUsername = String(slackUsername || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(normalizedSlackUsername)) {
+    return null;
+  }
+
+  return normalizedSlackUsername;
+}
+
+function dedupeNormalizedGithubUsernames(githubUsernames) {
+  const normalizedGithubUsernames = new Set();
+  for (const githubUsername of Array.isArray(githubUsernames) ? githubUsernames : []) {
+    const normalizedGithubUsername = normalizeGithubUsername(githubUsername);
+    if (normalizedGithubUsername) {
+      normalizedGithubUsernames.add(normalizedGithubUsername);
+    }
+  }
+
+  return [...normalizedGithubUsernames];
 }
 
 function normalizeOptionalText(value) {
@@ -3068,6 +3180,7 @@ module.exports = {
   cacheSupportEmailThreadMessageText,
   insertDeployment,
   insertSupportEmailThread,
+  listGithubSlackUserMappings,
   listOpenErrorTrackingIssues,
   listOpenPullRequestsForReviewRecapSince,
   listPendingSupportEmailThreads,
@@ -3115,6 +3228,7 @@ module.exports = {
   setConfiguredEmailProvider,
   setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
+  setGithubSlackUserMapping,
   setSupportEmailChannel,
   setSupportEmailMonitorEnabled,
   setSupportEmailOnCall,

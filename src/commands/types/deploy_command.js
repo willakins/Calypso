@@ -112,6 +112,7 @@ class DeployCommand extends BaseCalypsoCommand {
         deployResult.deployProvider || deployConfiguration.deployProvider || "digitalocean";
       let deploymentSummary = {
         deployedPullRequestCount: 0,
+        deployedPullRequests: [],
         externalDeploymentId: deployResult.externalDeployId,
       };
 
@@ -128,9 +129,19 @@ class DeployCommand extends BaseCalypsoCommand {
       const shouldNotifyDeploymentCompletion =
         runtime.enableDeploymentCompletionNotifications &&
         Boolean(deploymentSummary.externalDeploymentId);
+      const deployedPullRequestSummaryText = isProductionDeploy
+        ? await this.buildDeployedPullRequestSummary({
+            runtime,
+            deployedPullRequestCount: deploymentSummary.deployedPullRequestCount,
+            deployedPullRequests: deploymentSummary.deployedPullRequests,
+          })
+        : "";
       if (isProductionDeploy && forceDeployment && blockingPullRequestCount > 0) {
         return this.buildExecutionResult(
-          `Force deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+          this.appendDeployedPullRequestSummary(
+            `Force deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+            deployedPullRequestSummaryText,
+          ),
           this.buildDeploymentExecutionFields({
             externalDeploymentId: deploymentSummary.externalDeploymentId,
             deployProvider,
@@ -153,7 +164,10 @@ class DeployCommand extends BaseCalypsoCommand {
       }
 
       return this.buildExecutionResult(
-        `Deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+        this.appendDeployedPullRequestSummary(
+          `Deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
+          deployedPullRequestSummaryText,
+        ),
         this.buildDeploymentExecutionFields({
           externalDeploymentId: deploymentSummary.externalDeploymentId,
           deployProvider,
@@ -297,17 +311,82 @@ class DeployCommand extends BaseCalypsoCommand {
         externalDeployId: externalDeploymentId,
       });
 
-      const deployedPullRequestCount = await runtime.markPullRequestsDeployedSinceFn(
+      const deployedPullRequestMarkingResult = await runtime.markPullRequestsDeployedSinceFn(
         runtime.pool,
         lastProductionDeploymentAt,
         deploymentRecord.deployed_at,
       );
+      const normalizedDeployedPullRequestMarkingResult =
+        normalizeDeployedPullRequestMarkingResult(deployedPullRequestMarkingResult);
 
       return {
-        deployedPullRequestCount,
+        deployedPullRequestCount:
+          normalizedDeployedPullRequestMarkingResult.deployedPullRequestCount,
+        deployedPullRequests:
+          normalizedDeployedPullRequestMarkingResult.deployedPullRequests,
         externalDeploymentId,
       };
     });
+  }
+
+  appendDeployedPullRequestSummary(baseText, deployedPullRequestSummaryText) {
+    const normalizedSummaryText = String(deployedPullRequestSummaryText || "").trim();
+    if (normalizedSummaryText === "") {
+      return baseText;
+    }
+
+    return `${baseText}\n${normalizedSummaryText}`;
+  }
+
+  async buildDeployedPullRequestSummary({
+    runtime,
+    deployedPullRequestCount,
+    deployedPullRequests,
+  }) {
+    const normalizedDeployedPullRequests = normalizeDeployedPullRequests(deployedPullRequests);
+    if (normalizedDeployedPullRequests.length === 0) {
+      const parsedDeployedPullRequestCount = Number(deployedPullRequestCount);
+      if (Number.isFinite(parsedDeployedPullRequestCount) && parsedDeployedPullRequestCount > 0) {
+        return `Deployed PRs:\n• ${parsedDeployedPullRequestCount} PR(s) deployed (details unavailable).`;
+      }
+      return "Deployed PRs:\n• none.";
+    }
+
+    const githubUsernames = [...new Set(
+      normalizedDeployedPullRequests
+        .map((pullRequest) => normalizeGithubUsername(pullRequest.author_login))
+        .filter(Boolean),
+    )];
+    const slackUsernameByGithubUsername = await this.resolveSlackUsernameByGithubUsername({
+      runtime,
+      githubUsernames,
+    });
+
+    return [
+      "Deployed PRs:",
+      ...normalizedDeployedPullRequests.map((pullRequest) =>
+        formatDeployedPullRequestLine({
+          pullRequest,
+          slackUsernameByGithubUsername,
+        }),
+      ),
+    ].join("\n");
+  }
+
+  async resolveSlackUsernameByGithubUsername({ runtime, githubUsernames }) {
+    if (!runtime.pool || typeof runtime.listGithubSlackUserMappingsFn !== "function") {
+      return new Map();
+    }
+
+    try {
+      const githubToSlackUserMapping = await runtime.listGithubSlackUserMappingsFn(
+        runtime.pool,
+        githubUsernames,
+      );
+      return normalizeGithubToSlackUserMapping(githubToSlackUserMapping);
+    } catch (_error) {
+      return new Map();
+    }
   }
 
   async withDatabaseTransaction(pool, transactionalWork) {
@@ -367,6 +446,146 @@ class DeployCommand extends BaseCalypsoCommand {
       shouldNotifyDeploymentCompletion,
     };
   }
+}
+
+function normalizeDeployedPullRequestMarkingResult(markingResult) {
+  if (typeof markingResult === "number" && Number.isFinite(markingResult)) {
+    return {
+      deployedPullRequestCount: markingResult,
+      deployedPullRequests: [],
+    };
+  }
+
+  if (!markingResult || typeof markingResult !== "object") {
+    return {
+      deployedPullRequestCount: 0,
+      deployedPullRequests: [],
+    };
+  }
+
+  const deployedPullRequests = normalizeDeployedPullRequests(
+    markingResult.deployedPullRequests || markingResult.pullRequests,
+  );
+  const parsedCount = Number(markingResult.deployedPullRequestCount);
+  const deployedPullRequestCount = Number.isFinite(parsedCount)
+    ? parsedCount
+    : deployedPullRequests.length;
+
+  return {
+    deployedPullRequestCount,
+    deployedPullRequests,
+  };
+}
+
+function normalizeDeployedPullRequests(deployedPullRequests) {
+  return (Array.isArray(deployedPullRequests) ? deployedPullRequests : [])
+    .map((pullRequest) => ({
+      repo: String(pullRequest?.repo || "").trim(),
+      pr_number: pullRequest?.pr_number,
+      title: String(pullRequest?.title || "").trim() || null,
+      url: String(pullRequest?.url || "").trim() || null,
+      author_login: String(pullRequest?.author_login || "").trim() || null,
+    }))
+    .filter((pullRequest) => Boolean(pullRequest.repo) && pullRequest.pr_number !== undefined);
+}
+
+function normalizeGithubToSlackUserMapping(githubToSlackUserMapping) {
+  const mappings = new Map();
+  if (githubToSlackUserMapping instanceof Map) {
+    for (const [githubUsername, slackUsername] of githubToSlackUserMapping.entries()) {
+      const normalizedGithubUsername = normalizeGithubUsername(githubUsername);
+      const normalizedSlackUsername = normalizeSlackUsername(slackUsername);
+      if (normalizedGithubUsername && normalizedSlackUsername) {
+        mappings.set(normalizedGithubUsername, normalizedSlackUsername);
+      }
+    }
+    return mappings;
+  }
+
+  if (
+    githubToSlackUserMapping &&
+    typeof githubToSlackUserMapping === "object" &&
+    !Array.isArray(githubToSlackUserMapping)
+  ) {
+    for (const [githubUsername, slackUsername] of Object.entries(githubToSlackUserMapping)) {
+      const normalizedGithubUsername = normalizeGithubUsername(githubUsername);
+      const normalizedSlackUsername = normalizeSlackUsername(slackUsername);
+      if (normalizedGithubUsername && normalizedSlackUsername) {
+        mappings.set(normalizedGithubUsername, normalizedSlackUsername);
+      }
+    }
+  }
+
+  return mappings;
+}
+
+function normalizeGithubUsername(githubUsername) {
+  const normalizedGithubUsername = String(githubUsername || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+  if (normalizedGithubUsername === "") {
+    return null;
+  }
+
+  return normalizedGithubUsername;
+}
+
+function normalizeSlackUsername(slackUsername) {
+  const normalizedSlackUsername = String(slackUsername || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+  if (normalizedSlackUsername === "") {
+    return null;
+  }
+
+  return normalizedSlackUsername;
+}
+
+function formatDeployedPullRequestLine({
+  pullRequest,
+  slackUsernameByGithubUsername,
+}) {
+  const pullRequestTitleReference = formatDeployedPullRequestTitleReference(pullRequest);
+  const pullRequestAuthor = formatDeployedPullRequestAuthor({
+    pullRequest,
+    slackUsernameByGithubUsername,
+  });
+  return `• ${pullRequestTitleReference} by ${pullRequestAuthor}.`;
+}
+
+function formatDeployedPullRequestTitleReference(pullRequest) {
+  const normalizedTitle = String(pullRequest?.title || "").trim();
+  if (normalizedTitle && pullRequest?.url) {
+    return `<${pullRequest.url}|${normalizedTitle}>`;
+  }
+  if (normalizedTitle) {
+    return normalizedTitle;
+  }
+
+  return formatPullRequestReference({
+    repo: pullRequest?.repo,
+    prNumber: pullRequest?.pr_number,
+    url: pullRequest?.url,
+  });
+}
+
+function formatDeployedPullRequestAuthor({
+  pullRequest,
+  slackUsernameByGithubUsername,
+}) {
+  const normalizedGithubUsername = normalizeGithubUsername(pullRequest?.author_login);
+  if (normalizedGithubUsername) {
+    const mappedSlackUsername = slackUsernameByGithubUsername.get(normalizedGithubUsername);
+    if (mappedSlackUsername) {
+      return `@${mappedSlackUsername}`;
+    }
+
+    return `${normalizedGithubUsername} (github username since no matching slack username)`;
+  }
+
+  return "unknown (github username since no matching slack username)";
 }
 
 function readDeployAvailabilityFromTopic(topicText, deployEnvironment) {
