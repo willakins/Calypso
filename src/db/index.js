@@ -139,7 +139,7 @@ function createPool(databaseConnectionString) {
 
 function buildPoolConfiguration(databaseConnectionString) {
   const poolConfiguration = {
-    connectionString: databaseConnectionString,
+    connectionString: stripSslUrlParameters(databaseConnectionString),
   };
 
   if (isTlsRequiredByDatabaseUrl(databaseConnectionString)) {
@@ -149,6 +149,46 @@ function buildPoolConfiguration(databaseConnectionString) {
   }
 
   return poolConfiguration;
+}
+
+function stripSslUrlParameters(databaseConnectionString) {
+  const SSL_PARAMETER_NAMES = new Set(["sslmode", "sslcert", "sslkey", "sslrootcert"]);
+
+  try {
+    const parsedDatabaseUrl = new URL(databaseConnectionString);
+    const parameterNames = [...parsedDatabaseUrl.searchParams.keys()];
+    for (const parameterName of parameterNames) {
+      if (SSL_PARAMETER_NAMES.has(parameterName.toLowerCase())) {
+        parsedDatabaseUrl.searchParams.delete(parameterName);
+      }
+    }
+    return parsedDatabaseUrl.toString();
+  } catch (_error) {
+    return stripSslUrlParametersFromMalformedUrl(databaseConnectionString, SSL_PARAMETER_NAMES);
+  }
+}
+
+function stripSslUrlParametersFromMalformedUrl(databaseConnectionString, parameterNames) {
+  const [baseAndQuery, hashFragment = ""] = String(databaseConnectionString).split("#");
+  const [baseUrl, rawQuery = ""] = baseAndQuery.split("?");
+  if (rawQuery === "") {
+    return databaseConnectionString;
+  }
+
+  const filteredParameters = rawQuery
+    .split("&")
+    .filter((parameter) => parameter !== "")
+    .filter((parameter) => {
+      const [rawName] = parameter.split("=");
+      return !parameterNames.has(decodeURIComponent(rawName || "").toLowerCase());
+    });
+
+  const rebuiltUrl =
+    filteredParameters.length > 0
+      ? `${baseUrl}?${filteredParameters.join("&")}`
+      : baseUrl;
+
+  return hashFragment === "" ? rebuiltUrl : `${rebuiltUrl}#${hashFragment}`;
 }
 
 function isTlsRequiredByDatabaseUrl(databaseConnectionString) {

@@ -54,18 +54,30 @@ test("createPool does not force SSL when sslmode is absent", async () => {
 test("createPool enables SSL for sslmode=require", async () => {
   const pool = createPool("postgresql://user:pass@localhost:5432/calypso?sslmode=require");
   assert.deepEqual(pool.options.ssl, { rejectUnauthorized: false });
+  assert.equal(pool.options.connectionString, "postgresql://user:pass@localhost:5432/calypso");
   await pool.end();
 });
 
 test("createPool enables SSL for sslmode=verify-full", async () => {
   const pool = createPool("postgresql://user:pass@localhost:5432/calypso?sslmode=verify-full");
   assert.deepEqual(pool.options.ssl, { rejectUnauthorized: false });
+  assert.equal(pool.options.connectionString, "postgresql://user:pass@localhost:5432/calypso");
   await pool.end();
 });
 
 test("createPool keeps SSL disabled for sslmode=disable", async () => {
   const pool = createPool("postgresql://user:pass@localhost:5432/calypso?sslmode=disable");
   assert.equal(pool.options.ssl, undefined);
+  assert.equal(pool.options.connectionString, "postgresql://user:pass@localhost:5432/calypso");
+  await pool.end();
+});
+
+test("createPool strips SSL query parameters that override explicit ssl config", async () => {
+  const pool = createPool(
+    "postgresql://user:pass@localhost:5432/calypso?sslmode=require&sslrootcert=%2Ftmp%2Fcert.pem&x=1",
+  );
+  assert.deepEqual(pool.options.ssl, { rejectUnauthorized: false });
+  assert.equal(pool.options.connectionString, "postgresql://user:pass@localhost:5432/calypso?x=1");
   await pool.end();
 });
 
