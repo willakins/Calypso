@@ -9,6 +9,7 @@ const {
   getRuntimeProviderConfig,
   getReviewRecapConfig,
   isUserWhitelistedForDeploy,
+  listBlockingPullRequests,
   listGithubSlackUserMappings,
   listOpenPullRequestsForReviewRecapSince,
   listOpenPullRequestsWaitingOnReviewSince,
@@ -22,6 +23,7 @@ const {
   setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
   setGithubSlackUserMapping,
+  setPullRequestForceDeployBlocked,
   markStaleOpenPullRequestsClosed,
   markReviewRecapSent,
   setConfiguredTimeFormat,
@@ -107,6 +109,89 @@ test("listRecentlyTestedPullRequests returns queried rows", async () => {
   assert.deepEqual(rows, [row]);
   assert.match(captured.sql, /tested_at >= \$1/);
   assert.deepEqual(captured.params, [sinceTimestamp]);
+});
+
+test("listBlockingPullRequests returns blocker rows including force-deploy flag", async () => {
+  const sinceTimestamp = new Date("2026-02-12T00:00:00.000Z");
+  const row = {
+    repo: "croft-eng/croft",
+    pr_number: 77,
+    status: "untested",
+    force_deploy_blocked: true,
+  };
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return { rows: [row] };
+    },
+  };
+
+  const rows = await listBlockingPullRequests(pool, sinceTimestamp);
+
+  assert.deepEqual(rows, [row]);
+  assert.match(captured.sql, /force_deploy_blocked/);
+  assert.deepEqual(captured.params, [sinceTimestamp]);
+});
+
+test("setPullRequestForceDeployBlocked updates most recent pull request flag", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      if (calls.length === 1) {
+        return {
+          rows: [{ id: 99, pr_number: 77, status: "untested", force_deploy_blocked: false }],
+        };
+      }
+
+      return {
+        rows: [{ id: 99, pr_number: 77, status: "untested", force_deploy_blocked: true }],
+      };
+    },
+  };
+
+  const result = await setPullRequestForceDeployBlocked(pool, 77, true);
+
+  assert.equal(result.found, true);
+  assert.equal(result.alreadySet, false);
+  assert.equal(result.pullRequest.force_deploy_blocked, true);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].sql, /FROM pull_requests/);
+  assert.match(calls[1].sql, /UPDATE pull_requests/);
+  assert.deepEqual(calls[1].params, [99, true]);
+});
+
+test("setPullRequestForceDeployBlocked returns idempotent result when already set", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return {
+        rows: [{ id: 88, pr_number: 55, status: "untested", force_deploy_blocked: true }],
+      };
+    },
+  };
+
+  const result = await setPullRequestForceDeployBlocked(pool, 55, true);
+
+  assert.equal(result.found, true);
+  assert.equal(result.alreadySet, true);
+  assert.equal(result.pullRequest.force_deploy_blocked, true);
+  assert.equal(calls.length, 1);
+});
+
+test("setPullRequestForceDeployBlocked returns not found when PR does not exist", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  const result = await setPullRequestForceDeployBlocked(pool, 404, true);
+
+  assert.deepEqual(result, { found: false });
 });
 
 test("isUserWhitelistedForDeploy returns true when user is present", async () => {

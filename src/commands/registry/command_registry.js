@@ -3,6 +3,7 @@ const { DeployCommand } = require("../types/deploy_command");
 const { EmailsCommand } = require("../types/emails_command");
 const { ErrorsCommand } = require("../types/errors_command");
 const { HelpCommand } = require("../types/help_command");
+const { MustTestCommand } = require("../types/must_test_command");
 const { ReviewsCommand } = require("../types/reviews_command");
 const { SyncCommand } = require("../types/sync_command");
 const { StatusCommand } = require("../types/status_command");
@@ -22,6 +23,7 @@ function createCalypsoCommandRegistry(options = {}) {
       new StatusCommand(),
       new ReviewsCommand(),
       new TestedCommand(),
+      new MustTestCommand(),
       new DeployCommand(),
       new WhitelistCommand(),
     ],

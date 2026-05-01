@@ -198,7 +198,7 @@ async function getLastProdDeployAt(pool) {
 
 async function listBlockingPullRequests(pool, lastDeployAt) {
   const query = `
-    SELECT repo, pr_number, title, url, status, merged_at
+    SELECT repo, pr_number, title, url, status, merged_at, force_deploy_blocked
     FROM pull_requests
     WHERE merged_at > $1
       AND status NOT IN ('tested', 'deployed')
@@ -328,9 +328,43 @@ async function markPullRequestTested(pool, prNumber, testedBy) {
   };
 }
 
+async function setPullRequestForceDeployBlocked(pool, prNumber, forceDeployBlocked) {
+  const existingPullRequest = await findMostRecentPullRequestByNumber(pool, prNumber);
+  if (!existingPullRequest) {
+    return { found: false };
+  }
+
+  const normalizedForceDeployBlocked = Boolean(forceDeployBlocked);
+  if (existingPullRequest.force_deploy_blocked === normalizedForceDeployBlocked) {
+    return {
+      found: true,
+      alreadySet: true,
+      pullRequest: existingPullRequest,
+    };
+  }
+
+  const updateQuery = `
+    UPDATE pull_requests
+    SET force_deploy_blocked = $2,
+        updated_at = NOW()
+    WHERE id = $1
+    RETURNING id, pr_number, status, force_deploy_blocked
+  `;
+  const updatedResult = await pool.query(updateQuery, [
+    existingPullRequest.id,
+    normalizedForceDeployBlocked,
+  ]);
+
+  return {
+    found: true,
+    alreadySet: false,
+    pullRequest: updatedResult.rows[0],
+  };
+}
+
 async function findMostRecentPullRequestByNumber(pool, prNumber) {
   const query = `
-    SELECT id, pr_number, status, tested_at, tested_by
+    SELECT id, pr_number, status, tested_at, tested_by, force_deploy_blocked
     FROM pull_requests
     WHERE pr_number = $1
     ORDER BY merged_at DESC
@@ -3214,6 +3248,7 @@ module.exports = {
   updateEnvironmentStatusRuntimeState,
   updateSupportEmailRuntimeState,
   markPullRequestTested,
+  setPullRequestForceDeployBlocked,
   upsertPendingSupportEmailHistoryId,
   runMigrations,
   setErrorTrackingChannel,

@@ -38,6 +38,7 @@ const {
   setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
   setGithubSlackUserMapping,
+  setPullRequestForceDeployBlocked,
   setErrorTrackingChannel,
   setErrorTrackingEnabled,
   setErrorTrackingEnvironment,
@@ -154,6 +155,7 @@ function createDefaultDependencies() {
     setConfiguredAiProviderFn: setConfiguredAiProvider,
     setConfiguredErrorTrackingProviderFn: setConfiguredErrorTrackingProvider,
     setGithubSlackUserMappingFn: setGithubSlackUserMapping,
+    setPullRequestForceDeployBlockedFn: setPullRequestForceDeployBlocked,
     setErrorTrackingChannelFn: setErrorTrackingChannel,
     setErrorTrackingEnabledFn: setErrorTrackingEnabled,
     setErrorTrackingEnvironmentFn: setErrorTrackingEnvironment,
@@ -310,6 +312,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     setGithubSlackUserMappingFn:
       mergedOptions.setGithubSlackUserMappingFn ||
       defaultDependencies.setGithubSlackUserMappingFn,
+    setPullRequestForceDeployBlockedFn:
+      mergedOptions.setPullRequestForceDeployBlockedFn ||
+      defaultDependencies.setPullRequestForceDeployBlockedFn,
     setErrorTrackingChannelFn:
       mergedOptions.setErrorTrackingChannelFn || defaultDependencies.setErrorTrackingChannelFn,
     setErrorTrackingEnabledFn:

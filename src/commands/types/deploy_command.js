@@ -85,6 +85,25 @@ class DeployCommand extends BaseCalypsoCommand {
           ].join("\n"),
         );
       }
+
+      if (forceDeployment) {
+        const forceDeployBlockedPullRequests = readForceDeployBlockedPullRequests(
+          deployGateState.blockingPullRequests,
+        );
+        if (forceDeployBlockedPullRequests.length > 0) {
+          return this.buildExecutionResult(
+            [
+              "Force deploy blocked.",
+              "These PRs are marked as must-test and cannot be bypassed:",
+              ...forceDeployBlockedPullRequests.map(
+                (pr) =>
+                  `• ${formatPullRequestReference({ repo: pr.repo, prNumber: pr.pr_number, url: pr.url })} (${pr.status})`,
+              ),
+              "Mark them tested with `/calypso tested <PR_NUMBER>` or clear the requirement with `/calypso must-test off <PR_NUMBER>`.",
+            ].join("\n"),
+          );
+        }
+      }
     }
 
     const deployConfiguration = this.resolveDeployConfiguration(
@@ -475,6 +494,21 @@ function normalizeDeployedPullRequestMarkingResult(markingResult) {
     deployedPullRequestCount,
     deployedPullRequests,
   };
+}
+
+function readForceDeployBlockedPullRequests(blockingPullRequests) {
+  return (Array.isArray(blockingPullRequests) ? blockingPullRequests : []).filter((pullRequest) =>
+    isForceDeployBlocked(pullRequest?.force_deploy_blocked),
+  );
+}
+
+function isForceDeployBlocked(value) {
+  if (value === true || value === 1 || value === "1") {
+    return true;
+  }
+
+  const normalizedValue = String(value || "").trim().toLowerCase();
+  return normalizedValue === "true" || normalizedValue === "t";
 }
 
 function normalizeDeployedPullRequests(deployedPullRequests) {

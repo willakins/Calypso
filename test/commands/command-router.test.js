@@ -39,6 +39,7 @@ test("handleCalypsoCommand returns deploy topic help for testing alias", () => {
   assert.match(result.responseText, /\*Calypso Deploy Help\*/);
   assert.match(result.responseText, /\/calypso status/);
   assert.match(result.responseText, /\/calypso tested <PR_NUMBER>/);
+  assert.match(result.responseText, /\/calypso must-test <PR_NUMBER>/);
   assert.match(result.responseText, /\/calypso deploy prod force/);
 });
 
@@ -185,6 +186,28 @@ test("handleCalypsoCommand routes tested recent input", () => {
 
   assert.equal(result.action, "tested_recent");
   assert.equal(result.timeframe, "week");
+});
+
+test("handleCalypsoCommand routes must-test input with PR number", () => {
+  const result = handleCalypsoCommand({ text: "must-test 42", user_id: "U123" });
+
+  assert.equal(result.action, "must_test_set");
+  assert.equal(result.prNumber, 42);
+});
+
+test("handleCalypsoCommand routes must-test off input with PR number", () => {
+  const result = handleCalypsoCommand({ text: "must-test off 42", user_id: "U123" });
+
+  assert.equal(result.action, "must_test_clear");
+  assert.equal(result.prNumber, 42);
+});
+
+test("handleCalypsoCommand rejects invalid must-test input", () => {
+  const result = handleCalypsoCommand({ text: "must-test maybe", user_id: "U123" });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /Usage:/);
+  assert.match(result.responseText, /\/calypso must-test <PR_NUMBER>/);
 });
 
 test("handleCalypsoCommand rejects tested input without PR number", () => {
@@ -1049,6 +1072,62 @@ test("registerCalypsoCommand denies tested all for non-admin, non-whitelisted us
   assert.match(payload.text, /Tested update denied/);
 });
 
+test("registerCalypsoCommand marks PR as must-test for force deploy", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setPullRequestForceDeployBlockedFn: async () => ({ found: true, alreadySet: false }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "must-test 77", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /PR #77 now requires testing before force deploy/);
+});
+
+test("registerCalypsoCommand denies must-test for non-admin, non-whitelisted user", async () => {
+  let commandHandler;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: false }),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "must-test 77", user_id: "U123" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Must-test update denied/);
+});
+
 test("registerCalypsoCommand shows recently tested PRs for tested recent", async () => {
   let commandHandler;
 
@@ -1330,6 +1409,56 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
     /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Hotfix without tested> by octocat \(github username since no matching slack username\)\./,
   );
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
+});
+
+test("registerCalypsoCommand blocks force deploy when must-test blockers exist", async () => {
+  let commandHandler;
+  let deployTriggered = false;
+
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    listBlockingPullRequestsFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 12,
+        url: "https://github.com/croft-eng/croft/pull/12",
+        status: "untested",
+        force_deploy_blocked: true,
+      },
+    ],
+    triggerProdDeployFn: async () => {
+      deployTriggered = true;
+      return { externalDeployId: "dep-123" };
+    },
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy prod force", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Force deploy blocked/);
+  assert.match(payload.text, /must-test and cannot be bypassed/);
+  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|croft-eng\/croft#12> \(untested\)/);
+  assert.match(payload.text, /\/calypso must-test off <PR_NUMBER>/);
+  assert.equal(deployTriggered, false);
 });
 
 test("registerCalypsoCommand triggers staging deploy without deploy-gate transaction", async () => {

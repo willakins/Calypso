@@ -51,6 +51,8 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   - `/calypso emails draft <EMAIL_ID> [ADDITIONAL_INSTRUCTIONS...]`
   - `/calypso emails responded <EMAIL_ID>`
   - `/calypso tested <PR_NUMBER>`
+  - `/calypso must-test <PR_NUMBER>`
+  - `/calypso must-test off <PR_NUMBER>`
   - `/calypso deploy staging`
   - `/calypso deploy prod`
 - Enforces deploy blocking rules:
@@ -87,7 +89,7 @@ Commands are structured for extensibility:
 - `registry`:
   - Command lookup and dispatch by command name.
 - `types`:
-  - One file per command type (`help`, `config`, `status`, `tested`, `deploy`, `unknown`).
+  - One file per command type (`help`, `config`, `status`, `tested`, `must-test`, `deploy`, `unknown`).
   - Each command encapsulates its own parse + execute behavior.
 - `base class`:
   - Shared command contract and helpers.
@@ -998,6 +1000,16 @@ Rules:
 - Lists PRs tested in the selected recent timeframe.
 - Includes PR number, repo, status, tester, and tested timestamp.
 
+`/calypso must-test <PR_NUMBER>`
+
+- Marks a PR as requiring testing before `deploy prod force` can bypass blockers.
+- Restricted to workspace admins or already-whitelisted users.
+
+`/calypso must-test off <PR_NUMBER>`
+
+- Removes the force-deploy test requirement for that PR.
+- Restricted to workspace admins or already-whitelisted users.
+
 `/calypso whitelist <@USER>`
 
 - Restricted command for workspace admins or already-whitelisted users.
@@ -1031,6 +1043,7 @@ Rules:
 `/calypso deploy prod force` (or `/calypso deploy prod forced`)
 
 - Bypasses blocker checks and triggers deploy anyway.
+- Cannot bypass blockers that are explicitly marked as must-test.
 - Still requires deploy configuration (`DEPLOY_TOKEN`, `DEPLOY_PROD_APP_ID`).
 - Marks merged PRs since last prod deploy as `deployed`, even if they were `untested`.
 - Includes those PRs in the `Deployed PRs` response list.

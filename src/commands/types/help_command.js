@@ -70,6 +70,8 @@ function buildDeployHelpText(botName) {
     "`/calypso tested <PR_NUMBER>` Mark one PR as tested.",
     "`/calypso tested all` Mark all untested PRs as tested.",
     "`/calypso tested recent <day|week|month>` List recently tested PRs.",
+    "`/calypso must-test <PR_NUMBER>` Require testing before force deploy.",
+    "`/calypso must-test off <PR_NUMBER>` Remove force-deploy test requirement.",
     "`/calypso deploy staging` Trigger staging deploy.",
     "`/calypso deploy prod` Attempt prod deploy after gate check.",
     "`/calypso deploy prod force` Force deploy and bypass blockers.",
