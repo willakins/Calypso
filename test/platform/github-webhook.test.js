@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const http = require("node:http");
 const test = require("node:test");
+
+const express = require("express");
 
 const {
   createGithubWebhookHandler,
@@ -117,6 +120,41 @@ function buildPullRequestReactionPayload(overrides = {}) {
   };
 }
 
+function listenOnEphemeralPort(app) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => resolve(server));
+  });
+}
+
+function postWebhookRequest({ body, headers, path, port }) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        method: "POST",
+        port,
+        path,
+        headers: {
+          "content-length": body.length,
+          ...headers,
+        },
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => {
+          const responseBodyText = Buffer.concat(chunks).toString("utf8");
+          resolve({
+            statusCode: response.statusCode,
+            body: JSON.parse(responseBodyText),
+          });
+        });
+      },
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
 test("verifyGithubSignature validates a correct sha256 signature", () => {
   const secret = "test-secret";
   const payloadBuffer = Buffer.from('{"ok":true}', "utf8");
@@ -155,6 +193,42 @@ test("registerGithubWebhook registers configured webhook path", () => {
   });
 
   assert.deepEqual(registeredPaths, ["/codehost/webhook"]);
+});
+
+test("registered github route reads form-encoded webhook bodies as raw bytes", async (t) => {
+  const secret = "secret";
+  const app = express();
+  registerGithubWebhook(app, {
+    pool: {},
+    github: {
+      mainBranch: "main",
+      repositoryFullName: "croft-eng/croft",
+      webhookSecret: secret,
+    },
+    paths: ["/codehost/webhook"],
+  });
+  const server = await listenOnEphemeralPort(app);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const payload = {
+    zen: "Keep it logically awesome.",
+    repository: { full_name: "croft-eng/croft" },
+  };
+  const body = Buffer.from(`payload=${encodeURIComponent(JSON.stringify(payload))}`, "utf8");
+  const response = await postWebhookRequest({
+    body,
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-github-delivery": "delivery-form-route-123",
+      "x-github-event": "ping",
+      "x-hub-signature-256": signPayload(secret, body),
+    },
+    path: "/codehost/webhook",
+    port: server.address().port,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.ignored, true);
 });
 
 test("github webhook returns 401 on invalid signature", async () => {
@@ -259,6 +333,68 @@ test("github webhook returns 400 on invalid json payload", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.error, "invalid json payload");
+});
+
+test("github webhook accepts form-encoded payload bodies after signature verification", async () => {
+  const secret = "secret";
+  const logger = createCapturingLogger();
+  const handler = createGithubWebhookHandler({
+    pool: {},
+    config: {
+      githubMainBranch: "main",
+      githubRepo: "croft-eng/croft",
+      githubWebhookSecret: secret,
+    },
+    logger,
+  });
+  const payload = {
+    zen: "Approachable is better than simple.",
+    hook_id: 12345,
+    repository: { full_name: "croft-eng/croft" },
+  };
+  const rawBody = Buffer.from(
+    `payload=${encodeURIComponent(JSON.stringify(payload))}`,
+    "utf8",
+  );
+  const req = {
+    body: rawBody,
+    get(name) {
+      const key = name.toLowerCase();
+      if (key === "x-github-delivery") {
+        return "delivery-form-123";
+      }
+      if (key === "x-github-event") {
+        return "ping";
+      }
+      if (key === "x-hub-signature-256") {
+        return signPayload(secret, rawBody);
+      }
+      if (key === "content-type") {
+        return "application/x-www-form-urlencoded";
+      }
+      return undefined;
+    },
+  };
+  const res = {
+    statusCode: 200,
+    body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payloadBody) {
+      this.body = payloadBody;
+      return this;
+    },
+  };
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ignored, true);
+  assert.equal(logger.entries[0].outcome, "ignored_unsupported_event");
+  assert.equal(logger.entries[0].delivery_id, "delivery-form-123");
+  assert.equal(logger.entries[0].event, "ping");
 });
 
 test("github webhook ignores unsupported event types", async () => {

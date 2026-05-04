@@ -4,7 +4,7 @@ function registerRawJsonWebhookRoutes(httpApp, { paths, defaultPath, handler }) 
   const webhookPaths = Array.isArray(paths) && paths.length > 0 ? paths : [defaultPath];
 
   for (const webhookPath of webhookPaths) {
-    httpApp.post(webhookPath, express.raw({ type: "application/json" }), handler);
+    httpApp.post(webhookPath, express.raw({ type: "*/*" }), handler);
   }
 }
 
@@ -87,8 +87,50 @@ function createCodeHostWebhookHandler({
 }
 
 function tryParseJsonPayload(rawBodyBuffer) {
+  const rawBodyText = readRequestBodyText(rawBodyBuffer);
+  if (rawBodyText === null) {
+    return null;
+  }
+
   try {
-    return JSON.parse(rawBodyBuffer.toString("utf8"));
+    return JSON.parse(rawBodyText);
+  } catch (_error) {
+    return tryParseFormEncodedJsonPayload(rawBodyText);
+  }
+}
+
+function readRequestBodyText(rawBodyBuffer) {
+  if (Buffer.isBuffer(rawBodyBuffer)) {
+    return rawBodyBuffer.toString("utf8");
+  }
+
+  if (typeof rawBodyBuffer === "string") {
+    return rawBodyBuffer;
+  }
+
+  if (rawBodyBuffer instanceof ArrayBuffer) {
+    return Buffer.from(rawBodyBuffer).toString("utf8");
+  }
+
+  if (ArrayBuffer.isView(rawBodyBuffer)) {
+    return Buffer.from(
+      rawBodyBuffer.buffer,
+      rawBodyBuffer.byteOffset,
+      rawBodyBuffer.byteLength,
+    ).toString("utf8");
+  }
+
+  return null;
+}
+
+function tryParseFormEncodedJsonPayload(rawBodyText) {
+  const payloadValue = new URLSearchParams(rawBodyText).get("payload");
+  if (!payloadValue) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(payloadValue);
   } catch (_error) {
     return null;
   }

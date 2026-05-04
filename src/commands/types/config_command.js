@@ -37,7 +37,7 @@ const GITHUB_SLACK_USER_MAP_ARGUMENT_PATTERN = /^github-slack-user-map:([^=]+)=(
 const REVIEW_RECAP_SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const GITHUB_USERNAME_PATTERN = /^@?([a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)$/i;
 const SLACK_USER_MENTION_PATTERN = /^<@([UW][A-Z0-9]+)(?:\|[^>]+)?>$/i;
-const SLACK_USER_ID_PATTERN = /^([UW][A-Z0-9]+)$/i;
+const SLACK_USER_ID_PATTERN = /^([UW][A-Z0-9]*[0-9][A-Z0-9]*)$/i;
 const SLACK_USERNAME_PATTERN = /^@?([a-z0-9][a-z0-9._-]*)$/i;
 const EMAIL_ON_CALL_COMMAND_NAME = "email-on-call";
 const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(

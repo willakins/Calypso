@@ -1383,6 +1383,7 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
         },
       ],
     }),
+    listGithubSlackUserMappingsFn: async () => new Map(),
     deployConfig: {
       digitaloceanToken: "token",
       doAppIdProd: "app-id",
