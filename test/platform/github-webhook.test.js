@@ -12,9 +12,10 @@ function signPayload(secret, payloadBuffer) {
   return `sha256=${crypto.createHmac("sha256", secret).update(payloadBuffer).digest("hex")}`;
 }
 
-function buildReqRes({ payload, signature, event = "pull_request" }) {
+function buildReqRes({ payload, signature, event = "pull_request", delivery = "delivery-123" }) {
   const body = Buffer.from(JSON.stringify(payload), "utf8");
   const headers = {
+    "x-github-delivery": delivery,
     "x-github-event": event,
     "x-hub-signature-256": signature,
   };
@@ -40,6 +41,24 @@ function buildReqRes({ payload, signature, event = "pull_request" }) {
   };
 
   return { req, res, body };
+}
+
+function createCapturingLogger() {
+  const entries = [];
+  return {
+    entries,
+    info(message) {
+      entries.push(parseWebhookLogMessage(message));
+    },
+    error(message) {
+      entries.push(parseWebhookLogMessage(message));
+    },
+  };
+}
+
+function parseWebhookLogMessage(message) {
+  const jsonStartIndex = String(message).indexOf("{");
+  return JSON.parse(String(message).slice(jsonStartIndex));
 }
 
 function buildPullRequestPayload(overrides = {}) {
@@ -245,6 +264,7 @@ test("github webhook returns 400 on invalid json payload", async () => {
 test("github webhook ignores unsupported event types", async () => {
   const secret = "secret";
   let upsertCalled = false;
+  const logger = createCapturingLogger();
   const handler = createGithubWebhookHandler({
     pool: {},
     config: {
@@ -252,6 +272,7 @@ test("github webhook ignores unsupported event types", async () => {
       githubRepo: "croft-eng/croft",
       githubWebhookSecret: secret,
     },
+    logger,
     upsertPullRequestAsUntestedFn: async () => {
       upsertCalled = true;
     },
@@ -270,11 +291,19 @@ test("github webhook ignores unsupported event types", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.ignored, true);
   assert.equal(upsertCalled, false);
+  assert.equal(logger.entries[0].provider, "GitHub");
+  assert.equal(logger.entries[0].outcome, "ignored_unsupported_event");
+  assert.equal(logger.entries[0].delivery_id, "delivery-123");
+  assert.equal(logger.entries[0].event, "push");
+  assert.equal(logger.entries[0].action, "closed");
+  assert.equal(logger.entries[0].expected_repo, "croft-eng/croft");
+  assert.equal(logger.entries[0].expected_base_branch, "main");
 });
 
 test("github webhook ignores pull request events outside tracked branch/repo", async () => {
   const secret = "secret";
   let upsertCalled = false;
+  const logger = createCapturingLogger();
   const handler = createGithubWebhookHandler({
     pool: {},
     config: {
@@ -282,6 +311,7 @@ test("github webhook ignores pull request events outside tracked branch/repo", a
       githubRepo: "croft-eng/croft",
       githubWebhookSecret: secret,
     },
+    logger,
     upsertPullRequestAsUntestedFn: async () => {
       upsertCalled = true;
     },
@@ -301,6 +331,11 @@ test("github webhook ignores pull request events outside tracked branch/repo", a
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.ignored, true);
   assert.equal(upsertCalled, false);
+  assert.equal(logger.entries[0].outcome, "ignored_untracked_repo_or_branch");
+  assert.equal(logger.entries[0].repo, "other/repo");
+  assert.equal(logger.entries[0].expected_repo, "croft-eng/croft");
+  assert.equal(logger.entries[0].repo_matches, false);
+  assert.equal(logger.entries[0].base_branch_matches, true);
 });
 
 test("github webhook tracks opened pull request review lifecycle", async () => {
@@ -373,6 +408,7 @@ test("github webhook tracks ready_for_review transitions", async () => {
 test("github webhook upserts merged main PR as untested while updating review state", async () => {
   let savedPullRequest;
   let savedReviewState;
+  const logger = createCapturingLogger();
   const handler = createGithubWebhookHandler({
     pool: { marker: "pool" },
     config: {
@@ -380,6 +416,7 @@ test("github webhook upserts merged main PR as untested while updating review st
       githubRepo: "croft-eng/croft",
       githubWebhookSecret: "secret",
     },
+    logger,
     upsertOpenPullRequestReviewStateFn: async (_pool, state) => {
       savedReviewState = state;
       return { pr_number: state.prNumber, review_state: state.reviewState };
@@ -413,6 +450,14 @@ test("github webhook upserts merged main PR as untested while updating review st
   assert.equal(savedPullRequest.prNumber, 77);
   assert.equal(savedPullRequest.mergedAt, "2026-02-13T17:00:00Z");
   assert.equal(savedReviewState.lifecycleState, "merged");
+  assert.equal(logger.entries[0].outcome, "processed");
+  assert.equal(logger.entries[0].event, "pull_request");
+  assert.equal(logger.entries[0].action, "closed");
+  assert.equal(logger.entries[0].repo_matches, true);
+  assert.equal(logger.entries[0].base_branch_matches, true);
+  assert.equal(logger.entries[0].merged, true);
+  assert.equal(logger.entries[0].pr_number, 77);
+  assert.equal(logger.entries[0].status, "untested");
 });
 
 test("github webhook updates review state on submitted approval", async () => {

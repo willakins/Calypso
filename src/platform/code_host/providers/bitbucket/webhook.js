@@ -20,6 +20,7 @@ function registerBitbucketWebhook(httpApp, options) {
 
 function createBitbucketWebhookHandler(options) {
   const {
+    logger = null,
     pool,
     upsertPullRequestAsUntestedFn = upsertPullRequestAsUntested,
     upsertOpenPullRequestReviewStateFn = upsertOpenPullRequestReviewState,
@@ -31,7 +32,10 @@ function createBitbucketWebhookHandler(options) {
     providerLabel: "Bitbucket",
     webhookSecret: bitbucketSettings.webhookSecret,
     isRequestSignatureValid,
+    readDeliveryId: readBitbucketDeliveryId,
     readEventName: readBitbucketEventName,
+    describePayload: (payload) =>
+      describeBitbucketWebhookPayload(payload, bitbucketSettings),
     isSupportedEvent: isSupportedBitbucketWebhookEvent,
     isPullRequestForTrackedMain: (payload) =>
       isPullRequestForTrackedMain(payload, bitbucketSettings),
@@ -44,6 +48,7 @@ function createBitbucketWebhookHandler(options) {
         upsertOpenPullRequestReviewStateFn,
         updatePullRequestReviewSubmissionFn,
       }),
+    logger,
   });
 }
 
@@ -153,6 +158,10 @@ function readBitbucketEventName(request) {
   return String(request.get("x-event-key") || "").toLowerCase();
 }
 
+function readBitbucketDeliveryId(request) {
+  return String(request.get("x-request-uuid") || "").trim() || null;
+}
+
 function isSupportedBitbucketWebhookEvent(eventName) {
   return (
     eventName === "pullrequest:created" ||
@@ -162,6 +171,24 @@ function isSupportedBitbucketWebhookEvent(eventName) {
     eventName === "pullrequest:fulfilled" ||
     eventName === "pullrequest:rejected"
   );
+}
+
+function describeBitbucketWebhookPayload(payload, bitbucketSettings) {
+  const pullRequest = payload.pullrequest || {};
+  const repo = payload.repository?.full_name || null;
+  const baseBranch = pullRequest.destination?.branch?.name || null;
+
+  return {
+    repo,
+    expected_repo: bitbucketSettings.repositoryFullName,
+    repo_matches: repo === bitbucketSettings.repositoryFullName,
+    pr_number: pullRequest.id || null,
+    base_branch: baseBranch,
+    expected_base_branch: bitbucketSettings.mainBranch,
+    base_branch_matches: baseBranch === bitbucketSettings.mainBranch,
+    pull_request_state: pullRequest.state || null,
+    merged: isMergedPullRequestEvent({ eventName: "", payload }),
+  };
 }
 
 function isPullRequestForTrackedMain(payload, bitbucketSettings) {

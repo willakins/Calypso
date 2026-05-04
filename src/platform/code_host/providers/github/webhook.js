@@ -21,6 +21,7 @@ function registerGithubWebhook(httpApp, options) {
 
 function createGithubWebhookHandler(options) {
   const {
+    logger = null,
     pool,
     upsertPullRequestAsUntestedFn = upsertPullRequestAsUntested,
     upsertOpenPullRequestReviewStateFn = upsertOpenPullRequestReviewState,
@@ -33,7 +34,10 @@ function createGithubWebhookHandler(options) {
     providerLabel: "GitHub",
     webhookSecret: githubSettings.webhookSecret,
     isRequestSignatureValid,
+    readDeliveryId: readGithubDeliveryId,
     readEventName: readGithubEventName,
+    describePayload: (payload, eventName) =>
+      describeGithubWebhookPayload(payload, eventName, githubSettings),
     isSupportedEvent: isSupportedGithubWebhookEvent,
     isPullRequestForTrackedMain: (payload, eventName) =>
       isPullRequestForTrackedMain(payload, githubSettings, eventName),
@@ -48,6 +52,7 @@ function createGithubWebhookHandler(options) {
         updatePullRequestCodexApprovalFn,
         githubSettings,
       }),
+    logger,
   });
 }
 
@@ -198,8 +203,34 @@ function readGithubEventName(request) {
   return String(request.get("x-github-event") || "").toLowerCase();
 }
 
+function readGithubDeliveryId(request) {
+  return String(request.get("x-github-delivery") || "").trim() || null;
+}
+
 function isSupportedGithubWebhookEvent(eventName) {
   return eventName === "pull_request" || eventName === "pull_request_review" || eventName === "reaction";
+}
+
+function describeGithubWebhookPayload(payload, eventName, githubSettings) {
+  const pullRequest = payload.pull_request || {};
+  const repo = payload.repository?.full_name || null;
+  const baseBranch = pullRequest.base?.ref || null;
+  const prNumber = pullRequest.number || payload.issue?.number || null;
+
+  return {
+    action: payload.action || null,
+    repo,
+    expected_repo: githubSettings.repositoryFullName,
+    repo_matches: repo === githubSettings.repositoryFullName,
+    pr_number: prNumber,
+    base_branch: baseBranch,
+    expected_base_branch: eventName === "reaction" ? null : githubSettings.mainBranch,
+    base_branch_matches:
+      eventName === "reaction" ? null : baseBranch === githubSettings.mainBranch,
+    merged: pullRequest.merged,
+    is_pull_request_description_reaction:
+      eventName === "reaction" ? isPullRequestDescriptionReaction(payload) : null,
+  };
 }
 
 function isPullRequestForTrackedMain(payload, githubSettings, eventName) {

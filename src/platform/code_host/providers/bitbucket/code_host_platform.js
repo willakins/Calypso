@@ -31,6 +31,7 @@ class BitbucketCodeHostPlatform extends BaseCodeHostPlatform {
         repositoryFullName: this.config.codeHostRepository,
         webhookSecret: this.config.codeHostWebhookSecret,
       },
+      logger: console,
       paths: ["/bitbucket/webhook", "/codehost/webhook"],
     });
   }

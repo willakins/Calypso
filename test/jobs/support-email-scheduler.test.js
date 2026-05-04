@@ -33,6 +33,36 @@ test("buildSupportEmailNotificationText includes slack on call mention when acti
   assert.match(text, /On call: <@UONCALL>/);
 });
 
+test("runSupportEmailSchedulerTick stays quiet and does not resolve email client when monitoring is disabled", async () => {
+  let resolveCallCount = 0;
+  const logger = capturingLogger();
+
+  await runSupportEmailSchedulerTick({
+    communicationClient: null,
+    emailSyncFallbackIntervalMs: 5 * 60 * 1000,
+    emailWatchRenewIntervalMs: 24 * 60 * 60 * 1000,
+    getSupportEmailConfigFn: async () => createSupportEmailState().config,
+    insertSupportEmailThreadFn: async () => null,
+    listUnnotifiedSupportEmailThreadsFn: async () => [],
+    logger,
+    markSupportEmailThreadNotificationSentFn: async () => null,
+    nowFn: () => new Date("2026-03-06T12:00:00.000Z"),
+    pool: createTransactionalPool(),
+    resolveEmailClientFn: async () => {
+      resolveCallCount += 1;
+      return null;
+    },
+    schedulerState: {
+      lastSkipLogMinuteKeyByReason: new Map(),
+      lastWatchRenewAttemptAt: 0,
+    },
+    updateSupportEmailRuntimeStateFn: async () => ({}),
+  });
+
+  assert.equal(resolveCallCount, 0);
+  assert.deepEqual(logger.messages, []);
+});
+
 test("runSupportEmailSchedulerTick performs initial backfill and posts a notification", async () => {
   const state = createSupportEmailState({
     config: {
@@ -459,5 +489,21 @@ function silentLogger() {
     error() {},
     info() {},
     warn() {},
+  };
+}
+
+function capturingLogger() {
+  const messages = [];
+  return {
+    messages,
+    error(message) {
+      messages.push(message);
+    },
+    info(message) {
+      messages.push(message);
+    },
+    warn(message) {
+      messages.push(message);
+    },
   };
 }

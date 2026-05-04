@@ -92,18 +92,17 @@ async function runSupportEmailSchedulerTick({
 }) {
   try {
     const now = nowFn();
+    let config = await getSupportEmailConfigFn(pool);
+    if (!config.enabled) {
+      return;
+    }
+
     const currentEmailClient = await resolveCurrentEmailClient({
       emailClient: emailClient || gmailClient || null,
       resolveEmailClientFn,
     });
     if (!currentEmailClient) {
       logSchedulerSkip({ logger, now, reason: "missing_email_client", schedulerState });
-      return;
-    }
-
-    let config = await getSupportEmailConfigFn(pool);
-    if (!config.enabled) {
-      logSchedulerSkip({ logger, now, reason: "disabled", schedulerState });
       return;
     }
 
@@ -652,10 +651,6 @@ function logSchedulerSkip({ logger, now, reason, schedulerState }) {
   }
 
   schedulerState.lastSkipLogMinuteKeyByReason.set(reason, minuteKey);
-  if (reason === "disabled") {
-    logger.info("Support email scheduler skipped: monitoring disabled.");
-    return;
-  }
   if (reason === "missing_email_client") {
     logger.info("Support email scheduler skipped: missing email client.");
     return;

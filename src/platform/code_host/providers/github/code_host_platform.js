@@ -34,6 +34,7 @@ class GithubCodeHostPlatform extends BaseCodeHostPlatform {
         webhookSecret: this.config.codeHostWebhookSecret || this.config.githubWebhookSecret,
         codexUserLogins: this.config.codeHostCodexUserLogins,
       },
+      logger: console,
       paths: ["/codehost/webhook"],
     });
   }
