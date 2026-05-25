@@ -21,7 +21,10 @@ class SlackCommunicationPlatform extends BaseCommunicationPlatform {
   }
 
   registerCalypsoCommand(options = {}) {
-    registerCalypsoCommand(this.app, options);
+    registerCalypsoCommand(this.app, {
+      ...options,
+      communicationProvider: "slack",
+    });
   }
 
   getCommandClient() {

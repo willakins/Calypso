@@ -1025,11 +1025,13 @@ Rules:
 - If configured and deploy succeeds:
   - inserts a `deployments` row
   - marks tested PRs since last deploy as `deployed`
+  - shows the triggering Slack user as a Slack mention
   - includes a `Deployed PRs` list in the response with PR title links and mapped author handles
 - If deploy fails:
   - does not write deployment row
   - does not mark PRs deployed
-- After trigger, Calypso sends a follow-up message when DigitalOcean finishes the deployment.
+- After trigger, Calypso sends a follow-up message when the deploy provider finishes the deployment.
+- If the follow-up detects that the deployment failed or timed out, Calypso tags `@here` in Slack.
 
 `/calypso deploy staging`
 

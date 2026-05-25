@@ -288,12 +288,16 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   async resolveDeploymentTriggeredBy(runtime) {
+    const callerUserId = String(runtime.userId || "").trim();
+    if (callerUserId !== "" && isSlackCommunicationProvider(runtime.communicationProvider)) {
+      return formatSlackUserMention(callerUserId);
+    }
+
     const callerUserName = String(runtime.callerUserName || "").trim();
     if (callerUserName !== "") {
       return callerUserName;
     }
 
-    const callerUserId = String(runtime.userId || "").trim();
     const resolveUserDisplayNameFn = runtime.resolveUserDisplayNameFn;
     if (callerUserId !== "" && typeof resolveUserDisplayNameFn === "function") {
       try {
@@ -637,6 +641,14 @@ function formatDeployedPullRequestAuthor({
 
 function isSlackUserId(value) {
   return /^([UW][A-Z0-9]*[0-9][A-Z0-9]*)$/i.test(String(value || "").trim());
+}
+
+function isSlackCommunicationProvider(provider) {
+  return String(provider || "slack").trim().toLowerCase() === "slack";
+}
+
+function formatSlackUserMention(userId) {
+  return `<@${userId}>`;
 }
 
 function readDeployAvailabilityFromTopic(topicText, deployEnvironment) {
