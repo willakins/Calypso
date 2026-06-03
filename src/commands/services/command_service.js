@@ -183,6 +183,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
   const mergedOptions = { ...serviceOptions, ...commandContext };
   const userId = mergedOptions.userId || mergedOptions.slackUserId;
   const callerUserName = mergedOptions.callerUserName || mergedOptions.userName || null;
+  const communicationProvider =
+    mergedOptions.communicationProvider || serviceOptions.communicationProvider || "slack";
   const communicationClient = mergedOptions.communicationClient || mergedOptions.slackClient || null;
   const currentChannelId = mergedOptions.currentChannelId || mergedOptions.channelId || null;
   const currentChannelName = mergedOptions.currentChannelName || mergedOptions.channelName || null;
@@ -363,6 +365,7 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     emailProvider: mergedOptions.emailProvider || serviceOptions.emailProvider || "gmail",
     userId,
     callerUserName,
+    communicationProvider,
     // Backward-compatible aliases while commands migrate to neutral naming.
     slackClient: communicationClient,
     slackUserId: userId,

@@ -109,6 +109,7 @@ function wireCommunicationCommands(runtime) {
     botName: runtime.config.botName,
     enableDeploymentCompletionNotifications: true,
     getRuntimeProviderConfigFn: getRuntimeProviderConfig,
+    communicationProvider: runtime.config.communicationProvider,
     errorTrackingProvider: runtime.config.errorTrackingProvider,
     aiProvider: runtime.config.aiProvider,
     aiSupportEmailSystemPrompt: runtime.config.aiSupportEmailSystemPrompt,

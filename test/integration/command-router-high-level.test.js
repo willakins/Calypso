@@ -83,7 +83,7 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.match(markTested.text, /Marked PR #700 as tested/);
   assert.equal(deploySuccess.response_type, "in_channel");
   assert.match(deploySuccess.text, /Deploy to prod is in progress \(id: dep-999\)/);
-  assert.match(deploySuccess.text, /Triggered by U_TESTER/);
+  assert.match(deploySuccess.text, /Triggered by <@U_TESTER>/);
   assert.match(deploySuccess.text, /Marked 1 PR\(s\) deployed/);
   assert.match(deploySuccess.text, /Deployed PRs:/);
   assert.match(

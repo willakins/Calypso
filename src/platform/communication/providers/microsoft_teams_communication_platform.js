@@ -28,6 +28,7 @@ class MicrosoftTeamsCommunicationPlatform extends BaseCommunicationPlatform {
     registerCalypsoCommand(bridgeApp, {
       ...options,
       botName: options.botName || this.botName,
+      communicationProvider: "microsoft_teams",
       enableDeploymentCompletionNotifications: false,
     });
   }

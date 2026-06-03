@@ -2,6 +2,8 @@ const { parseCalypsoCommand } = require("./parsing/command_parser");
 const { createCalypsoCommandService } = require("./services/command_service");
 const { DEFAULT_BOT_NAME } = require("../config");
 
+const SLACK_HERE_MENTION = "<!here>";
+
 function handleCalypsoCommand({ text, user_id, botName }) {
   void user_id;
   return parseCalypsoCommand({ text, botName });
@@ -93,7 +95,7 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
       response_type: normalizeResponseType(
         executionResult.followUpResponseType || executionResult.responseType,
       ),
-      text: `Deployment ${externalDeploymentId} failed after trigger: ${error.message}`,
+      text: `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} failed after trigger: ${error.message}`,
     });
   }
 }
